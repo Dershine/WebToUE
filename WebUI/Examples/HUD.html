@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+<head>
+  <link rel="stylesheet" href="HUD.css">
+</head>
+<body>
+  <div class="hud-card">
+    <p class="label">PLAYER STATUS</p>
+    <p class="player" data-ue-bind-text="PlayerName">Player</p>
+    <div class="health-row">
+      <p>Health</p>
+      <p class="health" data-ue-bind-text="HealthText">100 / 100</p>
+    </div>
+    <p class="warning" data-ue-bind-visible="bShowWarning">LOW HEALTH</p>
+  </div>
+</body>
+</html>

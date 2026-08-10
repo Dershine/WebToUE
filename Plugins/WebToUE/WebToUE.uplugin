@@ -1,0 +1,18 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0-preview",
+  "FriendlyName": "WebToUE",
+  "Description": "Native HTML/CSS-authored UI for Unreal Engine without an embedded browser.",
+  "Category": "UI",
+  "CreatedBy": "WebToUE",
+  "CanContainContent": true,
+  "IsBetaVersion": true,
+  "SupportedTargetPlatforms": ["Win64"],
+  "Modules": [
+    { "Name": "WebToUEYoga", "Type": "Runtime", "LoadingPhase": "Default" },
+    { "Name": "WebToUECore", "Type": "Runtime", "LoadingPhase": "Default" },
+    { "Name": "WebToUERuntime", "Type": "Runtime", "LoadingPhase": "Default" },
+    { "Name": "WebToUEEditor", "Type": "Editor", "LoadingPhase": "Default" }
+  ]
+}

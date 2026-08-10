@@ -1,0 +1,52 @@
+# Unreal Engine generated directories
+/Binaries/
+/Build/
+/DerivedDataCache/
+/Intermediate/
+/Saved/
+
+# Generated data inside plugins
+**/Binaries/
+**/Build/
+**/DerivedDataCache/
+**/Intermediate/
+**/Saved/
+
+# IDE and editor metadata
+/.vs/
+/.idea/
+/.vscode/
+*.sln
+*.slnx
+*.VC.db
+*.VC.opendb
+*.opensdf
+*.sdf
+*.suo
+*.user
+*.userprefs
+*.code-workspace
+
+# Generated project files for other toolchains
+*.xcodeproj
+*.xcworkspace
+*.xcuserdata
+*.xcuserstate
+*.xcsettings
+Makefile
+CMakeLists.txt
+
+# Build-system and tooling noise
+*.log
+*.tmp
+*.temp
+*.bak
+*.cache
+*.pid
+*.trace
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
