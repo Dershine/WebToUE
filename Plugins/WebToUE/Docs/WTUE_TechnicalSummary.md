@@ -59,8 +59,8 @@ flowchart LR
 1. 读取 HTML 文本。
 2. 扫描 `<link rel="stylesheet" href="...">`。
 3. 以 HTML 所在目录为基准解析相对 CSS 路径。
-4. 合并外部 CSS 和 HTML 内的 `<style>` 内容。
-5. 调用 `FWebToUECompiler::Compile`。
+4. 将每个外部 CSS 作为带独立文件名和起始位置的样式表输入传给编译器，并单独收集 HTML 内的 `<style>`。
+5. 调用 `FWebToUECompiler::Compile`，按样式表顺序参与级联。
 6. 将节点树和样式规则序列化到 `UWebToUEDocument`。
 7. 收集 `<img src>` 中的 Unreal Texture2D 软引用。
 8. 保存源文件、依赖文件和诊断信息供编辑器使用。
@@ -90,6 +90,9 @@ HTML、CSS 原文、导入路径和依赖文件被放在 `WITH_EDITORONLY_DATA` 
 - CSS 规则块未闭合。
 - CSS 声明格式错误。
 - 不支持的 CSS at-rule 或选择器。
+- 不支持的 CSS 属性和非法属性值；对应声明会被忽略，不进入最终规则。
+
+外链 CSS、HTML 内的 `<style>` 和元素 `style` 属性会保留各自的源文件与起始位置。CSS 诊断使用实际行列号，不再把拼接后的外链样式统一报告为 HTML 文件第一行。HTML 结构诊断已有行列号，未知 HTML 属性及更细粒度的属性值校验仍待补充。
 
 第一次导入发生错误时不会产生有效运行数据。已有资产重导入失败时，工厂保留上一次成功编译的节点与规则，同时更新诊断信息，避免一次 CSS 书写错误立即破坏正在预览的界面。
 
@@ -183,6 +186,8 @@ Flex：
 - `z-index`
 
 颜色支持 `#RGB`、`#RGBA`、`#RRGGBB`、`#RRGGBBAA`，以及 `transparent`、`white`、`black`、`red`、`green`、`blue`。当前不支持 `rgb()`、CSS 变量、calc、渐变或完整颜色名称集合。
+
+样式表和元素 `style` 属性会在编译阶段校验当前受支持的属性和值。未知属性、非法枚举、错误长度和错误颜色会产生 Warning，并按 CSS 的无效声明语义忽略；它们不会覆盖同一元素上其他有效声明。
 
 ### 5.4 样式继承
 
@@ -351,6 +356,8 @@ CSS：
 
 - `WebToUE.Core.HtmlCss`：HTML、实体、ID/伪类级联和样式重算。
 - `WebToUE.Core.FlexLayout`：百分比宽度、水平 Flex 和 gap。
+- `WebToUE.Core.CssDiagnostics`：多来源样式表顺序、外链 CSS 文件/行/列、未知属性、非法值和内联样式诊断。
+- `WebToUE.Runtime.AssetVersion`：自定义版本注册和旧资产重编译判定。
 
 第一版已经通过：
 
@@ -360,7 +367,7 @@ CSS：
 - Development 与 Shipping BuildCookRun。
 - BuildPlugin 的 UnrealEditor、UnrealGame Development、UnrealGame Shipping 验证。
 
-目前测试集中在 Core，尚缺少 Slate 输入、绑定、重导入、截图对比、性能和跨平台自动化测试。
+目前功能测试仍主要集中在 Core，尚缺少 Slate 输入、绑定、重导入、截图对比、性能和跨平台自动化测试。
 
 ## 13. 性能特征与已知风险
 
@@ -401,7 +408,7 @@ CSS：
 - 滚动容器、裁剪修正、滚轮输入和简单列表。
 - 触摸与手柄焦点导航、安全区和 DPI 适配。
 - 更完整的颜色、边框、背景图和常用 CSS 属性。
-- 改进 CSS/HTML 行列号、未知属性和值诊断。
+- 改进 CSS/HTML 行列号、未知属性和值诊断（多来源 CSS、内联样式、属性和值校验已完成；HTML 属性诊断待补）。
 - 为 Document 引入自定义版本号和自动迁移/重编译策略（基础版本检测与已加载资产重编译已完成，后续补全批量扫描和字段级迁移）。
 - 增加 Slate 输入、绑定、重导入和截图对比自动化测试。
 

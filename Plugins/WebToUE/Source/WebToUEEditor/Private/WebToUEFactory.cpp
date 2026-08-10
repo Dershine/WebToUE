@@ -95,6 +95,7 @@ bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FStri
 
 	const TSharedRef<FWebToUEDocument> LinkScan = FWebToUECompiler::Compile(Html, FString(), Filename);
 	FString CombinedCss;
+	TArray<FWebToUEStyleSheetSource> ExternalStyleSheets;
 	TArray<FString> Dependencies;
 	Dependencies.Add(FPaths::ConvertRelativePathToFull(Filename));
 	TArray<FWebToUEDiagnostic> LinkErrors;
@@ -108,6 +109,7 @@ bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FStri
 		if (FFileHelper::LoadFileToString(Css, *CssPath))
 		{
 			CombinedCss += FString::Printf(TEXT("\n/* %s */\n%s\n"), *CssPath, *Css);
+			ExternalStyleSheets.Add({ MoveTemp(Css), CssPath, 1, 1 });
 			Dependencies.AddUnique(CssPath);
 		}
 		else
@@ -117,7 +119,7 @@ bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FStri
 		}
 	}
 
-	const TSharedRef<FWebToUEDocument> Compiled = FWebToUECompiler::Compile(Html, CombinedCss, Filename);
+	const TSharedRef<FWebToUEDocument> Compiled = FWebToUECompiler::Compile(Html, ExternalStyleSheets, Filename);
 	Compiled->Diagnostics.Append(LinkErrors);
 	Document.Diagnostics.Reset();
 	for (const FWebToUEDiagnostic& Diagnostic : Compiled->Diagnostics)

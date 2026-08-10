@@ -1,6 +1,15 @@
 #pragma once
 
+#include "Containers/ArrayView.h"
 #include "WebToUECoreTypes.h"
+
+struct WEBTOUECORE_API FWebToUEStyleSheetSource
+{
+	FString Css;
+	FString SourceName = TEXT("<memory>");
+	int32 StartLine = 1;
+	int32 StartColumn = 1;
+};
 
 class WEBTOUECORE_API FWebToUECompiler
 {
@@ -8,6 +17,11 @@ public:
 	static TSharedRef<FWebToUEDocument> Compile(
 		const FString& Html,
 		const FString& ExternalCss = FString(),
+		const FString& SourceName = TEXT("<memory>"));
+
+	static TSharedRef<FWebToUEDocument> Compile(
+		const FString& Html,
+		TConstArrayView<FWebToUEStyleSheetSource> ExternalStyleSheets,
 		const FString& SourceName = TEXT("<memory>"));
 };
 

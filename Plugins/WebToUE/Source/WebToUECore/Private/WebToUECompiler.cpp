@@ -2,7 +2,9 @@
 
 #include "Algo/Sort.h"
 #include "Internationalization/Regex.h"
+#include "String/LexFromString.h"
 #include <yoga/Yoga.h>
+#include <initializer_list>
 
 namespace WebToUE::Private
 {
@@ -10,6 +12,11 @@ namespace WebToUE::Private
 		TEXT("html"), TEXT("head"), TEXT("body"), TEXT("style"), TEXT("link"),
 		TEXT("div"), TEXT("span"), TEXT("p"), TEXT("img"), TEXT("button")
 	};
+
+	static bool IsKnownCssProperty(const FString& Name);
+	static bool IsValidCssValue(const FString& Name, const FString& Value);
+	static void ParseDeclarationBlock(const FString& Block, const FString& SourceName,
+		int32 StartLine, int32 StartColumn, FWebToUEDocument& Document, TMap<FString, FString>& OutDeclarations);
 
 	static FString DecodeEntities(FString Value)
 	{
@@ -42,7 +49,7 @@ namespace WebToUE::Private
 		{
 		}
 
-		void Parse(FString& OutInlineCss)
+		void Parse(TArray<FWebToUEStyleSheetSource>& OutInlineStyleSheets)
 		{
 			TSharedPtr<FWebToUENode> SyntheticRoot = MakeShared<FWebToUENode>();
 			SyntheticRoot->Tag = TEXT("body");
@@ -64,7 +71,7 @@ namespace WebToUE::Private
 				}
 				else
 				{
-					ParseText(OutInlineCss);
+					ParseText(OutInlineStyleSheets);
 				}
 			}
 
@@ -159,12 +166,14 @@ namespace WebToUE::Private
 			return Source.Mid(Start, Pos - Start).ToLower();
 		}
 
-		FString ParseAttributeValue()
+		FString ParseAttributeValue(int32& OutLine, int32& OutColumn)
 		{
 			SkipWhitespace();
 			if (Peek() == TEXT('"') || Peek() == TEXT('\''))
 			{
 				const TCHAR Quote = Advance();
+				OutLine = Line;
+				OutColumn = Column;
 				const int32 Start = Pos;
 				while (!AtEnd() && Peek() != Quote)
 				{
@@ -177,6 +186,8 @@ namespace WebToUE::Private
 				}
 				return DecodeEntities(Value);
 			}
+			OutLine = Line;
+			OutColumn = Column;
 			const int32 Start = Pos;
 			while (!AtEnd() && !FChar::IsWhitespace(Peek()) && Peek() != TEXT('>'))
 			{
@@ -235,6 +246,8 @@ namespace WebToUE::Private
 				{
 					break;
 				}
+				const int32 AttributeLine = Line;
+				const int32 AttributeColumn = Column;
 				const FString Name = ParseName();
 				if (Name.IsEmpty())
 				{
@@ -243,10 +256,23 @@ namespace WebToUE::Private
 				}
 				SkipWhitespace();
 				FString Value = TEXT("true");
+				int32 ValueLine = AttributeLine;
+				int32 ValueColumn = AttributeColumn;
 				if (Peek() == TEXT('='))
 				{
 					Advance();
-					Value = ParseAttributeValue();
+					Value = ParseAttributeValue(ValueLine, ValueColumn);
+				}
+				if (Name == TEXT("style"))
+				{
+					TMap<FString, FString> ValidatedDeclarations;
+					ParseDeclarationBlock(Value, SourceName, ValueLine, ValueColumn, Document, ValidatedDeclarations);
+					Value.Reset();
+					for (const TPair<FString, FString>& Declaration : ValidatedDeclarations)
+					{
+						if (!Value.IsEmpty()) Value += TEXT("; ");
+						Value += Declaration.Key + TEXT(": ") + Declaration.Value;
+					}
 				}
 				Node->Attributes.Add(Name, MoveTemp(Value));
 			}
@@ -275,8 +301,10 @@ namespace WebToUE::Private
 			}
 		}
 
-		void ParseText(FString& OutInlineCss)
+		void ParseText(TArray<FWebToUEStyleSheetSource>& OutInlineStyleSheets)
 		{
+			const int32 StartLine = Line;
+			const int32 StartColumn = Column;
 			const int32 Start = Pos;
 			while (!AtEnd() && Peek() != TEXT('<'))
 			{
@@ -285,7 +313,10 @@ namespace WebToUE::Private
 			FString Text = Source.Mid(Start, Pos - Start);
 			if (Stack.Last()->Tag == TEXT("style"))
 			{
-				OutInlineCss += Text + TEXT("\n");
+				if (!Text.IsEmpty())
+				{
+					OutInlineStyleSheets.Add({ MoveTemp(Text), SourceName, StartLine, StartColumn });
+				}
 				return;
 			}
 			Text = DecodeEntities(Text);
@@ -318,14 +349,49 @@ namespace WebToUE::Private
 			if (Start + 1 < Css.Len() && Css[Start + 1] == TEXT('*'))
 			{
 				const int32 End = Css.Find(TEXT("*/"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Start + 2);
-				Css.RemoveAt(Start, End == INDEX_NONE ? Css.Len() - Start : End + 2 - Start);
-				SearchFrom = Start;
+				const int32 ReplaceEnd = End == INDEX_NONE ? Css.Len() : End + 2;
+				for (int32 Index = Start; Index < ReplaceEnd; ++Index)
+				{
+					if (Css[Index] != TEXT('\r') && Css[Index] != TEXT('\n')) Css[Index] = TEXT(' ');
+				}
+				SearchFrom = ReplaceEnd;
 			}
 			else
 			{
 				SearchFrom = Start + 1;
 			}
 		}
+	}
+
+	static void GetSourceLocation(const FString& Source, int32 Offset, int32 StartLine, int32 StartColumn,
+		int32& OutLine, int32& OutColumn)
+	{
+		OutLine = StartLine;
+		OutColumn = StartColumn;
+		for (int32 Index = 0; Index < FMath::Min(Offset, Source.Len()); ++Index)
+		{
+			if (Source[Index] == TEXT('\n'))
+			{
+				++OutLine;
+				OutColumn = 1;
+			}
+			else
+			{
+				++OutColumn;
+			}
+		}
+	}
+
+	static int32 SkipWhitespace(const FString& Source, int32 Offset, int32 End)
+	{
+		while (Offset < End && FChar::IsWhitespace(Source[Offset])) ++Offset;
+		return Offset;
+	}
+
+	static int32 TrimWhitespaceEnd(const FString& Source, int32 Start, int32 End)
+	{
+		while (End > Start && FChar::IsWhitespace(Source[End - 1])) --End;
+		return End;
 	}
 
 	static bool IsSelectorNameChar(TCHAR Char)
@@ -439,9 +505,9 @@ namespace WebToUE::Private
 		return Rule.Selector.Num() > 0;
 	}
 
-	static void ParseCss(const FString& InCss, const FString& SourceName, FWebToUEDocument& Document)
+	static void ParseCss(const FWebToUEStyleSheetSource& StyleSheet, FWebToUEDocument& Document)
 	{
-		FString Css = InCss;
+		FString Css = StyleSheet.Css;
 		RemoveCssComments(Css);
 		int32 Pos = 0;
 		int32 SourceOrder = Document.Rules.Num();
@@ -455,54 +521,65 @@ namespace WebToUE::Private
 			const int32 Close = Css.Find(TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Open + 1);
 			if (Close == INDEX_NONE)
 			{
-				Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Error, SourceName, 1, Open + 1, TEXT("Unterminated CSS rule block.") });
+				int32 Line;
+				int32 Column;
+				GetSourceLocation(Css, Open, StyleSheet.StartLine, StyleSheet.StartColumn, Line, Column);
+				Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Error, StyleSheet.SourceName, Line, Column,
+					TEXT("Unterminated CSS rule block.") });
 				break;
 			}
-			FString SelectorBlock = Css.Mid(Pos, Open - Pos).TrimStartAndEnd();
-			const FString DeclarationBlock = Css.Mid(Open + 1, Close - Open - 1);
+			const int32 SelectorStart = SkipWhitespace(Css, Pos, Open);
+			const int32 SelectorEnd = TrimWhitespaceEnd(Css, SelectorStart, Open);
+			const FString SelectorBlock = Css.Mid(SelectorStart, SelectorEnd - SelectorStart);
 			Pos = Close + 1;
 			if (SelectorBlock.StartsWith(TEXT("@")))
 			{
-				Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Warning, SourceName, 1, 1,
+				int32 Line;
+				int32 Column;
+				GetSourceLocation(Css, SelectorStart, StyleSheet.StartLine, StyleSheet.StartColumn, Line, Column);
+				Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Warning, StyleSheet.SourceName, Line, Column,
 					FString::Printf(TEXT("Unsupported CSS at-rule '%s'."), *SelectorBlock) });
 				continue;
 			}
 
 			TMap<FString, FString> Declarations;
-			TArray<FString> DeclarationTexts;
-			DeclarationBlock.ParseIntoArray(DeclarationTexts, TEXT(";"), true);
-			for (FString Declaration : DeclarationTexts)
+			int32 DeclarationLine;
+			int32 DeclarationColumn;
+			GetSourceLocation(Css, Open + 1, StyleSheet.StartLine, StyleSheet.StartColumn, DeclarationLine, DeclarationColumn);
+			ParseDeclarationBlock(Css.Mid(Open + 1, Close - Open - 1), StyleSheet.SourceName,
+				DeclarationLine, DeclarationColumn, Document, Declarations);
+
+			int32 GroupOffset = 0;
+			while (GroupOffset <= SelectorBlock.Len())
 			{
-				FString Name;
-				FString Value;
-				if (!Declaration.Split(TEXT(":"), &Name, &Value))
+				const int32 Comma = SelectorBlock.Find(TEXT(","), ESearchCase::CaseSensitive, ESearchDir::FromStart, GroupOffset);
+				const int32 RawEnd = Comma == INDEX_NONE ? SelectorBlock.Len() : Comma;
+				const int32 LocalStart = SkipWhitespace(SelectorBlock, GroupOffset, RawEnd);
+				const int32 LocalEnd = TrimWhitespaceEnd(SelectorBlock, LocalStart, RawEnd);
+				const FString Selector = SelectorBlock.Mid(LocalStart, LocalEnd - LocalStart);
+				if (Selector.IsEmpty())
 				{
-					if (!Declaration.TrimStartAndEnd().IsEmpty())
-					{
-						Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Warning, SourceName, 1, 1,
-							FString::Printf(TEXT("Ignored malformed CSS declaration '%s'."), *Declaration) });
-					}
+					if (Comma == INDEX_NONE) break;
+					GroupOffset = Comma + 1;
 					continue;
 				}
-				Declarations.Add(Name.TrimStartAndEnd().ToLower(), Value.TrimStartAndEnd());
-			}
-
-			TArray<FString> Selectors;
-			SelectorBlock.ParseIntoArray(Selectors, TEXT(","), true);
-			for (FString Selector : Selectors)
-			{
 				FWebToUEStyleRule Rule;
 				Rule.SourceOrder = SourceOrder++;
 				Rule.Declarations = Declarations;
-				if (ParseSelector(Selector.TrimStartAndEnd(), Rule))
+				if (ParseSelector(Selector, Rule))
 				{
 					Document.Rules.Add(MoveTemp(Rule));
 				}
 				else
 				{
-					Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Warning, SourceName, 1, 1,
+					int32 Line;
+					int32 Column;
+					GetSourceLocation(Css, SelectorStart + LocalStart, StyleSheet.StartLine, StyleSheet.StartColumn, Line, Column);
+					Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Warning, StyleSheet.SourceName, Line, Column,
 						FString::Printf(TEXT("Ignored unsupported selector '%s'."), *Selector) });
 				}
+				if (Comma == INDEX_NONE) break;
+				GroupOffset = Comma + 1;
 			}
 		}
 	}
@@ -511,7 +588,11 @@ namespace WebToUE::Private
 	{
 		FString Value = Raw.TrimStartAndEnd().ToLower();
 		if (Value == TEXT("auto")) return FWebToUELength::Auto();
-		if (Value.EndsWith(TEXT("%"))) return FWebToUELength::Percent(FCString::Atof(*Value.LeftChop(1)));
+		if (Value.EndsWith(TEXT("%")))
+		{
+			const FString Number = Value.LeftChop(1);
+			return Number.IsNumeric() ? FWebToUELength::Percent(FCString::Atof(*Number)) : FWebToUELength();
+		}
 		if (Value.EndsWith(TEXT("px"))) Value.LeftChopInline(2);
 		if (Value.IsNumeric() || Value == TEXT("0")) return FWebToUELength::Pixels(FCString::Atof(*Value));
 		return {};
@@ -542,7 +623,12 @@ namespace WebToUE::Private
 				Hex = MoveTemp(Expanded);
 			}
 			if (Hex.Len() == 6) Hex += TEXT("ff");
-			if (Hex.Len() == 8)
+			bool bValidHex = Hex.Len() == 8;
+			for (TCHAR Char : Hex)
+			{
+				bValidHex = bValidHex && FChar::IsHexDigit(Char);
+			}
+			if (bValidHex)
 			{
 				const uint32 RGBA = FCString::Strtoui64(*Hex, nullptr, 16);
 				OutColor = FLinearColor(
@@ -571,6 +657,196 @@ namespace WebToUE::Private
 		Edges.Left = D;
 	}
 
+	static const TSet<FString>& GetKnownCssProperties()
+	{
+		static const TSet<FString> Properties = {
+			TEXT("display"), TEXT("position"), TEXT("visibility"), TEXT("overflow"),
+			TEXT("width"), TEXT("height"), TEXT("min-width"), TEXT("min-height"),
+			TEXT("max-width"), TEXT("max-height"), TEXT("left"), TEXT("top"), TEXT("right"), TEXT("bottom"),
+			TEXT("margin"), TEXT("margin-left"), TEXT("margin-top"), TEXT("margin-right"), TEXT("margin-bottom"),
+			TEXT("padding"), TEXT("padding-left"), TEXT("padding-top"), TEXT("padding-right"), TEXT("padding-bottom"),
+			TEXT("gap"), TEXT("row-gap"), TEXT("column-gap"),
+			TEXT("flex"), TEXT("flex-direction"), TEXT("flex-wrap"), TEXT("flex-grow"), TEXT("flex-shrink"),
+			TEXT("flex-basis"), TEXT("justify-content"), TEXT("align-items"), TEXT("align-self"),
+			TEXT("color"), TEXT("background"), TEXT("background-color"),
+			TEXT("border"), TEXT("border-color"), TEXT("border-width"), TEXT("border-style"), TEXT("border-radius"),
+			TEXT("opacity"), TEXT("font-family"), TEXT("font-size"), TEXT("font-weight"), TEXT("text-align"),
+			TEXT("object-fit"), TEXT("z-index")
+		};
+		return Properties;
+	}
+
+	static bool IsKnownCssProperty(const FString& Name)
+	{
+		return GetKnownCssProperties().Contains(Name);
+	}
+
+	static bool IsNumber(const FString& Raw)
+	{
+		double Parsed = 0.0;
+		return LexTryParseString(Parsed, *Raw.TrimStartAndEnd());
+	}
+
+	static bool IsInteger(const FString& Raw)
+	{
+		int32 Parsed = 0;
+		return LexTryParseString(Parsed, *Raw.TrimStartAndEnd());
+	}
+
+	static bool IsOneOf(FString Value, std::initializer_list<const TCHAR*> Allowed)
+	{
+		Value = Value.TrimStartAndEnd().ToLower();
+		for (const TCHAR* Candidate : Allowed)
+		{
+			if (Value == Candidate) return true;
+		}
+		return false;
+	}
+
+	static bool IsLength(const FString& Raw, bool bAllowAuto = true, bool bAllowPercent = true)
+	{
+		const FWebToUELength Length = ParseLength(Raw);
+		return Length.Unit == EWebToUEUnit::Pixels ||
+			(bAllowAuto && Length.Unit == EWebToUEUnit::Auto) ||
+			(bAllowPercent && Length.Unit == EWebToUEUnit::Percent);
+	}
+
+	static bool AreEdgesValid(const FString& Raw, bool bAllowAuto)
+	{
+		TArray<FString> Parts;
+		Raw.ParseIntoArrayWS(Parts);
+		if (Parts.IsEmpty() || Parts.Num() > 4) return false;
+		return Parts.ContainsByPredicate([bAllowAuto](const FString& Part)
+		{
+			return !IsLength(Part, bAllowAuto);
+		}) == false;
+	}
+
+	static bool IsBorderValid(const FString& Raw)
+	{
+		TArray<FString> Parts;
+		Raw.ParseIntoArrayWS(Parts);
+		if (Parts.IsEmpty()) return false;
+		for (const FString& Part : Parts)
+		{
+			FLinearColor Color;
+			if (IsLength(Part, false, false) || ParseColor(Part, Color) || IsOneOf(Part, { TEXT("solid"), TEXT("none") }))
+			{
+				continue;
+			}
+			return false;
+		}
+		return true;
+	}
+
+	static bool IsFlexValid(const FString& Raw)
+	{
+		TArray<FString> Parts;
+		Raw.ParseIntoArrayWS(Parts);
+		if (Parts.IsEmpty() || Parts.Num() > 3) return false;
+		if (!IsNumber(Parts[0])) return false;
+		if (Parts.Num() > 1 && !IsNumber(Parts[1])) return false;
+		return Parts.Num() < 3 || IsLength(Parts[2]);
+	}
+
+	static bool IsFontWeightValid(const FString& Raw)
+	{
+		if (IsOneOf(Raw, { TEXT("normal"), TEXT("bold") })) return true;
+		int32 Weight = 0;
+		return LexTryParseString(Weight, *Raw.TrimStartAndEnd()) && Weight >= 100 && Weight <= 900 && Weight % 100 == 0;
+	}
+
+	static bool IsValidCssValue(const FString& Name, const FString& Value)
+	{
+		if (Value.TrimStartAndEnd().IsEmpty()) return false;
+		if (Name == TEXT("display")) return IsOneOf(Value, { TEXT("flex"), TEXT("none") });
+		if (Name == TEXT("position")) return IsOneOf(Value, { TEXT("relative"), TEXT("absolute") });
+		if (Name == TEXT("visibility")) return IsOneOf(Value, { TEXT("visible"), TEXT("hidden") });
+		if (Name == TEXT("overflow")) return IsOneOf(Value, { TEXT("visible"), TEXT("hidden") });
+		if (Name == TEXT("flex-direction")) return IsOneOf(Value,
+			{ TEXT("row"), TEXT("row-reverse"), TEXT("column"), TEXT("column-reverse") });
+		if (Name == TEXT("flex-wrap")) return IsOneOf(Value, { TEXT("nowrap"), TEXT("wrap"), TEXT("wrap-reverse") });
+		if (Name == TEXT("justify-content")) return IsOneOf(Value,
+			{ TEXT("flex-start"), TEXT("center"), TEXT("flex-end"), TEXT("space-between"), TEXT("space-around"), TEXT("space-evenly") });
+		if (Name == TEXT("align-items")) return IsOneOf(Value,
+			{ TEXT("flex-start"), TEXT("center"), TEXT("flex-end"), TEXT("stretch"), TEXT("baseline") });
+		if (Name == TEXT("align-self")) return IsOneOf(Value,
+			{ TEXT("auto"), TEXT("flex-start"), TEXT("center"), TEXT("flex-end"), TEXT("stretch"), TEXT("baseline") });
+		if (Name == TEXT("border-style")) return IsOneOf(Value, { TEXT("solid"), TEXT("none") });
+		if (Name == TEXT("text-align")) return IsOneOf(Value, { TEXT("left"), TEXT("center"), TEXT("right") });
+		if (Name == TEXT("object-fit")) return IsOneOf(Value, { TEXT("fill"), TEXT("contain"), TEXT("cover") });
+		if (Name == TEXT("flex")) return IsFlexValid(Value);
+		if (Name == TEXT("flex-grow") || Name == TEXT("flex-shrink") || Name == TEXT("opacity")) return IsNumber(Value);
+		if (Name == TEXT("z-index")) return IsInteger(Value);
+		if (Name == TEXT("font-weight")) return IsFontWeightValid(Value);
+		if (Name == TEXT("font-family")) return true;
+		if (Name == TEXT("color") || Name == TEXT("background") || Name == TEXT("background-color") || Name == TEXT("border-color"))
+		{
+			FLinearColor Color;
+			return ParseColor(Value, Color);
+		}
+		if (Name == TEXT("border")) return IsBorderValid(Value);
+		if (Name == TEXT("margin")) return AreEdgesValid(Value, true);
+		if (Name == TEXT("padding")) return AreEdgesValid(Value, false);
+		if (Name.StartsWith(TEXT("margin-"))) return IsLength(Value, true);
+		if (Name.StartsWith(TEXT("padding-"))) return IsLength(Value, false);
+		if (Name == TEXT("gap") || Name == TEXT("row-gap") || Name == TEXT("column-gap") ||
+			Name == TEXT("border-width") || Name == TEXT("border-radius") || Name == TEXT("font-size"))
+		{
+			return IsLength(Value, false, false);
+		}
+		return IsLength(Value);
+	}
+
+	static void ParseDeclarationBlock(const FString& Block, const FString& SourceName,
+		int32 StartLine, int32 StartColumn, FWebToUEDocument& Document, TMap<FString, FString>& OutDeclarations)
+	{
+		int32 Offset = 0;
+		while (Offset <= Block.Len())
+		{
+			const int32 Semicolon = Block.Find(TEXT(";"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Offset);
+			const int32 RawEnd = Semicolon == INDEX_NONE ? Block.Len() : Semicolon;
+			const int32 DeclarationStart = SkipWhitespace(Block, Offset, RawEnd);
+			const int32 DeclarationEnd = TrimWhitespaceEnd(Block, DeclarationStart, RawEnd);
+			if (DeclarationStart < DeclarationEnd)
+			{
+				const int32 Colon = Block.Find(TEXT(":"), ESearchCase::CaseSensitive, ESearchDir::FromStart, DeclarationStart);
+				int32 Line;
+				int32 Column;
+				GetSourceLocation(Block, DeclarationStart, StartLine, StartColumn, Line, Column);
+				if (Colon == INDEX_NONE || Colon >= DeclarationEnd)
+				{
+					const FString Declaration = Block.Mid(DeclarationStart, DeclarationEnd - DeclarationStart);
+					Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Warning, SourceName, Line, Column,
+						FString::Printf(TEXT("Ignored malformed CSS declaration '%s'."), *Declaration) });
+				}
+				else
+				{
+					const int32 NameEnd = TrimWhitespaceEnd(Block, DeclarationStart, Colon);
+					const int32 ValueStart = SkipWhitespace(Block, Colon + 1, DeclarationEnd);
+					const FString Name = Block.Mid(DeclarationStart, NameEnd - DeclarationStart).ToLower();
+					const FString Value = Block.Mid(ValueStart, DeclarationEnd - ValueStart);
+					if (!IsKnownCssProperty(Name))
+					{
+						Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Warning, SourceName, Line, Column,
+							FString::Printf(TEXT("Ignored unsupported CSS property '%s'."), *Name) });
+					}
+					else if (!IsValidCssValue(Name, Value))
+					{
+						Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Warning, SourceName, Line, Column,
+							FString::Printf(TEXT("Ignored invalid value '%s' for CSS property '%s'."), *Value, *Name) });
+					}
+					else
+					{
+						OutDeclarations.Add(Name, Value);
+					}
+				}
+			}
+			if (Semicolon == INDEX_NONE) break;
+			Offset = Semicolon + 1;
+		}
+	}
+
 	static void ApplyProperties(const TMap<FString, FString>& Properties, FWebToUEComputedStyle& Style)
 	{
 		auto Value = [&Properties](const TCHAR* Name) -> const FString* { return Properties.Find(Name); };
@@ -597,6 +873,11 @@ namespace WebToUE::Private
 			V->ParseIntoArrayWS(Parts);
 			for (const FString& Part : Parts)
 			{
+				if (Part.Equals(TEXT("none"), ESearchCase::IgnoreCase))
+				{
+					Style.BorderWidth = 0.0f;
+					continue;
+				}
 				const FWebToUELength Length = ParseLength(Part);
 				if (Length.Unit == EWebToUEUnit::Pixels) Style.BorderWidth = Length.Value;
 				else ParseColor(Part, Style.BorderColor);
@@ -855,11 +1136,29 @@ namespace WebToUE::Private
 
 TSharedRef<FWebToUEDocument> FWebToUECompiler::Compile(const FString& Html, const FString& ExternalCss, const FString& SourceName)
 {
+	TArray<FWebToUEStyleSheetSource> ExternalStyleSheets;
+	if (!ExternalCss.IsEmpty())
+	{
+		ExternalStyleSheets.Add({ ExternalCss, SourceName, 1, 1 });
+	}
+	return Compile(Html, ExternalStyleSheets, SourceName);
+}
+
+TSharedRef<FWebToUEDocument> FWebToUECompiler::Compile(const FString& Html,
+	TConstArrayView<FWebToUEStyleSheetSource> ExternalStyleSheets, const FString& SourceName)
+{
 	using namespace WebToUE::Private;
 	TSharedRef<FWebToUEDocument> Document = MakeShared<FWebToUEDocument>();
-	FString InlineCss;
-	FHtmlParser(Html, SourceName, *Document).Parse(InlineCss);
-	ParseCss(ExternalCss + TEXT("\n") + InlineCss, SourceName, *Document);
+	TArray<FWebToUEStyleSheetSource> InlineStyleSheets;
+	FHtmlParser(Html, SourceName, *Document).Parse(InlineStyleSheets);
+	for (const FWebToUEStyleSheetSource& StyleSheet : ExternalStyleSheets)
+	{
+		ParseCss(StyleSheet, *Document);
+	}
+	for (const FWebToUEStyleSheetSource& StyleSheet : InlineStyleSheets)
+	{
+		ParseCss(StyleSheet, *Document);
+	}
 	FWebToUEStyleResolver::Resolve(*Document);
 	return Document;
 }

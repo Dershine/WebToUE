@@ -52,4 +52,84 @@ bool FWebToUELayoutTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUECssDiagnosticsTest, "WebToUE.Core.CssDiagnostics",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FWebToUECssDiagnosticsTest::RunTest(const FString& Parameters)
+{
+	const FString Html = TEXT("<body>\n<style>\n.panel { padding: invalid; }\n</style>\n"
+		"<div class='panel' style='height: invalid'>Panel</div>\n</body>");
+	TArray<FWebToUEStyleSheetSource> StyleSheets;
+	StyleSheets.Add({
+		TEXT(".panel {\n  width: invalid;\n  made-up-property: 10px;\n}\n.panel:first-child { color: blue; }"),
+		TEXT("Styles/Panel.css"), 1, 1
+	});
+	StyleSheets.Add({ TEXT(".panel { color: blue; }"), TEXT("Styles/Theme.css"), 1, 1 });
+
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		Html, StyleSheets, TEXT("UI/Panel.html"));
+	TestFalse(TEXT("CSS warnings do not invalidate the document"), Document->HasErrors());
+
+	auto FindDiagnostic = [&Document](const FString& MessagePart) -> const FWebToUEDiagnostic*
+	{
+		return Document->Diagnostics.FindByPredicate([&MessagePart](const FWebToUEDiagnostic& Diagnostic)
+		{
+			return Diagnostic.Message.Contains(MessagePart);
+		});
+	};
+
+	const FWebToUEDiagnostic* InvalidWidth = FindDiagnostic(TEXT("invalid value 'invalid' for CSS property 'width'"));
+	TestNotNull(TEXT("Invalid external value is diagnosed"), InvalidWidth);
+	if (InvalidWidth)
+	{
+		TestEqual(TEXT("External diagnostic preserves source file"), InvalidWidth->File, FString(TEXT("Styles/Panel.css")));
+		TestEqual(TEXT("External diagnostic has the correct line"), InvalidWidth->Line, 2);
+		TestEqual(TEXT("External diagnostic has the correct column"), InvalidWidth->Column, 3);
+	}
+
+	const FWebToUEDiagnostic* UnknownProperty = FindDiagnostic(TEXT("unsupported CSS property 'made-up-property'"));
+	TestNotNull(TEXT("Unknown property is diagnosed"), UnknownProperty);
+	if (UnknownProperty)
+	{
+		TestEqual(TEXT("Unknown property has the correct line"), UnknownProperty->Line, 3);
+		TestEqual(TEXT("Unknown property has the correct column"), UnknownProperty->Column, 3);
+	}
+
+	const FWebToUEDiagnostic* UnsupportedSelector = FindDiagnostic(TEXT("unsupported selector '.panel:first-child'"));
+	TestNotNull(TEXT("Unsupported selector is diagnosed"), UnsupportedSelector);
+	if (UnsupportedSelector)
+	{
+		TestEqual(TEXT("Selector diagnostic has the correct line"), UnsupportedSelector->Line, 5);
+		TestEqual(TEXT("Selector diagnostic has the correct column"), UnsupportedSelector->Column, 1);
+	}
+
+	const FWebToUEDiagnostic* InlineValue = FindDiagnostic(TEXT("invalid value 'invalid' for CSS property 'height'"));
+	TestNotNull(TEXT("Invalid inline value is diagnosed"), InlineValue);
+	if (InlineValue)
+	{
+		TestEqual(TEXT("Inline diagnostic preserves HTML source"), InlineValue->File, FString(TEXT("UI/Panel.html")));
+	}
+
+	const FWebToUEDiagnostic* StyleElementValue = FindDiagnostic(TEXT("invalid value 'invalid' for CSS property 'padding'"));
+	TestNotNull(TEXT("Invalid style element value is diagnosed"), StyleElementValue);
+	if (StyleElementValue)
+	{
+		TestEqual(TEXT("Style element diagnostic preserves HTML source"), StyleElementValue->File, FString(TEXT("UI/Panel.html")));
+		TestEqual(TEXT("Style element diagnostic has the correct line"), StyleElementValue->Line, 3);
+	}
+
+	FWebToUENode* Panel = nullptr;
+	Document->ForEachNode([&Panel](FWebToUENode& Node)
+	{
+		if (Node.HasClass(TEXT("panel"))) Panel = &Node;
+	});
+	TestNotNull(TEXT("Panel exists"), Panel);
+	if (Panel)
+	{
+		TestEqual(TEXT("Later stylesheet still wins after source separation"), Panel->Style.Color, FLinearColor::Blue);
+		TestFalse(TEXT("Invalid inline height is ignored"), Panel->Style.Height.IsDefined());
+	}
+	return true;
+}
+
 #endif
