@@ -2,7 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Widgets/SLeafWidget.h"
-#include "WebToUECoreTypes.h"
+#include "Widgets/Text/SlateTextBlockLayout.h"
+#include "WebToUECompiler.h"
 
 struct FSlateBrush;
 class UWebToUEDocument;
@@ -15,6 +16,7 @@ public:
 		SLATE_ARGUMENT(TWeakObjectPtr<UWebToUEView>, Owner)
 	SLATE_END_ARGS()
 
+	virtual ~SWebToUEView() override;
 	void Construct(const FArguments& InArgs);
 	void SetDocument(UWebToUEDocument* InDocument);
 	void RefreshBindings(UObject* DataContext);
@@ -33,6 +35,10 @@ public:
 	virtual FReply OnFocusReceived(const FGeometry& MyGeometry, const FFocusEvent& InFocusEvent) override;
 	virtual void OnFocusLost(const FFocusEvent& InFocusEvent) override;
 
+#if WITH_DEV_AUTOMATION_TESTS
+	FVector2f MeasureTextForTesting(const FString& Text, float Width, bool bWrap) const;
+#endif
+
 private:
 	TWeakObjectPtr<UWebToUEView> Owner;
 	TWeakObjectPtr<UWebToUEDocument> DocumentAsset;
@@ -40,6 +46,7 @@ private:
 	mutable FVector2f LastViewportSize = FVector2f(-1.0f, -1.0f);
 	mutable bool bLayoutDirty = true;
 	mutable TMap<const FWebToUENode*, TSharedPtr<FSlateBrush>> Brushes;
+	mutable TMap<const FWebToUENode*, TUniquePtr<FSlateTextBlockLayout>> TextLayouts;
 	mutable TArray<TStrongObjectPtr<UObject>> LoadedResources;
 	TSet<FString> LoggedBindingErrors;
 	FWebToUENode* HoveredNode = nullptr;
@@ -48,9 +55,11 @@ private:
 
 	void RebuildStylesAndBrushes();
 	void RebuildBrushes() const;
-	FVector2f MeasureNode(const FWebToUENode& Node) const;
-	int32 PaintNode(const FWebToUENode& Node, const FGeometry& Geometry, FSlateWindowElementList& Out,
-		int32 LayerId, float ParentOpacity, bool bParentEnabled) const;
+	FVector2f MeasureNode(const FWebToUENode& Node, const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
+	FSlateTextBlockLayout& PrepareTextLayout(const FWebToUENode& Node, float WrapWidth) const;
+	int32 PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, const FGeometry& Geometry,
+		const FSlateRect& CullingRect, FSlateWindowElementList& Out, int32 LayerId,
+		const FWidgetStyle& WidgetStyle, float ParentOpacity, bool bParentEnabled) const;
 	FWebToUENode* HitTest(const FVector2f& LocalPosition) const;
 	void SetHoveredNode(FWebToUENode* Node);
 	void SetPressedNode(FWebToUENode* Node);

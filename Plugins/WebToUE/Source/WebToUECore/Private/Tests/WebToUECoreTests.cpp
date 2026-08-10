@@ -40,7 +40,8 @@ bool FWebToUELayoutTest::RunTest(const FString& Parameters)
 	const FString Html = TEXT("<body><div id='row'><span>A</span><span>B</span></div></body>");
 	const FString Css = TEXT("#row { width: 100%; height: 40px; flex-direction: row; gap: 10px; } span { width: 20px; height: 20px; }");
 	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(Html, Css);
-	FWebToUELayoutEngine::Layout(*Document, FVector2f(200, 100), [](const FWebToUENode&) { return FVector2f(8, 16); });
+	FWebToUELayoutEngine::Layout(*Document, FVector2f(200, 100),
+		[](const FWebToUENode&, const FWebToUELayoutEngine::FMeasureConstraints&) { return FVector2f(8, 16); });
 	FWebToUENode* Row = nullptr;
 	Document->ForEachNode([&Row](FWebToUENode& Node) { if (Node.GetAttribute(TEXT("id")) == TEXT("row")) Row = &Node; });
 	TestNotNull(TEXT("Row exists"), Row);
@@ -49,6 +50,42 @@ bool FWebToUELayoutTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Percentage width resolved"), Row->Size.X, 200.0f);
 		TestEqual(TEXT("Gap applied"), Row->Children[1]->Position.X - Row->Children[0]->Position.X, 30.0f);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEConstrainedMeasureTest, "WebToUE.Core.ConstrainedMeasure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FWebToUEConstrainedMeasureTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body><p id='copy'>A long line of text that needs wrapping.</p></body>"),
+		TEXT("#copy { width: 80px; }"));
+	FWebToUELayoutEngine::FMeasureConstraints TextConstraints;
+	bool bMeasuredText = false;
+	FWebToUELayoutEngine::Layout(*Document, FVector2f(200, 100),
+		[&](const FWebToUENode& Node, const FWebToUELayoutEngine::FMeasureConstraints& Constraints)
+		{
+			if (Node.Type == EWebToUENodeType::Text)
+			{
+				bMeasuredText = true;
+				TextConstraints = Constraints;
+				return FVector2f(Constraints.Width, 40.0f);
+			}
+			return FVector2f::ZeroVector;
+		});
+
+	TestTrue(TEXT("Text leaf is measured through Yoga"), bMeasuredText);
+	TestTrue(TEXT("Text measurement receives a finite width constraint"),
+		TextConstraints.WidthMode != FWebToUELayoutEngine::EMeasureMode::Undefined);
+	TestEqual(TEXT("Text measurement receives the parent width"), TextConstraints.Width, 80.0f);
+	FWebToUENode* TextNode = nullptr;
+	Document->ForEachNode([&TextNode](FWebToUENode& Node)
+	{
+		if (Node.Type == EWebToUENodeType::Text) TextNode = &Node;
+	});
+	TestNotNull(TEXT("Text node exists"), TextNode);
+	if (TextNode) TestEqual(TEXT("Measured wrapped height reaches Yoga layout"), TextNode->Size.Y, 40.0f);
 	return true;
 }
 

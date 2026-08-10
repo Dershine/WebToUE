@@ -14,6 +14,6 @@ Saving the imported HTML or a linked CSS file triggers a debounced reimport and 
 
 ## First-version limits
 
-The supported authoring subset is intentionally small: flex and absolute layout, box sizing, solid color/rounded boxes, images, single-line text, clipping, mouse interaction, Tab focus, and instant interaction pseudo-classes. JavaScript, forms, scrolling, text wrapping, animations, gradients, shadows, transforms, touch, gamepad, and world-space UI are not included yet.
+The supported authoring subset is intentionally small: flex and absolute layout, box sizing, solid color/rounded boxes, images, wrapped plain text, clipping, mouse interaction, Tab focus, and instant interaction pseudo-classes. JavaScript, forms, scrolling, rich text, animations, gradients, shadows, transforms, touch, gamepad, and world-space UI are not included yet.
 
 `img src` uses an Unreal soft object path such as `/Game/UI/T_Logo.T_Logo`. Font family names can be mapped to Unreal font objects in **Project Settings → WebToUE**.

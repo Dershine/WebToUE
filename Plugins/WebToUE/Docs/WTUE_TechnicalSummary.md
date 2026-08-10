@@ -182,6 +182,7 @@ Flex：
 - `font-size`
 - `font-weight`
 - `text-align`
+- `white-space`：`normal` / `nowrap`
 - `object-fit`：`fill`、`contain`、`cover`
 - `z-index`
 
@@ -198,6 +199,7 @@ Flex：
 - `font-size`
 - `font-weight`
 - `text-align`
+- `white-space`
 
 `body` 默认占满视口；`button` 默认采用水平 Flex，并将内容居中。
 
@@ -205,7 +207,7 @@ Flex：
 
 `FWebToUELayoutEngine` 为运行时节点创建对应的 Yoga 节点树，将计算样式转换为 Yoga 属性，再把计算结果写回每个节点的 `Position`、`Size` 和 `PaintOrder`。
 
-文本尺寸使用 Slate FontMeasure 测量。没有明确宽高的图片使用纹理固有尺寸，没有明确宽高的文本使用单行测量尺寸。布局输入是控件当前视口尺寸，因此百分比尺寸会相对实际 UMG/Slate 分配空间计算。
+文本和图片叶节点通过 Yoga 原生 MeasureFunc 接收 `Exactly`、`AtMost` 或无约束的宽高条件。文本使用 Slate `FSlateTextBlockLayout` 在给定宽度下完成 shaping、断行和测量，测得的多行高度再返回 Yoga；`white-space: nowrap` 会禁用软换行。没有明确宽高的图片仍使用纹理固有尺寸。布局输入是控件当前视口尺寸，因此百分比尺寸会相对实际 UMG/Slate 分配空间计算。
 
 当前每次需要重新布局时会重建 Yoga 树，不进行节点级增量布局缓存。对主菜单和中小型 HUD 足够直接，但大型列表、频繁数据变化和复杂伪类切换需要后续优化。
 
@@ -216,7 +218,7 @@ Flex：
 `SWebToUEView` 在 `OnPaint` 中手动递归绘制：
 
 - 元素背景和边框使用 `FSlateRoundedBoxBrush`。
-- 文本使用 `FSlateDrawElement::MakeText`。
+- 文本使用按节点缓存的 `FSlateTextBlockLayout`，测量和绘制共享同一套换行、shaping 与逐行对齐逻辑。
 - 图片使用 Texture2D 对应的 Slate Brush。
 - `overflow: hidden` 通过 Slate clipping zone 实现。
 - 子节点按 `z-index` 和 `PaintOrder` 排序。
@@ -356,8 +358,10 @@ CSS：
 
 - `WebToUE.Core.HtmlCss`：HTML、实体、ID/伪类级联和样式重算。
 - `WebToUE.Core.FlexLayout`：百分比宽度、水平 Flex 和 gap。
+- `WebToUE.Core.ConstrainedMeasure`：Yoga 叶节点测量约束与多行高度回传。
 - `WebToUE.Core.CssDiagnostics`：多来源样式表顺序、外链 CSS 文件/行/列、未知属性、非法值和内联样式诊断。
 - `WebToUE.Runtime.AssetVersion`：自定义版本注册和旧资产重编译判定。
+- `WebToUE.Runtime.TextWrapping`：Slate 文本在宽/窄约束及 `nowrap` 下的测量行为。
 
 第一版已经通过：
 
@@ -376,7 +380,8 @@ CSS：
 - 伪类或绑定变化会重新计算样式、画刷，并把布局标记为脏；尚未区分“仅重绘”和“需要重排”。
 - Yoga 树在布局时重建，尚无持久节点或增量更新。
 - 图片画刷重建时会按软路径加载 Texture2D；未来应引入资源缓存和异步加载策略。
-- 文本仅支持单行，无法覆盖实际游戏 UI 中的长文本、本地化换行和富文本需求。
+- 文本布局缓存目前按运行时节点维护；伪类或字体样式频繁变化时仍会参与全量样式和布局刷新，需要后续做失效粒度与性能基准。
+- 文本节点仍存储为 `FString`，尚未接入稳定的 `FText`/String Table 本地化身份，也不支持行内富文本 run。
 - CSS 解析器是面向受控子集的自研实现，不应被当作完整、容错等价或安全隔离级别的浏览器解析器。
 - 当前插件描述只允许 Win64，其他平台尚未形成支持矩阵。
 - 编译资产已有初始自定义版本和已加载旧资产的自动重导入；它仍依赖源文件存在，成功后需要保存资产，且尚无全局未加载资产扫描或字段级迁移。
@@ -387,7 +392,7 @@ CSS：
 - 浏览器 DOM API、网络加载、Cookie、Storage。
 - 表单、输入框、文本编辑和 IME。
 - 滚动容器、虚拟列表。
-- 多行文本、自动换行、富文本和复杂排版。
+- 富文本、文本本地化资源身份和复杂排版。
 - CSS Grid、浮动、table layout。
 - transition、keyframes、transform。
 - 阴影、渐变、滤镜、mask。
@@ -404,7 +409,7 @@ CSS：
 
 ### 阶段一：0.2，补齐可用的 UI 基础设施
 
-- 多行文本、自动换行、本地化和基础富文本。
+- 多行文本、自动换行、本地化和基础富文本（约束测量、Slate 自动换行和 `white-space` 已完成；本地化身份与富文本待补）。
 - 滚动容器、裁剪修正、滚轮输入和简单列表。
 - 触摸与手柄焦点导航、安全区和 DPI 适配。
 - 更完整的颜色、边框、背景图和常用 CSS 属性。

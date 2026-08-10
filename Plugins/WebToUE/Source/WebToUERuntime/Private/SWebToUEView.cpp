@@ -9,15 +9,20 @@
 #include "Engine/Texture2D.h"
 #include "Fonts/FontMeasure.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Framework/Text/PlainTextLayoutMarshaller.h"
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
 #include "Layout/Clipping.h"
 #include "Rendering/DrawElements.h"
 #include "Rendering/SlateRenderer.h"
+#include "Styling/SlateTypes.h"
 #include "UObject/StrongObjectPtr.h"
 #include "UObject/UnrealType.h"
+#include "Widgets/Text/SlateTextBlockLayout.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWebToUE, Log, All);
+
+SWebToUEView::~SWebToUEView() = default;
 
 void SWebToUEView::Construct(const FArguments& InArgs)
 {
@@ -29,6 +34,7 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 {
 	DocumentAsset = InDocument;
 	RuntimeDocument.Reset();
+	TextLayouts.Reset();
 	HoveredNode = PressedNode = FocusedNode = nullptr;
 	if (InDocument && InDocument->CompiledNodes.IsValidIndex(InDocument->RootNodeIndex))
 	{
@@ -82,17 +88,59 @@ FVector2D SWebToUEView::ComputeDesiredSize(float LayoutScaleMultiplier) const
 	return FVector2D(320.0, 180.0);
 }
 
-FVector2f SWebToUEView::MeasureNode(const FWebToUENode& Node) const
+static ETextJustify::Type ToTextJustification(const FString& TextAlign)
+{
+	if (TextAlign == TEXT("center")) return ETextJustify::Center;
+	if (TextAlign == TEXT("right")) return ETextJustify::Right;
+	return ETextJustify::Left;
+}
+
+static FTextBlockStyle MakeTextBlockStyle(const FWebToUENode& Node)
+{
+	const UWebToUESettings* Settings = GetDefault<UWebToUESettings>();
+	FTextBlockStyle Style = FTextBlockStyle::GetDefault();
+	Style.SetFont(Settings->ResolveFont(Node.Style.FontFamily, Node.Style.FontSize, Node.Style.FontWeight));
+	Style.SetColorAndOpacity(Node.Style.Color);
+	return Style;
+}
+
+FSlateTextBlockLayout& SWebToUEView::PrepareTextLayout(const FWebToUENode& Node, float WrapWidth) const
+{
+	TUniquePtr<FSlateTextBlockLayout>& Layout = TextLayouts.FindOrAdd(&Node);
+	if (!Layout)
+	{
+		Layout = MakeUnique<FSlateTextBlockLayout>(const_cast<SWebToUEView*>(this), FTextBlockStyle::GetDefault(),
+			TOptional<ETextShapingMethod>(), TOptional<ETextFlowDirection>(), FCreateSlateTextLayout(),
+			FPlainTextLayoutMarshaller::Create(), nullptr);
+	}
+	const float EffectiveWrapWidth = Node.Style.WhiteSpace == TEXT("normal") && FMath::IsFinite(WrapWidth) && WrapWidth > 0.0f
+		? WrapWidth : 0.0f;
+	const FSlateTextBlockLayout::FWidgetDesiredSizeArgs DesiredSizeArgs(
+		FText::FromString(Node.Text), FText::GetEmpty(), EffectiveWrapWidth, false,
+		ETextWrappingPolicy::DefaultWrapping, ETextTransformPolicy::None, FMargin(), 1.0f, true,
+		ToTextJustification(Node.Style.TextAlign));
+	Layout->ComputeDesiredSize(DesiredSizeArgs, 1.0f, MakeTextBlockStyle(Node));
+	return *Layout;
+}
+
+FVector2f SWebToUEView::MeasureNode(const FWebToUENode& Node,
+	const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const
 {
 	if (Node.Type == EWebToUENodeType::Text)
 	{
-		const UWebToUESettings* Settings = GetDefault<UWebToUESettings>();
-		const FSlateFontInfo Font = Settings->ResolveFont(Node.Style.FontFamily, Node.Style.FontSize, Node.Style.FontWeight);
 		if (FSlateApplication::IsInitialized())
 		{
-			return FVector2f(FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Node.Text, Font));
+			const float WrapWidth = Constraints.WidthMode == FWebToUELayoutEngine::EMeasureMode::Undefined
+				? 0.0f : Constraints.Width;
+			return FVector2f(PrepareTextLayout(Node, WrapWidth).GetDesiredSize());
 		}
-		return FVector2f(Node.Text.Len() * Node.Style.FontSize * 0.5f, Node.Style.FontSize * 1.25f);
+		const float CharacterWidth = Node.Style.FontSize * 0.5f;
+		const float UnwrappedWidth = Node.Text.Len() * CharacterWidth;
+		const bool bCanWrap = Node.Style.WhiteSpace == TEXT("normal") &&
+			Constraints.WidthMode != FWebToUELayoutEngine::EMeasureMode::Undefined && Constraints.Width > 0.0f;
+		const int32 LineCount = bCanWrap ? FMath::Max(1, FMath::CeilToInt(UnwrappedWidth / Constraints.Width)) : 1;
+		return FVector2f(bCanWrap ? FMath::Min(UnwrappedWidth, Constraints.Width) : UnwrappedWidth,
+			LineCount * Node.Style.FontSize * 1.25f);
 	}
 	if (Node.Tag == TEXT("img"))
 	{
@@ -103,6 +151,21 @@ FVector2f SWebToUEView::MeasureNode(const FWebToUENode& Node) const
 	}
 	return FVector2f::ZeroVector;
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+FVector2f SWebToUEView::MeasureTextForTesting(const FString& Text, float Width, bool bWrap) const
+{
+	FWebToUENode Node;
+	Node.Type = EWebToUENodeType::Text;
+	Node.Tag = TEXT("#text");
+	Node.Text = Text;
+	Node.Style.WhiteSpace = bWrap ? TEXT("normal") : TEXT("nowrap");
+	FWebToUELayoutEngine::FMeasureConstraints Constraints;
+	Constraints.Width = Width;
+	Constraints.WidthMode = FWebToUELayoutEngine::EMeasureMode::AtMost;
+	return MeasureNode(Node, Constraints);
+}
+#endif
 
 int32 SWebToUEView::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
 	const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
@@ -116,19 +179,24 @@ int32 SWebToUEView::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeo
 	if (bLayoutDirty || !ViewportSize.Equals(LastViewportSize, 0.1f))
 	{
 		FWebToUELayoutEngine::Layout(*RuntimeDocument, ViewportSize,
-			[this](const FWebToUENode& Node) { return MeasureNode(Node); });
+			[this](const FWebToUENode& Node, const FWebToUELayoutEngine::FMeasureConstraints& Constraints)
+			{
+				return MeasureNode(Node, Constraints);
+			});
 		LastViewportSize = ViewportSize;
 		bLayoutDirty = false;
 	}
-	return PaintNode(*RuntimeDocument->Root, AllottedGeometry, OutDrawElements, LayerId,
-		InWidgetStyle.GetColorAndOpacityTint().A, bParentEnabled);
+	return PaintNode(*RuntimeDocument->Root, Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId,
+		InWidgetStyle, 1.0f, bParentEnabled);
 }
 
-int32 SWebToUEView::PaintNode(const FWebToUENode& Node, const FGeometry& Geometry,
-	FSlateWindowElementList& Out, int32 LayerId, float ParentOpacity, bool bParentEnabled) const
+int32 SWebToUEView::PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, const FGeometry& Geometry,
+	const FSlateRect& CullingRect, FSlateWindowElementList& Out, int32 LayerId,
+	const FWidgetStyle& WidgetStyle, float ParentOpacity, bool bParentEnabled) const
 {
 	if (!Node.IsDisplayed()) return LayerId;
 	const float Opacity = ParentOpacity * Node.Style.Opacity;
+	const float DrawOpacity = Opacity * WidgetStyle.GetColorAndOpacityTint().A;
 	const FVector2f Position = Node.Position;
 	const FVector2f Size = Node.Size;
 	const FPaintGeometry PaintGeometry = Geometry.ToPaintGeometry(Size, FSlateLayoutTransform(Position));
@@ -156,29 +224,25 @@ int32 SWebToUEView::PaintNode(const FWebToUENode& Node, const FGeometry& Geometr
 				if (bClipImage) Out.PushClip(FSlateClippingZone(Geometry.MakeChild(Size, FSlateLayoutTransform(Position))));
 				FSlateDrawElement::MakeBox(Out, LayerId++, Geometry.ToPaintGeometry(ImageSize, FSlateLayoutTransform(ImagePosition)), Brush->Get(),
 					bParentEnabled && Node.Style.bEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect,
-					FLinearColor(1.0f, 1.0f, 1.0f, Opacity));
+					FLinearColor(1.0f, 1.0f, 1.0f, DrawOpacity));
 				if (bClipImage) Out.PopClip();
 			}
 			else if (Node.Style.BackgroundColor.A > 0.0f || Node.Style.BorderWidth > 0.0f)
 			{
 				FSlateDrawElement::MakeBox(Out, LayerId++, PaintGeometry, Brush->Get(),
 					bParentEnabled && Node.Style.bEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect,
-					FLinearColor(1.0f, 1.0f, 1.0f, Opacity));
+					FLinearColor(1.0f, 1.0f, 1.0f, DrawOpacity));
 			}
 		}
 	}
 	else
 	{
-		const UWebToUESettings* Settings = GetDefault<UWebToUESettings>();
-		const FSlateFontInfo Font = Settings->ResolveFont(Node.Style.FontFamily, Node.Style.FontSize, Node.Style.FontWeight);
-		FLinearColor Tint = Node.Style.Color;
-		Tint.A *= Opacity;
-		FVector2f TextPosition = Position;
-		const FVector2f TextSize = MeasureNode(Node);
-		if (Node.Style.TextAlign == TEXT("center")) TextPosition.X += FMath::Max(0.0f, (Size.X - TextSize.X) * 0.5f);
-		else if (Node.Style.TextAlign == TEXT("right")) TextPosition.X += FMath::Max(0.0f, Size.X - TextSize.X);
-		FSlateDrawElement::MakeText(Out, LayerId++, Geometry.ToOffsetPaintGeometry(FVector2D(TextPosition)),
-			Node.Text, Font, bParentEnabled && Node.Style.bEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect, Tint);
+		FSlateTextBlockLayout& TextLayout = PrepareTextLayout(Node, Size.X);
+		const FGeometry TextGeometry = Geometry.MakeChild(Size, FSlateLayoutTransform(Position));
+		FWidgetStyle TextWidgetStyle = WidgetStyle;
+		TextWidgetStyle.BlendColorAndOpacityTint(FLinearColor(1.0f, 1.0f, 1.0f, Opacity));
+		LayerId = TextLayout.OnPaint(Args, TextGeometry, CullingRect, Out, LayerId, TextWidgetStyle,
+			bParentEnabled && Node.Style.bEnabled) + 1;
 	}
 
 	bool bPushedClip = false;
@@ -196,7 +260,8 @@ int32 SWebToUEView::PaintNode(const FWebToUENode& Node, const FGeometry& Geometr
 	});
 	for (const TSharedPtr<FWebToUENode>& Child : SortedChildren)
 	{
-		LayerId = PaintNode(*Child, Geometry, Out, LayerId, Opacity, bParentEnabled && Node.Style.bEnabled);
+		LayerId = PaintNode(*Child, Args, Geometry, CullingRect, Out, LayerId, WidgetStyle,
+			Opacity, bParentEnabled && Node.Style.bEnabled);
 	}
 	if (bPushedClip) Out.PopClip();
 	return LayerId;

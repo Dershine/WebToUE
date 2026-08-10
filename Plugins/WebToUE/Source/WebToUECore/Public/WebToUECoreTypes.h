@@ -123,6 +123,7 @@ struct WEBTOUECORE_API FWebToUEComputedStyle
 	float FontSize = 16.0f;
 	FString FontWeight = TEXT("normal");
 	FString TextAlign = TEXT("left");
+	FString WhiteSpace = TEXT("normal");
 	FString ObjectFit = TEXT("fill");
 	int32 ZIndex = 0;
 };

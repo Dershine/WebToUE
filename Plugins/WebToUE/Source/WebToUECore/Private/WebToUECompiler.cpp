@@ -671,7 +671,7 @@ namespace WebToUE::Private
 			TEXT("color"), TEXT("background"), TEXT("background-color"),
 			TEXT("border"), TEXT("border-color"), TEXT("border-width"), TEXT("border-style"), TEXT("border-radius"),
 			TEXT("opacity"), TEXT("font-family"), TEXT("font-size"), TEXT("font-weight"), TEXT("text-align"),
-			TEXT("object-fit"), TEXT("z-index")
+			TEXT("white-space"), TEXT("object-fit"), TEXT("z-index")
 		};
 		return Properties;
 	}
@@ -774,6 +774,7 @@ namespace WebToUE::Private
 			{ TEXT("auto"), TEXT("flex-start"), TEXT("center"), TEXT("flex-end"), TEXT("stretch"), TEXT("baseline") });
 		if (Name == TEXT("border-style")) return IsOneOf(Value, { TEXT("solid"), TEXT("none") });
 		if (Name == TEXT("text-align")) return IsOneOf(Value, { TEXT("left"), TEXT("center"), TEXT("right") });
+		if (Name == TEXT("white-space")) return IsOneOf(Value, { TEXT("normal"), TEXT("nowrap") });
 		if (Name == TEXT("object-fit")) return IsOneOf(Value, { TEXT("fill"), TEXT("contain"), TEXT("cover") });
 		if (Name == TEXT("flex")) return IsFlexValid(Value);
 		if (Name == TEXT("flex-grow") || Name == TEXT("flex-shrink") || Name == TEXT("opacity")) return IsNumber(Value);
@@ -945,6 +946,7 @@ namespace WebToUE::Private
 		if (const FString* V = Value(TEXT("font-size"))) Style.FontSize = FMath::Max(1.0f, ParsePixels(*V, Style.FontSize));
 		if (const FString* V = Value(TEXT("font-weight"))) Style.FontWeight = V->ToLower();
 		if (const FString* V = Value(TEXT("text-align"))) Style.TextAlign = V->ToLower();
+		if (const FString* V = Value(TEXT("white-space"))) Style.WhiteSpace = V->ToLower();
 		if (const FString* V = Value(TEXT("object-fit"))) Style.ObjectFit = V->ToLower();
 		if (const FString* V = Value(TEXT("z-index"))) Style.ZIndex = FCString::Atoi(**V);
 	}
@@ -986,6 +988,7 @@ namespace WebToUE::Private
 			Style.FontSize = ParentStyle->FontSize;
 			Style.FontWeight = ParentStyle->FontWeight;
 			Style.TextAlign = ParentStyle->TextAlign;
+			Style.WhiteSpace = ParentStyle->WhiteSpace;
 		}
 
 		TArray<const FWebToUEStyleRule*> Matches;
@@ -1069,7 +1072,40 @@ namespace WebToUE::Private
 		return YGJustifyFlexStart;
 	}
 
-	static YGNodeRef BuildYogaTree(FWebToUENode& WebNode, const FWebToUELayoutEngine::FMeasureNode& MeasureNode)
+	struct FYogaMeasureContext
+	{
+		const FWebToUENode* WebNode = nullptr;
+		const FWebToUELayoutEngine::FMeasureNode* MeasureNode = nullptr;
+	};
+
+	static FWebToUELayoutEngine::EMeasureMode ToMeasureMode(YGMeasureMode Mode)
+	{
+		switch (Mode)
+		{
+		case YGMeasureModeExactly: return FWebToUELayoutEngine::EMeasureMode::Exactly;
+		case YGMeasureModeAtMost: return FWebToUELayoutEngine::EMeasureMode::AtMost;
+		default: return FWebToUELayoutEngine::EMeasureMode::Undefined;
+		}
+	}
+
+	static YGSize MeasureYogaNode(YGNodeConstRef Node, float Width, YGMeasureMode WidthMode,
+		float Height, YGMeasureMode HeightMode)
+	{
+		const FYogaMeasureContext* Context = static_cast<const FYogaMeasureContext*>(YGNodeGetContext(Node));
+		if (!Context || !Context->WebNode || !Context->MeasureNode) return { 0.0f, 0.0f };
+		const FWebToUELayoutEngine::FMeasureConstraints Constraints = {
+			Width, Height, ToMeasureMode(WidthMode), ToMeasureMode(HeightMode)
+		};
+		FVector2f Measured = (*Context->MeasureNode)(*Context->WebNode, Constraints);
+		if (WidthMode == YGMeasureModeExactly) Measured.X = Width;
+		else if (WidthMode == YGMeasureModeAtMost) Measured.X = FMath::Min(Measured.X, Width);
+		if (HeightMode == YGMeasureModeExactly) Measured.Y = Height;
+		else if (HeightMode == YGMeasureModeAtMost) Measured.Y = FMath::Min(Measured.Y, Height);
+		return { FMath::Max(0.0f, Measured.X), FMath::Max(0.0f, Measured.Y) };
+	}
+
+	static YGNodeRef BuildYogaTree(FWebToUENode& WebNode, const FWebToUELayoutEngine::FMeasureNode& MeasureNode,
+		TArray<TUniquePtr<FYogaMeasureContext>>& MeasureContexts)
 	{
 		YGNodeRef Node = YGNodeNew();
 		const FWebToUEComputedStyle& S = WebNode.Style;
@@ -1109,15 +1145,17 @@ namespace WebToUE::Private
 		YGNodeStyleSetGap(Node, YGGutterColumn, S.ColumnGap);
 		YGNodeStyleSetBorder(Node, YGEdgeAll, S.BorderWidth);
 
-		if ((WebNode.Type == EWebToUENodeType::Text || WebNode.Tag == TEXT("img")) && (!S.Width.IsDefined() || !S.Height.IsDefined()))
+		if ((WebNode.Type == EWebToUENodeType::Text || WebNode.Tag == TEXT("img")) && WebNode.Children.IsEmpty())
 		{
-			const FVector2f Measured = MeasureNode(WebNode);
-			if (!S.Width.IsDefined()) YGNodeStyleSetWidth(Node, Measured.X);
-			if (!S.Height.IsDefined()) YGNodeStyleSetHeight(Node, Measured.Y);
+			TUniquePtr<FYogaMeasureContext>& Context = MeasureContexts.Add_GetRef(MakeUnique<FYogaMeasureContext>());
+			Context->WebNode = &WebNode;
+			Context->MeasureNode = &MeasureNode;
+			YGNodeSetContext(Node, Context.Get());
+			YGNodeSetMeasureFunc(Node, MeasureYogaNode);
 		}
 		for (int32 Index = 0; Index < WebNode.Children.Num(); ++Index)
 		{
-			YGNodeInsertChild(Node, BuildYogaTree(*WebNode.Children[Index], MeasureNode), Index);
+			YGNodeInsertChild(Node, BuildYogaTree(*WebNode.Children[Index], MeasureNode, MeasureContexts), Index);
 		}
 		return Node;
 	}
@@ -1195,7 +1233,8 @@ void FWebToUEStyleResolver::Resolve(FWebToUEDocument& Document)
 void FWebToUELayoutEngine::Layout(FWebToUEDocument& Document, const FVector2f& ViewportSize, const FMeasureNode& MeasureNode)
 {
 	if (!Document.Root) return;
-	YGNodeRef Root = WebToUE::Private::BuildYogaTree(*Document.Root, MeasureNode);
+	TArray<TUniquePtr<WebToUE::Private::FYogaMeasureContext>> MeasureContexts;
+	YGNodeRef Root = WebToUE::Private::BuildYogaTree(*Document.Root, MeasureNode, MeasureContexts);
 	YGNodeStyleSetWidth(Root, ViewportSize.X);
 	YGNodeStyleSetHeight(Root, ViewportSize.Y);
 	YGNodeCalculateLayout(Root, ViewportSize.X, ViewportSize.Y, YGDirectionLTR);

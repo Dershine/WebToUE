@@ -35,7 +35,22 @@ public:
 class WEBTOUECORE_API FWebToUELayoutEngine
 {
 public:
-	using FMeasureNode = TFunction<FVector2f(const FWebToUENode&)>;
+	enum class EMeasureMode : uint8
+	{
+		Undefined,
+		Exactly,
+		AtMost
+	};
+
+	struct FMeasureConstraints
+	{
+		float Width = 0.0f;
+		float Height = 0.0f;
+		EMeasureMode WidthMode = EMeasureMode::Undefined;
+		EMeasureMode HeightMode = EMeasureMode::Undefined;
+	};
+
+	using FMeasureNode = TFunction<FVector2f(const FWebToUENode&, const FMeasureConstraints&)>;
 
 	static void Layout(
 		FWebToUEDocument& Document,
