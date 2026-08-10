@@ -147,6 +147,7 @@ bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FStri
 		else
 		{
 			SerializeCompiledDocument(*Compiled, Document);
+			Document.MarkRecompiled();
 		}
 		Document.ReferencedTextures.Reset();
 		if (!bHasErrors)

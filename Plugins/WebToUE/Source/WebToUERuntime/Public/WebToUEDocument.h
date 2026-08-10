@@ -123,12 +123,23 @@ public:
 
 	bool HasCompileErrors() const;
 	void NotifyDocumentChanged();
+	virtual void Serialize(FArchive& Ar) override;
 
 	DECLARE_MULTICAST_DELEGATE_OneParam(FOnDocumentChanged, UWebToUEDocument*);
 	static FOnDocumentChanged& OnDocumentChanged();
 
 #if WITH_EDITOR
+	bool NeedsRecompile() const { return bNeedsRecompile; }
+	void MarkRecompiled() { bNeedsRecompile = false; }
+
+	DECLARE_MULTICAST_DELEGATE_OneParam(FOnDocumentNeedsRecompile, UWebToUEDocument*);
+	static FOnDocumentNeedsRecompile& OnDocumentNeedsRecompile();
+
 	virtual void PostInitProperties() override;
+	virtual void PostLoad() override;
 	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
+
+private:
+	bool bNeedsRecompile = false;
 #endif
 };
