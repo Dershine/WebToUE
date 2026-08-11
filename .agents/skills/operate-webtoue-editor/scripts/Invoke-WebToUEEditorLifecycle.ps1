@@ -1,8 +1,9 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("Status", "SafeBuildAndLaunch")]
+    [ValidateSet("Status", "Preflight", "SafeBuildAndLaunch")]
     [string]$Action = "Status",
     [string]$ProjectRoot,
+    [string]$EngineRoot,
     [string]$McpUri = "http://127.0.0.1:8000/mcp",
     [switch]$AssetsSaved,
     [switch]$StrictRebuild,
@@ -18,9 +19,65 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$script:OperationState = $null
+$script:OperationStatePath = $null
+
+function Write-OperationState {
+    param([System.Collections.IDictionary]$State, [string]$Path)
+
+    $directory = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    $temporaryPath = "$Path.$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        $State.UpdatedUtc = [DateTime]::UtcNow.ToString("o")
+        [System.IO.File]::WriteAllText(
+            $temporaryPath,
+            ($State | ConvertTo-Json -Depth 10),
+            [System.Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temporaryPath -Destination $Path -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
+    }
+}
+
+function Read-OperationState {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+    try {
+        return Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
+    }
+    catch {
+        return [pscustomobject][ordered]@{
+            Phase = "Invalid"
+            Active = $false
+            Error = $_.Exception.Message
+        }
+    }
+}
+
+function Set-OperationPhase {
+    param([string]$Phase, [string]$ErrorMessage = $null)
+
+    if (-not $script:OperationState -or -not $script:OperationStatePath) {
+        return
+    }
+    $script:OperationState.Phase = $Phase
+    $script:OperationState.Error = $ErrorMessage
+    if ($Phase -in @("Healthy", "Failed")) {
+        $script:OperationState.CompletedUtc = [DateTime]::UtcNow.ToString("o")
+    }
+    Write-OperationState -State $script:OperationState -Path $script:OperationStatePath
+}
 
 function Stop-Lifecycle {
     param([int]$Code, [string]$Message)
+    Set-OperationPhase -Phase "Failed" -ErrorMessage $Message
     Write-Host "ERROR: $Message" -ForegroundColor Red
     exit $Code
 }
@@ -41,6 +98,132 @@ function Resolve-ProjectRoot {
 
 function Get-UnrealEditors {
     return @(Get-Process -Name "UnrealEditor*" -ErrorAction SilentlyContinue | Sort-Object Id)
+}
+
+function Resolve-EngineInstall {
+    param([string]$RequestedRoot, [string]$ProjectFile, [System.Array]$Editors)
+
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($RequestedRoot)) {
+        $candidates += $RequestedRoot
+    }
+
+    foreach ($editor in @($Editors)) {
+        if ($editor.Path -and $editor.Path -match '^(.*)\\Engine\\Binaries\\Win64\\UnrealEditor[^\\]*\.exe$') {
+            $candidates += $Matches[1]
+        }
+    }
+
+    try {
+        $association = [string]((Get-Content -Raw -LiteralPath $ProjectFile | ConvertFrom-Json).EngineAssociation)
+        if (-not [string]::IsNullOrWhiteSpace($association)) {
+            $candidates += @(
+                "D:\UE\UE_$association",
+                "E:\UE\UE_$association",
+                "C:\UE\UE_$association",
+                "D:\Program Files\Epic Games\UE_$association",
+                "E:\Program Files\Epic Games\UE_$association",
+                "C:\Program Files\Epic Games\UE_$association"
+            )
+        }
+    }
+    catch {}
+
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        if ([string]::IsNullOrWhiteSpace($candidate) -or -not (Test-Path -LiteralPath $candidate)) {
+            continue
+        }
+        $resolved = (Resolve-Path -LiteralPath $candidate).Path
+        $buildBat = Join-Path $resolved "Engine\Build\BatchFiles\Build.bat"
+        $editorExe = Join-Path $resolved "Engine\Binaries\Win64\UnrealEditor.exe"
+        if ((Test-Path -LiteralPath $buildBat) -and (Test-Path -LiteralPath $editorExe)) {
+            return $resolved
+        }
+    }
+    return $null
+}
+
+function Test-WriteProbe {
+    param([string]$Name, [string]$Directory)
+
+    $result = [ordered]@{
+        Name = $Name
+        Directory = $Directory
+        Writable = $false
+        Error = $null
+    }
+    $probePath = $null
+    try {
+        if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
+            throw "Directory does not exist."
+        }
+        $probePath = Join-Path $Directory (".webtoue-write-probe-{0}.tmp" -f [Guid]::NewGuid().ToString("N"))
+        [System.IO.File]::WriteAllText($probePath, "WebToUE lifecycle write probe", [System.Text.UTF8Encoding]::new($false))
+        Remove-Item -LiteralPath $probePath -Force
+        $probePath = $null
+        $result.Writable = $true
+    }
+    catch {
+        $result.Error = $_.Exception.Message
+    }
+    finally {
+        if ($probePath -and (Test-Path -LiteralPath $probePath)) {
+            Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
+        }
+    }
+    return [pscustomobject]$result
+}
+
+function Get-PreflightResult {
+    param([string]$Root, [string]$ResolvedEngineRoot)
+
+    $probeDirectories = [ordered]@{
+        ProjectSaved = (Join-Path $Root "Saved")
+        ProjectIntermediate = (Join-Path $Root "Intermediate")
+        EngineIntermediate = (Join-Path $ResolvedEngineRoot "Engine\Intermediate")
+        UnrealBuildToolLocalData = (Join-Path $env:LOCALAPPDATA "UnrealBuildTool")
+        UnrealEngineLocalData = (Join-Path $env:LOCALAPPDATA "UnrealEngine")
+    }
+    $probes = @()
+    foreach ($entry in $probeDirectories.GetEnumerator()) {
+        $probes += Test-WriteProbe -Name $entry.Key -Directory $entry.Value
+    }
+    $failed = @($probes | Where-Object { -not $_.Writable })
+    return [pscustomobject][ordered]@{
+        EngineRoot = $ResolvedEngineRoot
+        Probes = $probes
+        Passed = ($failed.Count -eq 0)
+        FailedCount = $failed.Count
+    }
+}
+
+function Get-ActiveOperationPids {
+    param([object]$Operation)
+
+    if (-not $Operation -or $Operation.Phase -in @("Healthy", "Failed", "Invalid")) {
+        return @()
+    }
+    $activePids = @()
+    foreach ($propertyName in @("OwnerPid", "VibeProcessPid", "NewEditorPid")) {
+        $property = $Operation.PSObject.Properties[$propertyName]
+        if ($property -and $property.Value -and (Get-Process -Id ([int]$property.Value) -ErrorAction SilentlyContinue)) {
+            $activePids += [int]$property.Value
+        }
+    }
+    return @($activePids | Select-Object -Unique)
+}
+
+function Remove-StaleLifecycleScripts {
+    param([string]$VibeScriptPath)
+
+    $removed = @()
+    $staleScripts = @(Get-ChildItem -LiteralPath (Split-Path -Parent $VibeScriptPath) `
+        -Filter ".BuildAndLaunchGame.WebToUE.*.ps1" -File -Force -ErrorAction SilentlyContinue)
+    foreach ($staleScript in $staleScripts) {
+        Remove-Item -LiteralPath $staleScript.FullName -Force
+        $removed += $staleScript.FullName
+    }
+    return $removed
 }
 
 function Get-ReadySignalEvidence {
@@ -214,8 +397,12 @@ function Wait-VibeReadySignal {
     finally {
         Unregister-Event -SourceIdentifier $createdId -ErrorAction SilentlyContinue
         Unregister-Event -SourceIdentifier $renamedId -ErrorAction SilentlyContinue
-        Remove-Job -Id $createdSubscription.Id -Force -ErrorAction SilentlyContinue
-        Remove-Job -Id $renamedSubscription.Id -Force -ErrorAction SilentlyContinue
+        if ($createdSubscription) {
+            Remove-Job -Id $createdSubscription.Id -Force -ErrorAction SilentlyContinue
+        }
+        if ($renamedSubscription) {
+            Remove-Job -Id $renamedSubscription.Id -Force -ErrorAction SilentlyContinue
+        }
         $watcher.Dispose()
     }
 }
@@ -231,14 +418,87 @@ if (-not (Test-Path -LiteralPath $vibeScript)) {
     Stop-Lifecycle -Code 3 -Message "VibeUE launch script is missing: $vibeScript"
 }
 
+$operationStatePath = Join-Path $resolvedRoot "Saved\VibeUE\Lifecycle\operation.json"
+
 if ($Action -eq "Status") {
     $statusResult = Get-StatusResult -Root $resolvedRoot -ProjectFile $projectFile -Endpoint $McpUri
+    $operationStatus = Read-OperationState -Path $operationStatePath
+    $statusResult | Add-Member -NotePropertyName Operation -NotePropertyValue $operationStatus
     $statusResult | ConvertTo-Json -Depth 10
     if ($statusResult.Healthy) { exit 0 }
     exit 10
 }
 
 $editorsBefore = @(Get-UnrealEditors)
+$resolvedEngineRoot = Resolve-EngineInstall -RequestedRoot $EngineRoot -ProjectFile $projectFile -Editors $editorsBefore
+if (-not $resolvedEngineRoot) {
+    Stop-Lifecycle -Code 4 -Message "Could not resolve a usable Unreal Engine install. Pass -EngineRoot explicitly."
+}
+
+$preflight = Get-PreflightResult -Root $resolvedRoot -ResolvedEngineRoot $resolvedEngineRoot
+if ($Action -eq "Preflight") {
+    $preflight | ConvertTo-Json -Depth 10
+    if ($preflight.Passed) { exit 0 }
+    exit 5
+}
+
+if (-not $preflight.Passed) {
+    $preflight | ConvertTo-Json -Depth 10
+    Stop-Lifecycle -Code 5 -Message "Lifecycle write-access preflight failed before Editor shutdown. Run this exact lifecycle command outside the workspace-only sandbox."
+}
+
+$mutexName = "Local\WebToUE.EditorLifecycle.$($uprojects[0].BaseName)"
+$lifecycleMutex = [System.Threading.Mutex]::new($false, $mutexName)
+$mutexAcquired = $false
+try {
+    $mutexAcquired = $lifecycleMutex.WaitOne(0)
+}
+catch [System.Threading.AbandonedMutexException] {
+    $mutexAcquired = $true
+}
+if (-not $mutexAcquired) {
+    $activeOperation = Read-OperationState -Path $operationStatePath
+    if ($activeOperation) {
+        $activeOperation | ConvertTo-Json -Depth 10
+    }
+    Stop-Lifecycle -Code 20 -Message "Another lifecycle operation owns '$mutexName'. Observe that operation; do not start a duplicate UBT or Editor launch."
+}
+
+$existingOperation = Read-OperationState -Path $operationStatePath
+if ($existingOperation -and $existingOperation.Phase -notin @("Healthy", "Failed", "Invalid")) {
+    $activePids = @(Get-ActiveOperationPids -Operation $existingOperation)
+    if ($activePids.Count -gt 0) {
+        $existingOperation | ConvertTo-Json -Depth 10
+        Stop-Lifecycle -Code 20 -Message "Lifecycle operation '$($existingOperation.OperationId)' still has active PID(s) $($activePids -join ', '). Observe it; do not start a duplicate UBT or Editor launch."
+    }
+}
+
+foreach ($removedScript in @(Remove-StaleLifecycleScripts -VibeScriptPath $vibeScript)) {
+    Write-Host "Removed stale WebToUE lifecycle script: $removedScript" -ForegroundColor Yellow
+}
+
+$operationId = [Guid]::NewGuid().ToString("N")
+$operationDirectory = Join-Path $resolvedRoot "Saved\VibeUE\Lifecycle\Operations\$operationId"
+$script:OperationStatePath = $operationStatePath
+$script:OperationState = [ordered]@{
+    OperationId = $operationId
+    OwnerPid = $PID
+    Phase = "PreflightPassed"
+    Project = $projectFile
+    EngineRoot = $resolvedEngineRoot
+    StartedUtc = [DateTime]::UtcNow.ToString("o")
+    UpdatedUtc = $null
+    CompletedUtc = $null
+    PreviousEditorPid = $null
+    VibeProcessPid = $null
+    NewEditorPid = $null
+    OutputPath = (Join-Path $operationDirectory "vibe-stdout.log")
+    ErrorPath = (Join-Path $operationDirectory "vibe-stderr.log")
+    TemporaryVibeScript = $null
+    Error = $null
+}
+Write-OperationState -State $script:OperationState -Path $script:OperationStatePath
+
 if ($editorsBefore.Count -gt 1) {
     Stop-Lifecycle -Code 30 -Message "Found multiple Unreal Editors ($($editorsBefore.Id -join ', ')); refusing an ambiguous shutdown."
 }
@@ -247,6 +507,8 @@ $previousPid = $null
 if ($editorsBefore.Count -eq 1) {
     $editor = $editorsBefore[0]
     $previousPid = $editor.Id
+    $script:OperationState.PreviousEditorPid = $previousPid
+    Write-OperationState -State $script:OperationState -Path $script:OperationStatePath
     $signal = Get-ReadySignalEvidence -Root $resolvedRoot -EditorPid $editor.Id
     if (-not $signal.Valid) {
         Stop-Lifecycle -Code 31 -Message "Editor PID $($editor.Id) is not proven to belong to this VibeUE project ($($signal.Reason))."
@@ -262,6 +524,7 @@ if ($archivePath) {
 }
 
 if ($editorsBefore.Count -eq 1) {
+    Set-OperationPhase -Phase "ClosingEditor"
     Write-Host "Requesting graceful shutdown of Editor PID $previousPid..." -ForegroundColor Yellow
     $closeRequested = $editorsBefore[0].CloseMainWindow()
     if (-not $closeRequested) {
@@ -276,21 +539,70 @@ if (@(Get-UnrealEditors).Count -ne 0) {
     Stop-Lifecycle -Code 35 -Message "An Unreal Editor appeared or remained after the safety gate; VibeUE was not invoked."
 }
 
-$vibeParameters = @{}
-if ($StrictRebuild) { $vibeParameters.StrictRebuild = $true }
-if ($Clean) { $vibeParameters.Clean = $true }
-if ($SkipBuild) { $vibeParameters.SkipBuild = $true }
+$vibeScriptToRun = $vibeScript
+$temporaryVibeScript = $null
+if ($resolvedEngineRoot) {
+    $vibeSource = [System.IO.File]::ReadAllText($vibeScript)
+    $enginePathMarker = '$enginePath = $null'
+    $markerCount = ([regex]::Matches($vibeSource, [regex]::Escape($enginePathMarker))).Count
+    if ($markerCount -ne 1) {
+        Stop-Lifecycle -Code 36 -Message "Expected exactly one VibeUE engine-path marker; found $markerCount."
+    }
+
+    $escapedEngineRoot = $resolvedEngineRoot.Replace("'", "''")
+    $temporaryVibeScript = Join-Path (Split-Path -Parent $vibeScript) (".BuildAndLaunchGame.WebToUE.{0}.ps1" -f [Guid]::NewGuid().ToString("N"))
+    $patchedSource = $vibeSource.Replace($enginePathMarker, "`$enginePath = '$escapedEngineRoot'")
+    [System.IO.File]::WriteAllText($temporaryVibeScript, $patchedSource, [System.Text.UTF8Encoding]::new($false))
+    $vibeScriptToRun = $temporaryVibeScript
+    $script:OperationState.TemporaryVibeScript = $temporaryVibeScript
+    Write-OperationState -State $script:OperationState -Path $script:OperationStatePath
+}
+
+$vibeArguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $vibeScriptToRun)
+if ($StrictRebuild) { $vibeArguments += "-StrictRebuild" }
+if ($Clean) { $vibeArguments += "-Clean" }
+if ($SkipBuild) { $vibeArguments += "-SkipBuild" }
 
 Write-Host "Invoking VibeUE's supported build-and-launch script..." -ForegroundColor Cyan
 $vibeOutput = @()
-& $vibeScript @vibeParameters | Tee-Object -Variable vibeOutput
+try {
+    New-Item -ItemType Directory -Path $operationDirectory -Force | Out-Null
+    Set-OperationPhase -Phase "InvokingVibeUE"
+    $vibeProcess = Start-Process `
+        -FilePath (Join-Path $PSHOME "powershell.exe") `
+        -ArgumentList $vibeArguments `
+        -NoNewWindow `
+        -PassThru `
+        -RedirectStandardOutput $script:OperationState.OutputPath `
+        -RedirectStandardError $script:OperationState.ErrorPath
+    $script:OperationState.VibeProcessPid = $vibeProcess.Id
+    Write-OperationState -State $script:OperationState -Path $script:OperationStatePath
+    $vibeProcess.WaitForExit()
+    $vibeProcess.Refresh()
+    $vibeExitCode = [int]$vibeProcess.ExitCode
+    $vibeOutput = @(Get-Content -LiteralPath $script:OperationState.OutputPath -ErrorAction SilentlyContinue)
+    $vibeErrors = @(Get-Content -LiteralPath $script:OperationState.ErrorPath -ErrorAction SilentlyContinue)
+    $vibeOutput | ForEach-Object { Write-Host $_ }
+    $vibeErrors | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+}
+finally {
+    if ($temporaryVibeScript -and (Test-Path -LiteralPath $temporaryVibeScript)) {
+        Remove-Item -LiteralPath $temporaryVibeScript -Force
+    }
+}
+if ($vibeExitCode -ne 0) {
+    Stop-Lifecycle -Code 39 -Message "VibeUE build-and-launch script failed with exit code $vibeExitCode."
+}
 
 $pidLines = @($vibeOutput | ForEach-Object { $_.ToString() } | Where-Object { $_ -match '^Editor-PID=(\d+)$' })
 if ($pidLines.Count -ne 1) {
     Stop-Lifecycle -Code 40 -Message "Could not parse exactly one Editor-PID from VibeUE output."
 }
 $newPid = [int]([regex]::Match($pidLines[0], '^Editor-PID=(\d+)$').Groups[1].Value)
+$script:OperationState.NewEditorPid = $newPid
+Set-OperationPhase -Phase "WaitingReadiness"
 $ready = Wait-VibeReadySignal -Root $resolvedRoot -EditorPid $newPid -TimeoutSec $ReadyTimeoutSec
+Set-OperationPhase -Phase "CheckingMcp"
 $mcp = Test-McpEndpoint -Uri $McpUri -TimeoutSec $McpTimeoutSec
 $healthy = ($ready.Valid -and $mcp.Ready)
 
@@ -301,6 +613,7 @@ $healthy = ($ready.Valid -and $mcp.Ready)
     NewEditorPid = $newPid
     ArchivedLogs = $archivePath
     BuildOptions = [ordered]@{
+        EngineRoot = $resolvedEngineRoot
         StrictRebuild = [bool]$StrictRebuild
         Clean = [bool]$Clean
         SkipBuild = [bool]$SkipBuild
@@ -313,4 +626,8 @@ $healthy = ($ready.Valid -and $mcp.Ready)
 if (-not $healthy) {
     Stop-Lifecycle -Code 44 -Message "The new Editor signaled readiness, but MCP initialization did not succeed."
 }
+$script:OperationState.TemporaryVibeScript = $null
+Set-OperationPhase -Phase "Healthy"
+$lifecycleMutex.ReleaseMutex()
+$lifecycleMutex.Dispose()
 exit 0

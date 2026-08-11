@@ -1,7 +1,9 @@
 #include "WebToUECompiler.h"
+#include "WebToUEPerformance.h"
 
 #include "Algo/Sort.h"
 #include "Internationalization/Regex.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "String/LexFromString.h"
 #include <yoga/Yoga.h>
 #include <initializer_list>
@@ -1248,6 +1250,9 @@ namespace WebToUE::Private
 	static YGSize MeasureYogaNode(YGNodeConstRef Node, float Width, YGMeasureMode WidthMode,
 		float Height, YGMeasureMode HeightMode)
 	{
+		SCOPE_CYCLE_COUNTER(STAT_WebToUE_Measure);
+		TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Measure);
+		FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Measure);
 		const FYogaMeasureContext* Context = static_cast<const FYogaMeasureContext*>(YGNodeGetContext(Node));
 		if (!Context || !Context->WebNode || !Context->MeasureNode) return { 0.0f, 0.0f };
 		const FWebToUELayoutEngine::FMeasureConstraints Constraints = {
@@ -1411,6 +1416,9 @@ bool FWebToUEStyleResolver::Matches(const FWebToUEStyleRule& Rule, const FWebToU
 
 void FWebToUEStyleResolver::Resolve(FWebToUEDocument& Document)
 {
+	SCOPE_CYCLE_COUNTER(STAT_WebToUE_Style);
+	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Style);
+	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Style);
 	if (Document.Root)
 	{
 		WebToUE::Private::ResolveNode(*Document.Root, Document, nullptr);
@@ -1419,6 +1427,9 @@ void FWebToUEStyleResolver::Resolve(FWebToUEDocument& Document)
 
 void FWebToUELayoutEngine::Layout(FWebToUEDocument& Document, const FVector2f& ViewportSize, const FMeasureNode& MeasureNode)
 {
+	SCOPE_CYCLE_COUNTER(STAT_WebToUE_Layout);
+	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Layout);
+	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Layout);
 	if (!Document.Root) return;
 	TArray<TUniquePtr<WebToUE::Private::FYogaMeasureContext>> MeasureContexts;
 	YGNodeRef Root = WebToUE::Private::BuildYogaTree(*Document.Root, MeasureNode, MeasureContexts);

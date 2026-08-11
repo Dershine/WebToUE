@@ -1,0 +1,111 @@
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "SWebToUEView.h"
+#include "WebToUEDocument.h"
+#include "WebToUEPerformance.h"
+
+#include "Input/HittestGrid.h"
+#include "Misc/AutomationTest.h"
+#include "Rendering/DrawElements.h"
+#include "Types/PaintArgs.h"
+#include "UObject/Package.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPerformanceInstrumentationTest,
+	"WebToUE.Runtime.PerformanceInstrumentation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+namespace WebToUE::Performance::Tests
+{
+	static void AddAttribute(FWebToUECompiledNode& Node, const TCHAR* Name, const TCHAR* Value)
+	{
+		FWebToUECompiledAttribute& Attribute = Node.Attributes.AddDefaulted_GetRef();
+		Attribute.Name = Name;
+		Attribute.Value = Value;
+	}
+
+	static UWebToUEDocument* MakeDocument()
+	{
+		UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
+		Document->LocalizationNamespace = TEXT("Measured Label");
+
+		FWebToUECompiledNode& Body = Document->CompiledNodes.AddDefaulted_GetRef();
+		Body.Type = static_cast<uint8>(EWebToUENodeType::Element);
+		Body.Tag = TEXT("body");
+
+		FWebToUECompiledNode& Button = Document->CompiledNodes.AddDefaulted_GetRef();
+		Button.Type = static_cast<uint8>(EWebToUENodeType::Element);
+		Button.Tag = TEXT("button");
+		Button.ParentIndex = 0;
+		AddAttribute(Button, TEXT("id"), TEXT("performance-target"));
+		AddAttribute(Button, TEXT("data-ue-bind-text"), TEXT("LocalizationNamespace"));
+		AddAttribute(Button, TEXT("data-ue-on-click"), TEXT("MeasuredClick"));
+
+		FWebToUECompiledNode& Text = Document->CompiledNodes.AddDefaulted_GetRef();
+		Text.Type = static_cast<uint8>(EWebToUENodeType::Text);
+		Text.Tag = TEXT("#text");
+		Text.Text = TEXT("Initial Label");
+		Text.LocalizedText = FText::FromString(Text.Text);
+		Text.ParentIndex = 1;
+
+		FWebToUECompiledRule& Rule = Document->CompiledRules.AddDefaulted_GetRef();
+		Rule.Specificity = 1;
+		FWebToUECompiledSelectorSegment& Selector = Rule.Selector.AddDefaulted_GetRef();
+		Selector.Type = TEXT("button");
+		FWebToUECompiledDeclaration& Width = Rule.Declarations.AddDefaulted_GetRef();
+		Width.Name = TEXT("width");
+		Width.Value = TEXT("120px");
+		FWebToUECompiledDeclaration& Height = Rule.Declarations.AddDefaulted_GetRef();
+		Height.Name = TEXT("height");
+		Height.Value = TEXT("40px");
+
+		Document->RootNodeIndex = 0;
+		return Document;
+	}
+}
+
+bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::Performance::Tests;
+
+	UWebToUEDocument* Document = MakeDocument();
+	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
+
+	FWebToUEPerformanceSnapshot Snapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->SetDocument(Document);
+		View->RefreshBindings(Document);
+		View->LayoutForTesting(FVector2f(320.0f, 180.0f));
+
+		FHittestGrid HittestGrid;
+		FSlateWindowElementList DrawElements(nullptr);
+		const FGeometry Geometry = FGeometry::MakeRoot(FVector2D(320.0, 180.0), FSlateLayoutTransform());
+		const FPaintArgs PaintArgs(&View.Get(), HittestGrid, FVector2D::ZeroVector, 0.0, 0.0f);
+		View->OnPaint(PaintArgs, Geometry, FSlateRect(0.0f, 0.0f, 320.0f, 180.0f), DrawElements,
+			0, FWidgetStyle(), true);
+		TestNotNull(TEXT("The instrumented document remains hittable"),
+			View->HitTestForTesting(FVector2f(10.0f, 10.0f)));
+
+		Snapshot = Capture.GetSnapshot();
+		AddInfo(Snapshot.ToLogString());
+	}
+
+	for (int32 Index = 0; Index < FWebToUEPerformanceSnapshot::PhaseCount; ++Index)
+	{
+		const EWebToUEPerformancePhase Phase = static_cast<EWebToUEPerformancePhase>(Index);
+		TestTrue(*FString::Printf(TEXT("%s records at least one call"), LexToString(Phase)),
+			Snapshot.Get(Phase).CallCount > 0);
+	}
+
+	FWebToUEPerformanceCapture EmptyCapture;
+	const FWebToUEPerformanceSnapshot EmptySnapshot = EmptyCapture.GetSnapshot();
+	for (int32 Index = 0; Index < FWebToUEPerformanceSnapshot::PhaseCount; ++Index)
+	{
+		const EWebToUEPerformancePhase Phase = static_cast<EWebToUEPerformancePhase>(Index);
+		TestEqual(*FString::Printf(TEXT("A new capture isolates %s"), LexToString(Phase)),
+			EmptySnapshot.Get(Phase).CallCount, uint64(0));
+	}
+	return true;
+}
+
+#endif

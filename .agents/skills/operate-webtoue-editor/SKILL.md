@@ -17,6 +17,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\.agents\skills\operate-web
 
 Read the JSON result. Trust an Editor process only when its PID matches a valid readiness file under `Saved/VibeUE/Signals`. Do not close an unrelated or ambiguous Editor process.
 
+`Status` also returns the latest operation record from `Saved/VibeUE/Lifecycle/operation.json`. If it names a live owner, VibeUE, or Editor PID, observe that operation; never start a second lifecycle command.
+
 ## Choose the workflow
 
 - For an Editor-only inspection or asset task, keep the current Editor open and use MCP.
@@ -36,22 +38,35 @@ Read the JSON result. Trust an Editor process only when its PID matches a valid 
 
 ## Rebuild and relaunch
 
+UBT, Turnkey, UBA, Zen, and the Editor write outside the repository. In Codex, run the lifecycle command through a narrowly scoped unsandboxed approval for this script; do not disable sandboxing globally and do not invoke arbitrary PowerShell with broad approval. The Editor must be launched from the same unsandboxed boundary so its child processes inherit usable permissions.
+
+Before stopping a healthy Editor, run the exact write-access preflight:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\.agents\skills\operate-webtoue-editor\scripts\Invoke-WebToUEEditorLifecycle.ps1 -Action Preflight -EngineRoot D:\UE\UE_5.8
+```
+
+All probes must report `Writable: true`. The safe build command repeats this preflight before it archives logs or requests Editor shutdown.
+
 After MCP has stopped PIE and saved the intended work, run:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\.agents\skills\operate-webtoue-editor\scripts\Invoke-WebToUEEditorLifecycle.ps1 -Action SafeBuildAndLaunch -AssetsSaved
 ```
 
+If the vendored VibeUE script cannot discover a nonstandard engine install, pass a verified root such as `-EngineRoot D:\UE\UE_5.8`. The wrapper injects it into an ephemeral same-directory copy so the third-party script remains unchanged, then removes the copy in `finally`.
+
 The script performs these guarded steps:
 
-1. Require exactly one running Unreal Editor at most.
-2. Require the running PID to have a valid readiness signal belonging to this project.
-3. Require `-AssetsSaved` when an Editor is running.
-4. Archive `Saved/Logs` under `Saved/VibeUE/LifecycleArchives/<UTC timestamp>/Logs`.
-5. Request a normal window close and wait at most 60 seconds.
-6. Stop before VibeUE if the process remains alive; never reach its force-kill fallback.
-7. Invoke `Plugins/VibeUE/BuildAndLaunchGame.ps1` for the supported build and launch path.
-8. Parse the new `Editor-PID`, wait on filesystem events for its readiness file, validate PID/session time, then make one MCP initialization request.
+1. Resolve and validate the engine install.
+2. Probe all required project, engine, and user-local write locations before Editor shutdown.
+3. Acquire a project-scoped mutex and reject a duplicate operation or surviving owner/VibeUE/Editor PID.
+4. Persist the operation id, phase, PIDs, output paths, and terminal status under `Saved/VibeUE/Lifecycle`.
+5. Require exactly one running Unreal Editor at most and prove its readiness belongs to this project.
+6. Require `-AssetsSaved` when an Editor is running.
+7. Archive `Saved/Logs`, request a normal window close, and stop if it does not exit within 60 seconds.
+8. Invoke `Plugins/VibeUE/BuildAndLaunchGame.ps1` in an isolated child PowerShell process and capture its output without modifying the vendored file.
+9. Parse the new `Editor-PID`, wait on filesystem events for its readiness file, validate PID/session time, then make one MCP initialization request.
 
 Pass optional build switches only when the request calls for them:
 
@@ -60,6 +75,8 @@ Pass optional build switches only when the request calls for them:
 - `-SkipBuild`: relaunch without compiling.
 
 Do not run VibeUE's build script directly while an Editor is open; it force-terminates processes after its own timeout.
+
+Builds are long-running. If the command yields an execution cell, call `wait` on that same cell until it completes. Do not impose a short shell timeout and do not rerun the lifecycle command because output is temporarily quiet. A second invocation is a diagnostic error, not a continuation mechanism.
 
 ## Verify the new session
 
@@ -78,6 +95,8 @@ Read [references/verification.md](references/verification.md) when running the f
 
 - Stop when more than one Editor process exists or the project/PID cannot be proven.
 - Stop when a save or modal dialog prevents graceful shutdown.
+- Stop when any preflight probe is not writable; the healthy Editor must remain open in this case.
+- Stop when the operation mutex or persisted state identifies a live lifecycle PID; observe the existing operation instead of retrying.
 - Stop when the new Editor exits, readiness exceeds 180 seconds, the signal is stale/invalid, or MCP initialization fails.
 - Retry an unchanged failing operation at most twice, then report the evidence and blocker.
 - Keep the Editor open at handoff unless the user explicitly asks to close it.

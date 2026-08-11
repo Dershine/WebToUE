@@ -241,3 +241,8 @@ When asked to rebuild / relaunch / test, use the project script — not manual `
 ## Project gotchas
 
 - In UE 5.8's interactive Editor, `Automation RunTests <filter>` can remain queued without starting the controller. Use `AutomationTestToolset.DiscoverTests` followed by `RunTests` or `RunTestsByFilter`; after a selective run, `ListTests(nameFilter="VibeUE")` may report zero while `RunTestsByFilter("StartsWith:VibeUE")` still discovers and executes the suite correctly.
+- Invoke VibeUE's `BuildAndLaunchGame.ps1` in a child PowerShell process from strict-mode lifecycle wrappers; otherwise its single-`.uproject` discovery returns one `FileInfo` and `$found.Count` fails under inherited `Set-StrictMode` before the build starts.
+- For a nonstandard engine install such as `D:\UE\UE_5.8`, pass `-EngineRoot` to the project lifecycle wrapper; it validates the root and injects it only into a cleaned-up temporary copy of the vendored VibeUE script.
+- UE 5.8 UBT and Turnkey write `%LOCALAPPDATA%\UnrealBuildTool`; run lifecycle build/launch outside a workspace-only sandbox, or they can finish work and then throw `UnauthorizedAccessException` while rotating `Trace*.uba`, leaving Editor startup without readiness.
+- Before closing a healthy Editor, require the lifecycle wrapper's engine/project/user-local write preflight to pass inside the same narrowly approved unsandboxed boundary that will launch UBT and Editor.
+- A yielded or quiet lifecycle command is still the same operation: wait on its existing execution cell or inspect `Saved/VibeUE/Lifecycle/operation.json`; never rerun it to obtain output.

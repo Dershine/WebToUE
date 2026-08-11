@@ -2,6 +2,7 @@
 
 #include "WebToUECompiler.h"
 #include "WebToUEDocument.h"
+#include "WebToUEPerformance.h"
 #include "WebToUESettings.h"
 #include "WebToUEView.h"
 
@@ -14,6 +15,7 @@
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
 #include "Layout/Clipping.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Rendering/DrawElements.h"
 #include "Rendering/SlateRenderer.h"
 #include "Styling/SlateTypes.h"
@@ -35,6 +37,9 @@ void SWebToUEView::Construct(const FArguments& InArgs)
 
 void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 {
+	SCOPE_CYCLE_COUNTER(STAT_WebToUE_Hydrate);
+	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Hydrate);
+	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Hydrate);
 	DocumentAsset = InDocument;
 	RuntimeDocument.Reset();
 	TextLayouts.Reset();
@@ -264,6 +269,9 @@ int32 SWebToUEView::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeo
 	const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
 	int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
 {
+	SCOPE_CYCLE_COUNTER(STAT_WebToUE_PaintBuild);
+	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_PaintBuild);
+	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::PaintBuild);
 	if (!RuntimeDocument || !RuntimeDocument->Root)
 	{
 		return LayerId;
@@ -441,6 +449,9 @@ static bool ReadPropertyAsBool(UObject* Context, const FString& Field, bool& Out
 
 void SWebToUEView::RefreshBindings(UObject* DataContext)
 {
+	SCOPE_CYCLE_COUNTER(STAT_WebToUE_Binding);
+	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Binding);
+	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Binding);
 	if (!RuntimeDocument || !DataContext) return;
 	RuntimeDocument->ForEachNode([this, DataContext](FWebToUENode& Node)
 	{
@@ -518,6 +529,9 @@ void SWebToUEView::ReportBindingErrorOnce(const FString& Field, const FString& M
 
 FWebToUENode* SWebToUEView::HitTest(const FVector2f& LocalPosition) const
 {
+	SCOPE_CYCLE_COUNTER(STAT_WebToUE_HitTest);
+	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_HitTest);
+	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::HitTest);
 	FWebToUENode* Best = nullptr;
 	if (!RuntimeDocument || !RuntimeDocument->Root) return nullptr;
 

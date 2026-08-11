@@ -10,7 +10,7 @@
 >
 > 当前里程碑：M2——增量原生运行时
 >
-> 最近核验：2026-08-11，基于 Git `26745212e962` 的 working tree
+> 最近核验：2026-08-11，基于 Git `342c04a916df` + working tree
 >
 > 统一术语：[CONTEXT.md](../../../CONTEXT.md)
 
@@ -79,10 +79,10 @@
 | 插件版本 | `0.1.0-preview` |
 | Engine | UE 5.8 |
 | SupportedTargetPlatforms | Win64 |
-| 自动化测试 | 12 / 12 通过（2026-08-11，working tree） |
+| 自动化测试 | 13 / 13 通过（2026-08-11，working tree） |
 | 当前编译验证 | UE 5.8 Win64 Editor Development 通过（2026-08-11，working tree） |
 | 历史发布验证 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 均曾通过；发布前必须在当前提交重新执行 |
-| Git 基线 | `26745212e962` 基础上的 working tree；未提交，不生成伪哈希 |
+| Git 基线 | `342c04a916df` + working tree；未提交，不生成伪哈希 |
 | 当前发布级别 | Developer Preview / 技术可行性与基础能力阶段 |
 
 ### 2.3 宏观里程碑
@@ -255,7 +255,9 @@ Cooked 游戏保留 Compiled Nodes、Rules、Root、纹理/String Table 引用�
 
 这只能证明当前插件代码的固定文件成本很小，不代表 Shipping 包体、运行时内存、GPU 成本或 Gameface 性能对等。
 
-M2 已建立三档确定性 Benchmark Corpus：100 节点/50 规则、500 节点/200 规则和 2,000 节点/500 规则。Automation Test 会验证源码生成确定性、编译无错误、运行节点/规则精确计数以及固定 Binding/Hover 目标。该证据只证明测试输入稳定可重复；尚未采集 Hydrate、Style、Measure、Layout、Paint Build、Hit Test、Binding 的计时、分配或 P50/P95 数据。
+M2 已建立三档确定性 Benchmark Corpus：100 节点/50 规则、500 节点/200 规则和 2,000 节点/500 规则。Automation Test 会验证源码生成确定性、编译无错误、运行节点/规则精确计数以及固定 Binding/Hover 目标。Runtime 现已在真实调用边界记录 Hydrate、Style、Measure、Layout、Paint Build、Hit Test、Binding 七阶段的 UE cycle stat、Insights trace scope 和线程局部 Automation capture；专项测试会执行真实 Hydrate/Binding/Yoga Measure/Layout/Slate Paint/Hit Test，并验证七阶段均被捕获及嵌套 capture 隔离。
+
+同一 Editor Development 环境中，插桩前固定 Corpus 10 样本为 median `0.600095 s`、P95 `0.605533 s`；插桩后 10 样本为 median `0.611922 s`、P95 `0.619202 s`，分别变化 `+1.97%` 与 `+2.26%`，低于本次实施使用的临时 `+5% / +10%` 回归守门。该数据只说明本次插桩没有造成明显 Corpus 回归，不是第 7.2 节的永久性能预算，也未提供节点/规则/文本/Brush/分配数量或阶段 P50/P95。
 
 有利特征：
 
@@ -301,10 +303,11 @@ M2 已建立三档确定性 Benchmark Corpus：100 节点/50 规则、500 节点
 | R-03 | 编译数据与 Runtime State 混合在节点结构 | High | `FWebToUENode` 字段已确认 | 拆分 IR/Instance/Cache 生命周期 | ⬜ M2 |
 | R-04 | 状态变化路径可能同步加载纹理 | High | Brush 重建使用 `LoadObject` | 编译依赖 + Resource Cache + 异步策略 | ⬜ M2 |
 | R-05 | Compiler/View 职责集中，修改回归面扩大 | High | 两个核心实现文件体量和职责已确认 | 按编译阶段和 Runtime 服务拆分 | ⬜ M2 |
-| R-06 | 没有完整可重复性能基准，无法证明“原生且高效” | Critical | 固定 Corpus 已建立；阶段计时、统计和预算门禁仍缺失 | Benchmark、Stat、Trace、预算门禁 | 🚧 M2 |
+| R-06 | 没有完整可重复性能基准，无法证明“原生且高效” | Critical | 固定 Corpus 与七阶段计时/capture 已建立；计数、分配、阶段分位数和永久预算门禁仍缺失 | Benchmark、Stat、Trace、预算门禁 | 🚧 M2 |
 | R-07 | CSS 声明使用 Map，重复声明顺序不完全等价 | Medium | 当前声明模型已确认 | Ordered Declaration IR | ⬜ M2 |
 | R-08 | 仅 Win64，平台假设尚未暴露 | Medium | `.uplugin` 平台限制 | 平台抽象审计与构建矩阵 | ⬜ M6 |
 | R-09 | MCP 为 Experimental、本地服务无认证，通用 Python 执行面权限较高 | Medium | UE 5.8 原生 MCP 与 VibeUE 5.0 已在开发环境验证 | 仅回环、本地受信任、Editor-only；项目专用工具仍默认关闭并遵守最小权限 | ⬜ M5 |
+| R-10 | workspace-only sandbox 可使 UBT/Turnkey 在关闭 Editor 后因用户目录不可写而失败，并诱发重复启动 | High | 复现 `UnauthorizedAccessException`；受限 Preflight 失败且未启动 Editor，精确非沙箱流程 build/readiness/MCP 通过 | 关 Editor 前写探针、项目互斥锁、持久 Operation State、单一 Skill 路由；见 [ADR-0001](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md) | ✅ Mitigated |
 
 风险关闭必须链接对应测试、基准或代码变更，不能只把状态改成“已解决”。
 
@@ -402,10 +405,10 @@ M2 已建立三档确定性 Benchmark Corpus：100 节点/50 规则、500 节点
 
 M2 是当前唯一活跃里程碑。工作包按依赖顺序推进；原则上不在 M2.0～M2.4 完成前扩张大型 CSS、组件或动画能力。
 
-### M2.0——性能可观测性 🚧 1 / 6
+### M2.0——性能可观测性 🚧 2 / 6
 
 - [x] 固定 100/500/2,000 节点文档生成器与 50/200/500 规则集。
-- [ ] 分别统计 Hydrate、Style、Measure、Layout、Paint Build、Hit Test、Binding。
+- [x] 分别统计 Hydrate、Style、Measure、Layout、Paint Build、Hit Test、Binding。
 - [ ] 记录节点、规则、匹配、Yoga、文本布局、Brush 和分配数量。
 - [ ] Unreal Insights/CSV/Automation 可消费的输出。
 - [ ] 固定测试机、构建配置、采样次数和 P50/P95 规则。
@@ -466,7 +469,7 @@ M2 是当前唯一活跃里程碑。工作包按依赖顺序推进；原则上�
 
 ### M2.7——退出检查 ⬜ 0 / 6
 
-- [ ] 11 项现有测试及新增 M2 测试全部通过。
+- [ ] 当前 13 项测试及后续新增 M2 测试全部通过。
 - [ ] Editor/Game Development/Shipping 编译通过。
 - [ ] Cook、IoStore 和 BuildPlugin 通过。
 - [ ] 第 7.2 节性能预算通过。
@@ -488,7 +491,9 @@ M2 是当前唯一活跃里程碑。工作包按依赖顺序推进；原则上�
 
 UE 5.8 的 Unreal MCP 仍是 Experimental。WebToUE 可以利用它改善编辑器开发体验，但不得让实验协议污染 Runtime 架构。
 
-当前开发环境已启用 UE 原生 `ModelContextProtocol`、`AllToolsets` 和 Editor-only 的 VibeUE 5.0。VibeUE 以固定提交 `24ac69d750c1c558a1b78ed5b60644ce000198d3` vendored 到 `Plugins/VibeUE`，版本与归档校验记录在项目根 `Plugins/VibeUE.version.json`；它与原生工具共用 `http://127.0.0.1:8000/mcp`。2026-08-11 已验证 VibeUE Win64 BuildPlugin、WebToUEEditor Development 构建、85 个 Agent Skills、83 个 Toolsets、Python API 发现/执行、PerformanceService，以及通过原生 AutomationTestToolset 运行的 12 / 12 WebToUE 测试和 17 / 17 VibeUE 测试。
+当前开发环境已启用 UE 原生 `ModelContextProtocol`、`AllToolsets` 和 Editor-only 的 VibeUE 5.0。VibeUE 以固定提交 `24ac69d750c1c558a1b78ed5b60644ce000198d3` vendored 到 `Plugins/VibeUE`，版本与归档校验记录在项目根 `Plugins/VibeUE.version.json`；它与原生工具共用 `http://127.0.0.1:8000/mcp`。2026-08-11 已验证 VibeUE Win64 BuildPlugin、WebToUEEditor Development 构建、85 个 Agent Skills、83 个 Toolsets、Python API 发现/执行、PerformanceService，以及通过原生 AutomationTestToolset 运行的 13 / 13 WebToUE 测试和 17 / 17 VibeUE 测试。
+
+Editor 生命周期统一路由到 `$operate-webtoue-editor` 及项目包装器。UBT、Turnkey 和 Editor 必须由同一精确批准的非沙箱边界启动；包装器在关闭健康 Editor 前验证 Engine/项目/LocalAppData 写权限，并用项目互斥锁与 `Saved/VibeUE/Lifecycle/operation.json` 阻止重复操作。长期决策和被否决方案见 [ADR-0001：Editor 生命周期执行边界](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md)。
 
 VibeUE 只作为受信任开发机上的通用 Editor Automation Surface，用于日志、截图、PIE、性能采样和通用资产操作。它暴露的任意 Python 执行能力不构成 WebToUE 产品接口，也不改变下述领域化 `WebToUEMCP` 规划；后者仍必须围绕 Compiled UI IR、Diagnostics、Computed Style、Source Map 和 Benchmark 提供收敛后的受控能力。
 
@@ -515,13 +520,15 @@ M2 期间先建立与传输协议无关的 Compiler、Diagnostics、Inspection�
 
 ## 12. 测试与发布门禁
 
-### 12.1 当前自动化测试（12 / 12）
+### 12.1 当前自动化测试（13 / 13）
 
 | 层 | 测试 |
 | --- | --- |
 | Core | `HtmlCss`、`FlexLayout`、`ConstrainedMeasure`、`RichTextCompile`、`ScrollLayout`、`CssDiagnostics` |
-| Runtime | `AssetVersion`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction` |
+| Runtime | `AssetVersion`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`PerformanceInstrumentation` |
 | Editor | `BenchmarkScenarios`、`LocalizationImport` |
+
+Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Preflight、探针失败不创建操作、持久存活 PID 识别与精确中断残留清理。它不计入 UE Automation 的 13 项。
 
 ### 12.2 仍需建立
 
@@ -544,6 +551,8 @@ M2 期间先建立与传输协议无关的 Compiler、Diagnostics、Inspection�
 
 | 日期 | 基线 | 变化 | 路线影响 |
 | --- | --- | --- | --- |
+| 2026-08-11 | `342c04a` + working tree | 建立 Editor 生命周期精确非沙箱执行边界、关 Editor 前 Preflight、项目互斥锁、持久 Operation State、3 / 3 Pester 与 ADR-0001；真实 UE build/readiness/MCP/Python/World 通过。 | R-10 降为 Mitigated；长期开发不再因观察超时或 sandbox 权限失败重复启动 UBT。 |
+| 2026-08-11 | `342c04a` + working tree | 为 Hydrate/Style/Measure/Layout/Paint Build/Hit Test/Binding 增加 Stats、Trace 与 Automation capture，新增 Runtime 集成测试；13 / 13 WebToUE 测试通过，固定 Corpus 前后 median/P95 为 `0.600095/0.605533 s` 与 `0.611922/0.619202 s`。 | M2.0 达到 2/6；R-06 保持 Critical，继续建设计数、阶段分位数和永久预算门禁。 |
 | 2026-08-11 | `2674521` + working tree | 接入固定版本的 Editor-only VibeUE 5.0，验证原生 MCP 共享端点、Agent Skills、PerformanceService、Win64 BuildPlugin、项目级 Editor 构建、12 / 12 WebToUE 测试及 17 / 17 VibeUE 测试。 | 提前获得 M2 性能调查与通用 Editor 调试能力；不替代 M5 的领域化最小权限 `WebToUEMCP`。 |
 | 2026-08-11 | `2674521` + working tree | 建立 Editor-only 的确定性 100/500/2,000 节点 Benchmark Corpus、50/200/500 规则集及专项 Automation Test。 | M2.0 达到 1/6；R-06 仍为 Critical，等待阶段计时与预算门禁。 |
 | 2026-08-11 | `2674521` + working tree | 将一次性技术总结重构为长期工程事实、风险、宏观/微观路线和验收进度文档；建立统一术语。 | M0/M1 固化为完成，M2 成为唯一活跃里程碑。 |
