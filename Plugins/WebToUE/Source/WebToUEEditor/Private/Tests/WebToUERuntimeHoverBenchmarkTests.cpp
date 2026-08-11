@@ -264,12 +264,15 @@ bool FWebToUERuntimeHoverBenchmarkTest::RunTest(const FString& Parameters)
 	AddTelemetryData(TEXT("runtime.hover_update.p95_ms"), InclusiveDistribution.P95, SummaryContext);
 	AddTelemetryData(TEXT("runtime.hover_update.target_p95_ms"),
 		FWebToUEBenchmarkBudgetPolicy::MediumSingleNodeHoverP95Milliseconds, SummaryContext);
+	AddTelemetryData(TEXT("runtime.hover_update.target_enforced"),
+		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumSingleNodeHoverBudget ? 1.0 : 0.0, SummaryContext);
 	AddTelemetryData(TEXT("runtime.hover_update.target_met"), bMeetsTarget ? 1.0 : 0.0, SummaryContext);
 	AddInfo(FString::Printf(
-		TEXT("Runtime hover: p50_ms=%.6f,p95_ms=%.6f,min_ms=%.6f,max_ms=%.6f,target_p95_ms=%.6f,target_met=%s"),
+		TEXT("Runtime hover: p50_ms=%.6f,p95_ms=%.6f,min_ms=%.6f,max_ms=%.6f,target_p95_ms=%.6f,target_enforced=%s,target_met=%s"),
 		InclusiveDistribution.P50, InclusiveDistribution.P95, InclusiveDistribution.Minimum,
 		InclusiveDistribution.Maximum,
 		FWebToUEBenchmarkBudgetPolicy::MediumSingleNodeHoverP95Milliseconds,
+		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumSingleNodeHoverBudget ? TEXT("true") : TEXT("false"),
 		bMeetsTarget ? TEXT("true") : TEXT("false")));
 
 	for (int32 PhaseIndex = 0; PhaseIndex < FWebToUEPerformanceSnapshot::PhaseCount; ++PhaseIndex)
@@ -488,12 +491,15 @@ bool FWebToUERuntimeFieldNotifyBenchmarkTest::RunTest(const FString& Parameters)
 	AddTelemetryData(TEXT("runtime.field_notify_update.p95_ms"), InclusiveDistribution.P95, SummaryContext);
 	AddTelemetryData(TEXT("runtime.field_notify_update.target_p95_ms"),
 		FWebToUEBenchmarkBudgetPolicy::MediumSingleFieldNotifyP95Milliseconds, SummaryContext);
+	AddTelemetryData(TEXT("runtime.field_notify_update.target_enforced"),
+		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumSingleFieldNotifyBudget ? 1.0 : 0.0, SummaryContext);
 	AddTelemetryData(TEXT("runtime.field_notify_update.target_met"), bMeetsTarget ? 1.0 : 0.0, SummaryContext);
 	AddInfo(FString::Printf(
-		TEXT("Runtime FieldNotify: p50_ms=%.6f,p95_ms=%.6f,min_ms=%.6f,max_ms=%.6f,target_p95_ms=%.6f,target_met=%s"),
+		TEXT("Runtime FieldNotify: p50_ms=%.6f,p95_ms=%.6f,min_ms=%.6f,max_ms=%.6f,target_p95_ms=%.6f,target_enforced=%s,target_met=%s"),
 		InclusiveDistribution.P50, InclusiveDistribution.P95, InclusiveDistribution.Minimum,
 		InclusiveDistribution.Maximum,
 		FWebToUEBenchmarkBudgetPolicy::MediumSingleFieldNotifyP95Milliseconds,
+		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumSingleFieldNotifyBudget ? TEXT("true") : TEXT("false"),
 		bMeetsTarget ? TEXT("true") : TEXT("false")));
 
 	for (int32 PhaseIndex = 0; PhaseIndex < FWebToUEPerformanceSnapshot::PhaseCount; ++PhaseIndex)
@@ -686,6 +692,10 @@ bool FWebToUERuntimeWarmLayoutBenchmarkTest::RunTest(const FString& Parameters)
 		FWebToUEBenchmarkStatistics::TryCalculate(InclusiveSamples, InclusiveDistribution));
 	const bool bMeetsTarget = InclusiveDistribution.P95 <
 		FWebToUEBenchmarkBudgetPolicy::MediumWarmFullLayoutP95Milliseconds;
+	if (FWebToUEBenchmarkBudgetPolicy::bEnforceMediumWarmFullLayoutBudget)
+	{
+		TestTrue(TEXT("The runtime warm full-layout P95 stays below the enforced budget"), bMeetsTarget);
+	}
 	const FString SummaryContext = MakeRuntimeTelemetryContext(Environment,
 		Scenario.Definition, TEXT("runtime_warm_layout_summary"));
 	AddTelemetryData(TEXT("benchmark.schema_version"), FWebToUEBenchmarkSamplingPolicy::SchemaVersion,
@@ -703,12 +713,15 @@ bool FWebToUERuntimeWarmLayoutBenchmarkTest::RunTest(const FString& Parameters)
 	AddTelemetryData(TEXT("runtime.warm_full_layout.p95_ms"), InclusiveDistribution.P95, SummaryContext);
 	AddTelemetryData(TEXT("runtime.warm_full_layout.target_p95_ms"),
 		FWebToUEBenchmarkBudgetPolicy::MediumWarmFullLayoutP95Milliseconds, SummaryContext);
+	AddTelemetryData(TEXT("runtime.warm_full_layout.target_enforced"),
+		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumWarmFullLayoutBudget ? 1.0 : 0.0, SummaryContext);
 	AddTelemetryData(TEXT("runtime.warm_full_layout.target_met"), bMeetsTarget ? 1.0 : 0.0, SummaryContext);
 	AddInfo(FString::Printf(
-		TEXT("Runtime warm full layout: p50_ms=%.6f,p95_ms=%.6f,min_ms=%.6f,max_ms=%.6f,target_p95_ms=%.6f,target_met=%s"),
+		TEXT("Runtime warm full layout: p50_ms=%.6f,p95_ms=%.6f,min_ms=%.6f,max_ms=%.6f,target_p95_ms=%.6f,target_enforced=%s,target_met=%s"),
 		InclusiveDistribution.P50, InclusiveDistribution.P95, InclusiveDistribution.Minimum,
 		InclusiveDistribution.Maximum,
 		FWebToUEBenchmarkBudgetPolicy::MediumWarmFullLayoutP95Milliseconds,
+		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumWarmFullLayoutBudget ? TEXT("true") : TEXT("false"),
 		bMeetsTarget ? TEXT("true") : TEXT("false")));
 
 	for (int32 PhaseIndex = 0; PhaseIndex < FWebToUEPerformanceSnapshot::PhaseCount; ++PhaseIndex)
@@ -988,14 +1001,17 @@ bool FWebToUERuntimeUnchangedPaintBenchmarkTest::RunTest(const FString& Paramete
 		static_cast<double>(
 			FWebToUEBenchmarkBudgetPolicy::MediumUnchangedPaintMaximumTrackedAllocationPayloadBytes),
 		SummaryContext);
+	AddTelemetryData(TEXT("runtime.unchanged_paint.target_enforced"),
+		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumUnchangedPaintBudget ? 1.0 : 0.0, SummaryContext);
 	AddTelemetryData(TEXT("runtime.unchanged_paint.target_met"), bMeetsTarget ? 1.0 : 0.0, SummaryContext);
 	AddInfo(FString::Printf(
-		TEXT("Runtime unchanged paint: p50_ms=%.6f,p95_ms=%.6f,min_ms=%.6f,max_ms=%.6f,tick_enabled=%s,maximum_tracked_allocations=%llu,payload_events=%llu,payload_bytes=%llu,target_maximum_tracked_allocations=%llu,target_maximum_payload_bytes=%llu,target_met=%s"),
+		TEXT("Runtime unchanged paint: p50_ms=%.6f,p95_ms=%.6f,min_ms=%.6f,max_ms=%.6f,tick_enabled=%s,maximum_tracked_allocations=%llu,payload_events=%llu,payload_bytes=%llu,target_maximum_tracked_allocations=%llu,target_maximum_payload_bytes=%llu,target_enforced=%s,target_met=%s"),
 		InclusiveDistribution.P50, InclusiveDistribution.P95, InclusiveDistribution.Minimum,
 		InclusiveDistribution.Maximum, bCanTick ? TEXT("true") : TEXT("false"), MaximumTrackedAllocations,
 		MaximumTrackedAllocationPayloadEvents, MaximumTrackedAllocationPayloadBytes,
 		FWebToUEBenchmarkBudgetPolicy::MediumUnchangedPaintMaximumTrackedAllocations,
 		FWebToUEBenchmarkBudgetPolicy::MediumUnchangedPaintMaximumTrackedAllocationPayloadBytes,
+		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumUnchangedPaintBudget ? TEXT("true") : TEXT("false"),
 		bMeetsTarget ? TEXT("true") : TEXT("false")));
 
 	for (int32 PhaseIndex = 0; PhaseIndex < FWebToUEPerformanceSnapshot::PhaseCount; ++PhaseIndex)
