@@ -10,12 +10,15 @@
 #include "Fonts/FontMeasure.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Text/PlainTextLayoutMarshaller.h"
+#include "Framework/Text/RichTextLayoutMarshaller.h"
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
 #include "Layout/Clipping.h"
 #include "Rendering/DrawElements.h"
 #include "Rendering/SlateRenderer.h"
 #include "Styling/SlateTypes.h"
+#include "Styling/CoreStyle.h"
+#include "Styling/SlateStyle.h"
 #include "UObject/StrongObjectPtr.h"
 #include "UObject/UnrealType.h"
 #include "Widgets/Text/SlateTextBlockLayout.h"
@@ -47,6 +50,9 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 			Node->Type = static_cast<EWebToUENodeType>(Source.Type);
 			Node->Tag = Source.Tag;
 			Node->Text = Source.Text;
+			Node->LocalizedText = Source.LocalizedText;
+			Node->bHasLocalizedText = Node->Type == EWebToUENodeType::Text;
+			Node->bRichText = Source.bRichText;
 			for (const FWebToUECompiledAttribute& Attribute : Source.Attributes) Node->Attributes.Add(Attribute.Name, Attribute.Value);
 			Nodes.Add(MoveTemp(Node));
 		}
@@ -104,23 +110,63 @@ static FTextBlockStyle MakeTextBlockStyle(const FWebToUENode& Node)
 	return Style;
 }
 
+static TSharedRef<FSlateStyleSet> MakeRichTextStyleSet(const FWebToUENode& Node)
+{
+	TSharedRef<FSlateStyleSet> StyleSet = MakeShared<FSlateStyleSet>(TEXT("WebToUERichText"));
+	const FTextBlockStyle BaseStyle = MakeTextBlockStyle(Node);
+	const UWebToUESettings* Settings = GetDefault<UWebToUESettings>();
+	const auto AddStyle = [&](const FName Name, bool bBold, bool bItalic, bool bUnderline)
+	{
+		FTextBlockStyle Style = BaseStyle;
+		if (bBold || bItalic)
+		{
+			Style.SetFont(Settings->ResolveFont(Node.Style.FontFamily, Node.Style.FontSize,
+				bBold ? TEXT("bold") : Node.Style.FontWeight));
+			if (bItalic) Style.SetTypefaceFontName(bBold ? TEXT("BoldItalic") : TEXT("Italic"));
+		}
+		if (bUnderline) Style.SetUnderlineBrush(*FCoreStyle::Get().GetBrush(TEXT("DefaultTextUnderline")));
+		StyleSet->Set(Name, Style);
+	};
+	AddStyle(TEXT("strong"), true, false, false);
+	AddStyle(TEXT("em"), false, true, false);
+	AddStyle(TEXT("underline"), false, false, true);
+	AddStyle(TEXT("strong_em"), true, true, false);
+	AddStyle(TEXT("strong_underline"), true, false, true);
+	AddStyle(TEXT("em_underline"), false, true, true);
+	AddStyle(TEXT("strong_em_underline"), true, true, true);
+	return StyleSet;
+}
+
+FText SWebToUEView::GetDisplayText(const FWebToUENode& Node) const
+{
+	return Node.bHasLocalizedText ? Node.LocalizedText : FText::FromString(Node.Text);
+}
+
 FSlateTextBlockLayout& SWebToUEView::PrepareTextLayout(const FWebToUENode& Node, float WrapWidth) const
 {
-	TUniquePtr<FSlateTextBlockLayout>& Layout = TextLayouts.FindOrAdd(&Node);
-	if (!Layout)
+	TUniquePtr<FWebToUETextLayoutCache>& Cache = TextLayouts.FindOrAdd(&Node);
+	if (!Cache || Cache->bRichText != Node.bRichText)
 	{
-		Layout = MakeUnique<FSlateTextBlockLayout>(const_cast<SWebToUEView*>(this), FTextBlockStyle::GetDefault(),
+		Cache = MakeUnique<FWebToUETextLayoutCache>();
+		Cache->bRichText = Node.bRichText;
+		TSharedRef<ITextLayoutMarshaller> Marshaller = FPlainTextLayoutMarshaller::Create();
+		if (Node.bRichText)
+		{
+			Cache->RichTextStyleSet = MakeRichTextStyleSet(Node);
+			Marshaller = FRichTextLayoutMarshaller::Create(TArray<TSharedRef<ITextDecorator>>(), Cache->RichTextStyleSet.Get());
+		}
+		Cache->Layout = MakeUnique<FSlateTextBlockLayout>(const_cast<SWebToUEView*>(this), FTextBlockStyle::GetDefault(),
 			TOptional<ETextShapingMethod>(), TOptional<ETextFlowDirection>(), FCreateSlateTextLayout(),
-			FPlainTextLayoutMarshaller::Create(), nullptr);
+			Marshaller, nullptr);
 	}
 	const float EffectiveWrapWidth = Node.Style.WhiteSpace == TEXT("normal") && FMath::IsFinite(WrapWidth) && WrapWidth > 0.0f
 		? WrapWidth : 0.0f;
 	const FSlateTextBlockLayout::FWidgetDesiredSizeArgs DesiredSizeArgs(
-		FText::FromString(Node.Text), FText::GetEmpty(), EffectiveWrapWidth, false,
+		GetDisplayText(Node), FText::GetEmpty(), EffectiveWrapWidth, false,
 		ETextWrappingPolicy::DefaultWrapping, ETextTransformPolicy::None, FMargin(), 1.0f, true,
 		ToTextJustification(Node.Style.TextAlign));
-	Layout->ComputeDesiredSize(DesiredSizeArgs, 1.0f, MakeTextBlockStyle(Node));
-	return *Layout;
+	Cache->Layout->ComputeDesiredSize(DesiredSizeArgs, 1.0f, MakeTextBlockStyle(Node));
+	return *Cache->Layout;
 }
 
 FVector2f SWebToUEView::MeasureNode(const FWebToUENode& Node,
@@ -164,6 +210,25 @@ FVector2f SWebToUEView::MeasureTextForTesting(const FString& Text, float Width, 
 	Constraints.Width = Width;
 	Constraints.WidthMode = FWebToUELayoutEngine::EMeasureMode::AtMost;
 	return MeasureNode(Node, Constraints);
+}
+
+FVector2f SWebToUEView::MeasureRichTextForTesting(const FString& Markup, float Width, bool bWrap) const
+{
+	FWebToUENode Node;
+	Node.Type = EWebToUENodeType::Text;
+	Node.Tag = TEXT("#text");
+	Node.Text = Markup;
+	Node.bRichText = true;
+	Node.Style.WhiteSpace = bWrap ? TEXT("normal") : TEXT("nowrap");
+	FWebToUELayoutEngine::FMeasureConstraints Constraints;
+	Constraints.Width = Width;
+	Constraints.WidthMode = FWebToUELayoutEngine::EMeasureMode::AtMost;
+	return MeasureNode(Node, Constraints);
+}
+
+FText SWebToUEView::GetDisplayTextForTesting(const FWebToUENode& Node) const
+{
+	return GetDisplayText(Node);
 }
 
 void SWebToUEView::SetRuntimeDocumentForTesting(TSharedRef<FWebToUEDocument> InDocument)
@@ -327,6 +392,7 @@ void SWebToUEView::RebuildBrushes() const
 
 void SWebToUEView::RebuildStylesAndBrushes()
 {
+	TextLayouts.Reset();
 	if (RuntimeDocument)
 	{
 		FWebToUEStyleResolver::Resolve(*RuntimeDocument);
@@ -336,27 +402,29 @@ void SWebToUEView::RebuildStylesAndBrushes()
 	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 }
 
-static bool ReadPropertyAsText(UObject* Context, const FString& Field, FString& Out)
+static bool ReadPropertyAsText(UObject* Context, const FString& Field, FText& Out)
 {
 	if (!Context) return false;
 	FProperty* Property = FindFProperty<FProperty>(Context->GetClass(), FName(*Field));
 	if (!Property) return false;
 	if (const FTextProperty* TextProperty = CastField<FTextProperty>(Property))
 	{
-		Out = TextProperty->GetPropertyValue_InContainer(Context).ToString();
+		Out = TextProperty->GetPropertyValue_InContainer(Context);
 		return true;
 	}
 	if (const FStrProperty* StringProperty = CastField<FStrProperty>(Property))
 	{
-		Out = StringProperty->GetPropertyValue_InContainer(Context);
+		Out = FText::FromString(StringProperty->GetPropertyValue_InContainer(Context));
 		return true;
 	}
 	if (const FNameProperty* NameProperty = CastField<FNameProperty>(Property))
 	{
-		Out = NameProperty->GetPropertyValue_InContainer(Context).ToString();
+		Out = FText::FromName(NameProperty->GetPropertyValue_InContainer(Context));
 		return true;
 	}
-	Property->ExportText_InContainer(0, Out, Context, Context, Context, PPF_None);
+	FString ExportedValue;
+	Property->ExportText_InContainer(0, ExportedValue, Context, Context, Context, PPF_None);
+	Out = FText::FromString(MoveTemp(ExportedValue));
 	return true;
 }
 
@@ -380,7 +448,7 @@ void SWebToUEView::RefreshBindings(UObject* DataContext)
 		const FString TextField = Node.GetAttribute(TEXT("data-ue-bind-text"));
 		if (!TextField.IsEmpty())
 		{
-			FString Value;
+			FText Value;
 			if (ReadPropertyAsText(DataContext, TextField, Value))
 			{
 				TSharedPtr<FWebToUENode> TextNode;
@@ -399,7 +467,10 @@ void SWebToUEView::RefreshBindings(UObject* DataContext)
 					TextNode->Parent = &Node;
 					Node.Children.Insert(TextNode, 0);
 				}
-				TextNode->Text = MoveTemp(Value);
+				TextNode->Text = Value.ToString();
+				TextNode->LocalizedText = MoveTemp(Value);
+				TextNode->bHasLocalizedText = true;
+				TextNode->bRichText = Node.GetAttribute(TEXT("data-ue-rich-text")).Equals(TEXT("true"), ESearchCase::IgnoreCase);
 			}
 			else ReportBindingErrorOnce(TextField, TEXT("Text binding property was not found."));
 		}

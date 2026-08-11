@@ -89,6 +89,55 @@ bool FWebToUEConstrainedMeasureTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUERichTextCompileTest, "WebToUE.Core.RichTextCompile",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FWebToUERichTextCompileTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body><p id='message'>Press <strong>Start</strong> or <em>go back</em>.<br><u>Choose wisely.</u></p></body>"),
+		FString(), TEXT("RichText.html"));
+	FWebToUENode* Paragraph = nullptr;
+	Document->ForEachNode([&Paragraph](FWebToUENode& Node)
+	{
+		if (Node.GetAttribute(TEXT("id")) == TEXT("message")) Paragraph = &Node;
+	});
+	TestNotNull(TEXT("Rich paragraph exists"), Paragraph);
+	if (Paragraph)
+	{
+		TestEqual(TEXT("Inline content collapses into one Yoga text leaf"), Paragraph->Children.Num(), 1);
+		if (Paragraph->Children.Num() == 1)
+		{
+			const FWebToUENode& TextNode = *Paragraph->Children[0];
+			TestTrue(TEXT("Collapsed leaf uses rich text layout"), TextNode.bRichText);
+			TestTrue(TEXT("Whitespace around inline runs is preserved"), TextNode.Text.StartsWith(TEXT("Press <strong>Start</> or <em>go back</>.")));
+			TestTrue(TEXT("Bold run is preserved"), TextNode.Text.Contains(TEXT("<strong>Start</>")));
+			TestTrue(TEXT("Italic run is preserved"), TextNode.Text.Contains(TEXT("<em>go back</>")));
+			TestTrue(TEXT("Line breaks are preserved"), TextNode.Text.Contains(TEXT("\n")));
+			TestTrue(TEXT("Underline run is preserved"), TextNode.Text.Contains(TEXT("<underline>Choose wisely.</>")));
+		}
+	}
+
+	const TSharedRef<FWebToUEDocument> InvalidStringTable = FWebToUECompiler::Compile(
+		TEXT("<body><p data-ue-string-table='/Game/UI/ST_UI.ST_UI'>Missing key</p></body>"), FString(), TEXT("Invalid.html"));
+	TestTrue(TEXT("Incomplete String Table identity is a compile error"), InvalidStringTable->HasErrors());
+
+	const TSharedRef<FWebToUEDocument> LineBreakDocument = FWebToUECompiler::Compile(
+		TEXT("<body><p id='lines'>First<br>Second</p></body>"), FString(), TEXT("LineBreak.html"));
+	FWebToUENode* Lines = nullptr;
+	LineBreakDocument->ForEachNode([&Lines](FWebToUENode& Node)
+	{
+		if (Node.GetAttribute(TEXT("id")) == TEXT("lines")) Lines = &Node;
+	});
+	TestNotNull(TEXT("Line-break-only rich text exists"), Lines);
+	if (Lines && Lines->Children.Num() == 1)
+	{
+		TestTrue(TEXT("br alone enables the rich text leaf"), Lines->Children[0]->bRichText);
+		TestEqual(TEXT("br compiles to one hard line break"), Lines->Children[0]->Text, TEXT("First\nSecond"));
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEScrollLayoutTest, "WebToUE.Core.ScrollLayout",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 

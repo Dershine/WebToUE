@@ -135,6 +135,11 @@ struct WEBTOUECORE_API FWebToUENode : public TSharedFromThis<FWebToUENode>
 	EWebToUENodeType Type = EWebToUENodeType::Element;
 	FString Tag;
 	FString Text;
+	FText LocalizedText;
+	bool bHasLocalizedText = false;
+	bool bRichText = false;
+	bool bTextHadLeadingWhitespace = false;
+	bool bTextHadTrailingWhitespace = false;
 	TMap<FString, FString> Attributes;
 	TArray<TSharedPtr<FWebToUENode>> Children;
 	FWebToUENode* Parent = nullptr;

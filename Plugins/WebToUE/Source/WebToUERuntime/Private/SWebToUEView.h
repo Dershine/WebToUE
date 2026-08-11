@@ -6,8 +6,16 @@
 #include "WebToUECompiler.h"
 
 struct FSlateBrush;
+class FSlateStyleSet;
 class UWebToUEDocument;
 class UWebToUEView;
+
+struct FWebToUETextLayoutCache
+{
+	TSharedPtr<FSlateStyleSet> RichTextStyleSet;
+	TUniquePtr<FSlateTextBlockLayout> Layout;
+	bool bRichText = false;
+};
 
 class SWebToUEView final : public SLeafWidget
 {
@@ -38,6 +46,8 @@ public:
 
 #if WITH_DEV_AUTOMATION_TESTS
 	FVector2f MeasureTextForTesting(const FString& Text, float Width, bool bWrap) const;
+	FVector2f MeasureRichTextForTesting(const FString& Markup, float Width, bool bWrap) const;
+	FText GetDisplayTextForTesting(const FWebToUENode& Node) const;
 	void SetRuntimeDocumentForTesting(TSharedRef<FWebToUEDocument> InDocument);
 	void LayoutForTesting(const FVector2f& ViewportSize) const;
 	FWebToUENode* HitTestForTesting(const FVector2f& LocalPosition) const { return HitTest(LocalPosition); }
@@ -52,7 +62,7 @@ private:
 	mutable FVector2f LastViewportSize = FVector2f(-1.0f, -1.0f);
 	mutable bool bLayoutDirty = true;
 	mutable TMap<const FWebToUENode*, TSharedPtr<FSlateBrush>> Brushes;
-	mutable TMap<const FWebToUENode*, TUniquePtr<FSlateTextBlockLayout>> TextLayouts;
+	mutable TMap<const FWebToUENode*, TUniquePtr<FWebToUETextLayoutCache>> TextLayouts;
 	mutable TArray<TStrongObjectPtr<UObject>> LoadedResources;
 	TSet<FString> LoggedBindingErrors;
 	FWebToUENode* HoveredNode = nullptr;
@@ -62,6 +72,7 @@ private:
 	void RebuildStylesAndBrushes();
 	void RebuildBrushes() const;
 	FVector2f MeasureNode(const FWebToUENode& Node, const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
+	FText GetDisplayText(const FWebToUENode& Node) const;
 	FSlateTextBlockLayout& PrepareTextLayout(const FWebToUENode& Node, float WrapWidth) const;
 	int32 PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, const FGeometry& Geometry,
 		const FSlateRect& CullingRect, FSlateWindowElementList& Out, int32 LayerId,

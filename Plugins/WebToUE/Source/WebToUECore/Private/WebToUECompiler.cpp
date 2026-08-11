@@ -10,7 +10,8 @@ namespace WebToUE::Private
 {
 	static const TSet<FString> KnownTags = {
 		TEXT("html"), TEXT("head"), TEXT("body"), TEXT("style"), TEXT("link"),
-		TEXT("div"), TEXT("span"), TEXT("p"), TEXT("img"), TEXT("button")
+		TEXT("div"), TEXT("span"), TEXT("p"), TEXT("img"), TEXT("button"),
+		TEXT("strong"), TEXT("b"), TEXT("em"), TEXT("i"), TEXT("u"), TEXT("br")
 	};
 
 	static bool IsKnownCssProperty(const FString& Name);
@@ -232,7 +233,7 @@ namespace WebToUE::Private
 			TSharedPtr<FWebToUENode> Node = MakeShared<FWebToUENode>();
 			Node->Tag = Tag;
 			Node->Parent = Stack.Last().Get();
-			bool bSelfClosing = Tag == TEXT("img") || Tag == TEXT("link");
+			bool bSelfClosing = Tag == TEXT("img") || Tag == TEXT("link") || Tag == TEXT("br");
 			while (!AtEnd() && Peek() != TEXT('>'))
 			{
 				SkipWhitespace();
@@ -280,6 +281,25 @@ namespace WebToUE::Private
 			{
 				Advance();
 			}
+			const bool bHasStringTable = !Node->GetAttribute(TEXT("data-ue-string-table")).IsEmpty();
+			const bool bHasStringKey = !Node->GetAttribute(TEXT("data-ue-string-key")).IsEmpty();
+			if (bHasStringTable != bHasStringKey)
+			{
+				AddDiagnostic(EWebToUEDiagnosticSeverity::Error, TagLine, TagColumn,
+					TEXT("data-ue-string-table and data-ue-string-key must be specified together."));
+			}
+			if (bHasStringTable && !Node->GetAttribute(TEXT("data-ue-loc-key")).IsEmpty())
+			{
+				AddDiagnostic(EWebToUEDiagnosticSeverity::Error, TagLine, TagColumn,
+					TEXT("String Table text cannot also declare data-ue-loc-key."));
+			}
+			const FString RichTextValue = Node->GetAttribute(TEXT("data-ue-rich-text"));
+			if (!RichTextValue.IsEmpty() && !RichTextValue.Equals(TEXT("true"), ESearchCase::IgnoreCase) &&
+				!RichTextValue.Equals(TEXT("false"), ESearchCase::IgnoreCase))
+			{
+				AddDiagnostic(EWebToUEDiagnosticSeverity::Error, TagLine, TagColumn,
+					TEXT("data-ue-rich-text must be true or false."));
+			}
 
 			Stack.Last()->Children.Add(Node);
 			if (!KnownTags.Contains(Tag))
@@ -320,8 +340,23 @@ namespace WebToUE::Private
 				return;
 			}
 			Text = DecodeEntities(Text);
+			const bool bHadLeadingWhitespace = !Text.IsEmpty() && FChar::IsWhitespace(Text[0]);
+			const bool bHadTrailingWhitespace = !Text.IsEmpty() && FChar::IsWhitespace(Text[Text.Len() - 1]);
 			Text.TrimStartAndEndInline();
-			if (Text.IsEmpty() || Stack.Last()->Tag == TEXT("head"))
+			if (Text.IsEmpty())
+			{
+				if (bHadLeadingWhitespace && !Stack.Last()->Children.IsEmpty())
+				{
+					TSharedPtr<FWebToUENode> LastNode = Stack.Last()->Children.Last();
+					while (LastNode && LastNode->Type == EWebToUENodeType::Element && !LastNode->Children.IsEmpty())
+					{
+						LastNode = LastNode->Children.Last();
+					}
+					if (LastNode && LastNode->Type == EWebToUENodeType::Text) LastNode->bTextHadTrailingWhitespace = true;
+				}
+				return;
+			}
+			if (Stack.Last()->Tag == TEXT("head"))
 			{
 				return;
 			}
@@ -329,6 +364,8 @@ namespace WebToUE::Private
 			TextNode->Type = EWebToUENodeType::Text;
 			TextNode->Tag = TEXT("#text");
 			TextNode->Text = MoveTemp(Text);
+			TextNode->bTextHadLeadingWhitespace = bHadLeadingWhitespace;
+			TextNode->bTextHadTrailingWhitespace = bHadTrailingWhitespace;
 			TextNode->Parent = Stack.Last().Get();
 			Stack.Last()->Children.Add(TextNode);
 		}
@@ -338,6 +375,120 @@ namespace WebToUE::Private
 			Document.Diagnostics.Add({ Severity, SourceName, InLine, InColumn, MoveTemp(Message) });
 		}
 	};
+
+	static bool IsSupportedInlineTag(const FString& Tag)
+	{
+		return Tag == TEXT("strong") || Tag == TEXT("b") || Tag == TEXT("em") || Tag == TEXT("i") ||
+			Tag == TEXT("u") || Tag == TEXT("br") || Tag == TEXT("span");
+	}
+
+	static bool HasOnlyInlineContent(const FWebToUENode& Node, bool& bOutHasFormatting)
+	{
+		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
+		{
+			if (Child->Type == EWebToUENodeType::Text) continue;
+			if (!IsSupportedInlineTag(Child->Tag)) return false;
+			if (Child->Tag != TEXT("span")) bOutHasFormatting = true;
+			if (Child->Tag == TEXT("br")) continue;
+			if (!HasOnlyInlineContent(*Child, bOutHasFormatting)) return false;
+		}
+		return true;
+	}
+
+	static FString EscapeRichText(FString Text)
+	{
+		Text.ReplaceInline(TEXT("&"), TEXT("&amp;"));
+		Text.ReplaceInline(TEXT("<"), TEXT("&lt;"));
+		Text.ReplaceInline(TEXT(">"), TEXT("&gt;"));
+		return Text;
+	}
+
+	struct FRichTextFlags
+	{
+		bool bBold = false;
+		bool bItalic = false;
+		bool bUnderline = false;
+	};
+
+	struct FRichTextBuildContext
+	{
+		FString Markup;
+		bool bHasContent = false;
+		bool bPendingWhitespace = false;
+		bool bAfterHardBreak = false;
+	};
+
+	static FString RichTextStyleName(const FRichTextFlags& Flags)
+	{
+		if (Flags.bBold && Flags.bItalic && Flags.bUnderline) return TEXT("strong_em_underline");
+		if (Flags.bBold && Flags.bItalic) return TEXT("strong_em");
+		if (Flags.bBold && Flags.bUnderline) return TEXT("strong_underline");
+		if (Flags.bItalic && Flags.bUnderline) return TEXT("em_underline");
+		if (Flags.bBold) return TEXT("strong");
+		if (Flags.bItalic) return TEXT("em");
+		if (Flags.bUnderline) return TEXT("underline");
+		return FString();
+	}
+
+	static void AppendRichText(const FWebToUENode& Node, FRichTextFlags Flags, FRichTextBuildContext& Context)
+	{
+		if (Node.Type == EWebToUENodeType::Text)
+		{
+			if (Node.bTextHadLeadingWhitespace && Context.bHasContent && !Context.bAfterHardBreak)
+			{
+				Context.bPendingWhitespace = true;
+			}
+			const FString EscapedText = EscapeRichText(Node.Text);
+			if (EscapedText.IsEmpty()) return;
+			if (Context.bPendingWhitespace)
+			{
+				Context.Markup += TEXT(" ");
+				Context.bPendingWhitespace = false;
+			}
+			const FString StyleName = RichTextStyleName(Flags);
+			Context.Markup += StyleName.IsEmpty() ? EscapedText : FString::Printf(TEXT("<%s>%s</>"), *StyleName, *EscapedText);
+			Context.bHasContent = true;
+			Context.bAfterHardBreak = false;
+			Context.bPendingWhitespace = Node.bTextHadTrailingWhitespace;
+			return;
+		}
+		if (Node.Tag == TEXT("br"))
+		{
+			Context.bPendingWhitespace = false;
+			Context.Markup += TEXT("\n");
+			Context.bHasContent = true;
+			Context.bAfterHardBreak = true;
+			return;
+		}
+		Flags.bBold |= Node.Tag == TEXT("strong") || Node.Tag == TEXT("b");
+		Flags.bItalic |= Node.Tag == TEXT("em") || Node.Tag == TEXT("i");
+		Flags.bUnderline |= Node.Tag == TEXT("u");
+		for (const TSharedPtr<FWebToUENode>& Child : Node.Children) AppendRichText(*Child, Flags, Context);
+	}
+
+	static void CollapseRichText(FWebToUENode& Node)
+	{
+		if (Node.Type != EWebToUENodeType::Element || Node.Children.IsEmpty()) return;
+
+		bool bHasFormatting = false;
+		const bool bInlineContent = HasOnlyInlineContent(Node, bHasFormatting);
+		const bool bExplicitRichText = Node.GetAttribute(TEXT("data-ue-rich-text")).Equals(TEXT("true"), ESearchCase::IgnoreCase);
+		if (bInlineContent && (bHasFormatting || bExplicitRichText))
+		{
+			FRichTextBuildContext Context;
+			for (const TSharedPtr<FWebToUENode>& Child : Node.Children) AppendRichText(*Child, FRichTextFlags(), Context);
+			TSharedPtr<FWebToUENode> TextNode = MakeShared<FWebToUENode>();
+			TextNode->Type = EWebToUENodeType::Text;
+			TextNode->Tag = TEXT("#text");
+			TextNode->Text = MoveTemp(Context.Markup);
+			TextNode->bRichText = true;
+			TextNode->Parent = &Node;
+			Node.Children.Reset();
+			Node.Children.Add(MoveTemp(TextNode));
+			return;
+		}
+		for (const TSharedPtr<FWebToUENode>& Child : Node.Children) CollapseRichText(*Child);
+	}
 
 	static void RemoveCssComments(FString& Css)
 	{
@@ -1224,6 +1375,7 @@ TSharedRef<FWebToUEDocument> FWebToUECompiler::Compile(const FString& Html,
 	TSharedRef<FWebToUEDocument> Document = MakeShared<FWebToUEDocument>();
 	TArray<FWebToUEStyleSheetSource> InlineStyleSheets;
 	FHtmlParser(Html, SourceName, *Document).Parse(InlineStyleSheets);
+	if (Document->Root) CollapseRichText(*Document->Root);
 	for (const FWebToUEStyleSheetSource& StyleSheet : ExternalStyleSheets)
 	{
 		ParseCss(StyleSheet, *Document);

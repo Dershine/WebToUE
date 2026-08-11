@@ -5,6 +5,7 @@
 #include "WebToUEDocument.generated.h"
 
 class UAssetImportData;
+class UStringTable;
 class UTexture2D;
 
 USTRUCT()
@@ -22,6 +23,14 @@ struct FWebToUECompiledNode
 	UPROPERTY() uint8 Type = 0;
 	UPROPERTY() FString Tag;
 	UPROPERTY() FString Text;
+	UPROPERTY() FText LocalizedText;
+	UPROPERTY() bool bRichText = false;
+	UPROPERTY() FString TextIdentity;
+	UPROPERTY() FString LocalizationNamespace;
+	UPROPERTY() FString LocalizationKey;
+	UPROPERTY() bool bAutoLocalizationKey = false;
+	UPROPERTY() FName StringTableId;
+	UPROPERTY() FString StringTableKey;
 	UPROPERTY() TArray<FWebToUECompiledAttribute> Attributes;
 	UPROPERTY() int32 ParentIndex = INDEX_NONE;
 };
@@ -91,6 +100,9 @@ class WEBTOUERUNTIME_API UWebToUEDocument : public UObject
 
 public:
 	UPROPERTY()
+	FString LocalizationNamespace;
+
+	UPROPERTY()
 	TArray<FWebToUECompiledNode> CompiledNodes;
 
 	UPROPERTY()
@@ -112,6 +124,9 @@ public:
 
 	UPROPERTY()
 	TArray<TSoftObjectPtr<UTexture2D>> ReferencedTextures;
+
+	UPROPERTY()
+	TArray<TSoftObjectPtr<UStringTable>> ReferencedStringTables;
 
 #if WITH_EDITORONLY_DATA
 	UPROPERTY(VisibleAnywhere, Instanced, Category="Import Settings")

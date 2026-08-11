@@ -19,6 +19,8 @@ bool FWebToUEAssetVersionTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("Assets without the custom version require recompilation"),
 		FWebToUEAssetVersion::RequiresRecompile(INDEX_NONE));
+	TestTrue(TEXT("Assets without localized rich text fields require recompilation"),
+		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::InitialCompiledDocument));
 	TestFalse(TEXT("Assets at the latest version do not require recompilation"),
 		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::LatestVersion));
 	return true;

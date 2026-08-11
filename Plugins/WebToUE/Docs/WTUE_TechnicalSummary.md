@@ -111,8 +111,9 @@ Editor 模块监听项目目录内的 `.html` 和 `.css` 变化，并使用 200m
 - 文档标签：`html`、`head`、`body`
 - 样式标签：`style`、`link`
 - UI 标签：`div`、`span`、`p`、`img`、`button`
+- 行内富文本标签：`strong` / `b`、`em` / `i`、`u`、`br`
 
-`img` 和 `link` 默认按自闭合标签处理。未知元素会保留属性和子节点，并作为通用 Flex 容器参与布局，同时生成警告。
+`img`、`link` 和 `br` 默认按自闭合标签处理。未知元素会保留属性和子节点，并作为通用 Flex 容器参与布局，同时生成警告。
 
 解析器支持：
 
@@ -122,7 +123,7 @@ Editor 模块监听项目目录内的 `.html` 和 `.css` 变化，并使用 200m
 - `&lt;`、`&gt;`、`&quot;`、`&apos;`、`&amp;` 和数值实体解码。
 - `<style>` 内联样式和元素 `style="..."` 声明。
 
-文本节点目前会裁掉首尾空白，不保留浏览器式空白折叠语义；`white-space: normal` 会在宽度约束下自动换行，`nowrap` 保持单行。
+文本节点目前会裁掉首尾空白，不保留浏览器式空白折叠语义；`white-space: normal` 会在宽度约束下自动换行，`nowrap` 保持单行。只包含文本和受支持行内标签的元素会编译为单个富文本叶节点，避免行内 run 被 Yoga 当作多个块布局。
 
 ### 5.2 CSS 选择器
 
@@ -203,6 +204,29 @@ Flex：
 
 `body` 默认占满视口；`button` 默认采用水平 Flex，并将内容居中。
 
+### 5.4 本地化身份与基础富文本
+
+每个导入后的文本叶节点都在 `CompiledNodes` 中保存真正的 `FText`：
+
+- Document 首次导入时生成持久的文档命名空间，后续重导入继续复用。
+- 没有显式 key 时生成一次自动 key，并通过文本作者路径在重导入时复用；带 `id` 的元素移动位置后仍使用 `#id/text[n]` 身份。
+- 对需要长期稳定、可跨结构调整的文本，推荐显式填写 `data-ue-loc-key`；可用 `data-ue-loc-namespace` 覆盖文档命名空间。
+- `data-ue-string-table` 与 `data-ue-string-key` 必须成对出现，编译结果使用 `FText::FromStringTable`，资产同时保存 String Table 软引用以参与 Cook。
+
+```html
+<p data-ue-loc-key="Menu.Start">Start Game</p>
+<p data-ue-loc-namespace="Dialog" data-ue-loc-key="Guide.Welcome">Welcome</p>
+<button
+  data-ue-string-table="/Game/UI/ST_UI.ST_UI"
+  data-ue-string-key="Common.Continue">
+  Continue
+</button>
+```
+
+String Table 模式下，元素内文本只是 HTML 作者提示，不是运行时缺失条目的 fallback；表和 key 应在 Unreal 中真实存在。自动 key 对常规内容编辑稳定，但没有 `id` 的节点在结构重排后作者路径可能变化，因此关键产品文案应使用显式 key。
+
+基础富文本会把 `strong` / `b`、`em` / `i`、`u` 和 `br` 编译成同一个 Slate 富文本布局中的 bold、italic、underline run 和换行。来自 DataContext 或 String Table 的动态富文本需要在元素上设置 `data-ue-rich-text="true"`，值中使用 Slate 闭合形式，例如 `Choose <strong>Start</> now`。当前不支持图片、超链接、自定义 decorator 或任意 CSS span run。
+
 ## 6. 布局系统
 
 `FWebToUELayoutEngine` 为运行时节点创建对应的 Yoga 节点树，将计算样式转换为 Yoga 属性，再把计算结果写回每个节点的 `Position`、`Size` 和 `PaintOrder`。
@@ -218,7 +242,7 @@ Flex：
 `SWebToUEView` 在 `OnPaint` 中手动递归绘制：
 
 - 元素背景和边框使用 `FSlateRoundedBoxBrush`。
-- 文本使用按节点缓存的 `FSlateTextBlockLayout`，测量和绘制共享同一套换行、shaping 与逐行对齐逻辑。
+- 文本使用按节点缓存的 `FSlateTextBlockLayout`；普通文本使用 PlainText marshaller，富文本使用受控样式集的 RichText marshaller，测量和绘制共享同一套换行、shaping 与逐行对齐逻辑。
 - 图片使用 Texture2D 对应的 Slate Brush。
 - `overflow: hidden` 通过 Slate clipping zone 实现。
 - `overflow: auto` 和 `overflow: scroll` 维护节点级滚动偏移，子树绘制位置会累计祖先滚动偏移，并沿用同一裁剪区域。
@@ -265,7 +289,7 @@ Hit Test 会累计祖先滚动偏移并与祖先裁剪矩形求交，再按布�
 
 | HTML 属性 | 目标属性要求 | 行为 |
 | --- | --- | --- |
-| `data-ue-bind-text="PlayerName"` | UPROPERTY；优先支持 FText、FString、FName，其他类型使用 ExportText | 更新元素的首个文本节点。 |
+| `data-ue-bind-text="PlayerName"` | UPROPERTY；优先支持 FText、FString、FName，其他类型使用 ExportText | 更新元素的首个文本节点；FText 的 namespace/key 或 String Table 历史保持不变。 |
 | `data-ue-bind-visible="bShowWarning"` | bool UPROPERTY | 控制运行时可见性。 |
 | `data-ue-bind-enabled="bCanStart"` | bool UPROPERTY | 控制可用状态和 `:disabled`。 |
 
@@ -298,6 +322,7 @@ Cooked 游戏只需要：
 - `CompiledRules`
 - `RootNodeIndex`
 - `ReferencedTextures`
+- `ReferencedStringTables`
 - `Diagnostics`
 - 运行时模块
 
@@ -352,7 +377,7 @@ CSS：
 5. 监听 `On UI Event`。
 6. 确保需要打包的 Document 被地图、资源或 AlwaysCook 目录引用。
 
-项目内已有 `WebUI/Examples/MainMenu.*`、`WebUI/Examples/HUD.*` 和对应的 `/Game/WebToUEExamples` 资产。
+项目内已有 `WebUI/Examples/MainMenu.*`、`WebUI/Examples/HUD.*`、`WebUI/Examples/ScrollableSettings.*` 和 `WebUI/Examples/LocalizedRichText.*` 源文件。
 
 ## 12. 测试与构建状态
 
@@ -361,11 +386,14 @@ CSS：
 - `WebToUE.Core.HtmlCss`：HTML、实体、ID/伪类级联和样式重算。
 - `WebToUE.Core.FlexLayout`：百分比宽度、水平 Flex 和 gap。
 - `WebToUE.Core.ConstrainedMeasure`：Yoga 叶节点测量约束与多行高度回传。
+- `WebToUE.Core.RichTextCompile`：行内标签合并、富文本 markup 和 String Table 属性诊断。
 - `WebToUE.Core.ScrollLayout`：滚动 CSS、内容范围计算和偏移钳制。
 - `WebToUE.Core.CssDiagnostics`：多来源样式表顺序、外链 CSS 文件/行/列、未知属性、非法值和内联样式诊断。
 - `WebToUE.Runtime.AssetVersion`：自定义版本注册和旧资产重编译判定。
 - `WebToUE.Runtime.TextWrapping`：Slate 文本在宽/窄约束及 `nowrap` 下的测量行为。
+- `WebToUE.Runtime.LocalizedRichText`：FText namespace/key、String Table 历史和 RichText marshaller 测量。
 - `WebToUE.Runtime.ScrollInteraction`：裁剪感知命中、滚轮滚动、可视位置和边界处理。
+- `WebToUE.Editor.LocalizationImport`：自动 key/文档命名空间跨重导入稳定、显式身份和 String Table 编译。
 
 第一版已经通过：
 
@@ -385,7 +413,8 @@ CSS：
 - Yoga 树在布局时重建，尚无持久节点或增量更新。
 - 图片画刷重建时会按软路径加载 Texture2D；未来应引入资源缓存和异步加载策略。
 - 文本布局缓存目前按运行时节点维护；伪类或字体样式频繁变化时仍会参与全量样式和布局刷新，需要后续做失效粒度与性能基准。
-- 文本节点仍存储为 `FString`，尚未接入稳定的 `FText`/String Table 本地化身份，也不支持行内富文本 run。
+- 文本节点同时保留 HTML 源字符串与编译后的 `FText`；自动 key 会按作者路径复用，但无 `id` 节点的结构重排仍可能改变路径，关键文案应显式指定 key。
+- 基础富文本只覆盖 bold、italic、underline 和换行；尚无 CSS span run、自定义 decorator、图片或超链接。
 - CSS 解析器是面向受控子集的自研实现，不应被当作完整、容错等价或安全隔离级别的浏览器解析器。
 - 当前插件描述只允许 Win64，其他平台尚未形成支持矩阵。
 - 编译资产已有初始自定义版本和已加载旧资产的自动重导入；它仍依赖源文件存在，成功后需要保存资产，且尚无全局未加载资产扫描或字段级迁移。
@@ -396,7 +425,7 @@ CSS：
 - 浏览器 DOM API、网络加载、Cookie、Storage。
 - 表单、输入框、文本编辑和 IME。
 - 可见滚动条、拖拽/触摸滚动、惯性滚动和虚拟列表。
-- 富文本、文本本地化资源身份和复杂排版。
+- 复杂富文本 decorator、行内图片/超链接和高级排版。
 - CSS Grid、浮动、table layout。
 - transition、keyframes、transform。
 - 阴影、渐变、滤镜、mask。
@@ -413,7 +442,7 @@ CSS：
 
 ### 阶段一：0.2，补齐可用的 UI 基础设施
 
-- 多行文本、自动换行、本地化和基础富文本（约束测量、Slate 自动换行和 `white-space` 已完成；本地化身份与富文本待补）。
+- 多行文本、自动换行、本地化和基础富文本（约束测量、Slate 自动换行、稳定 FText/String Table 身份和基础语义 run 已完成；复杂 decorator 待补）。
 - 滚动容器、裁剪修正、滚轮输入和简单列表（基础垂直滚轮滚动、嵌套边界传递和裁剪感知命中已完成；滚动条、拖拽、惯性与虚拟化待补）。
 - 触摸与手柄焦点导航、安全区和 DPI 适配。
 - 更完整的颜色、边框、背景图和常用 CSS 属性。
