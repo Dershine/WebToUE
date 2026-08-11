@@ -45,8 +45,21 @@ CMakeLists.txt
 *.pid
 *.trace
 
+# Shared MCP/agent configs are committed; ignore only local overrides and caches
+/.mcp.local.json
+/.codex/*.local.toml
+/.cursor/*.local.json
+/.gemini/*.local.json
+/.agents/**/.cache/
+**/__pycache__/
+*.py[cod]
+
+# Local environment values and secrets
+.env
+.env.*
+!.env.example
+
 # Operating-system metadata
 .DS_Store
 Thumbs.db
 Desktop.ini
-

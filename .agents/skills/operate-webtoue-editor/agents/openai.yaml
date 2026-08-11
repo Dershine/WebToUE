@@ -1,0 +1,15 @@
+interface:
+  display_name: "WebToUE UE Operator"
+  short_description: "Safely operate, rebuild, and verify the WebToUE editor"
+  default_prompt: "Use $operate-webtoue-editor to safely rebuild, relaunch, and verify the WebToUE Unreal Editor."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "unreal-mcp"
+      description: "UE 5.8 Model Context Protocol server with VibeUE toolsets"
+      transport: "streamable_http"
+      url: "http://127.0.0.1:8000/mcp"
+
+policy:
+  allow_implicit_invocation: true

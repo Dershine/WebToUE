@@ -304,7 +304,7 @@ M2 已建立三档确定性 Benchmark Corpus：100 节点/50 规则、500 节点
 | R-06 | 没有完整可重复性能基准，无法证明“原生且高效” | Critical | 固定 Corpus 已建立；阶段计时、统计和预算门禁仍缺失 | Benchmark、Stat、Trace、预算门禁 | 🚧 M2 |
 | R-07 | CSS 声明使用 Map，重复声明顺序不完全等价 | Medium | 当前声明模型已确认 | Ordered Declaration IR | ⬜ M2 |
 | R-08 | 仅 Win64，平台假设尚未暴露 | Medium | `.uplugin` 平台限制 | 平台抽象审计与构建矩阵 | ⬜ M6 |
-| R-09 | MCP 为 Experimental 且本地服务无认证 | Medium | UE 5.8 官方边界 | Editor-only、默认关闭、最小权限工具 | ⬜ M5 |
+| R-09 | MCP 为 Experimental、本地服务无认证，通用 Python 执行面权限较高 | Medium | UE 5.8 原生 MCP 与 VibeUE 5.0 已在开发环境验证 | 仅回环、本地受信任、Editor-only；项目专用工具仍默认关闭并遵守最小权限 | ⬜ M5 |
 
 风险关闭必须链接对应测试、基准或代码变更，不能只把状态改成“已解决”。
 
@@ -488,6 +488,10 @@ M2 是当前唯一活跃里程碑。工作包按依赖顺序推进；原则上�
 
 UE 5.8 的 Unreal MCP 仍是 Experimental。WebToUE 可以利用它改善编辑器开发体验，但不得让实验协议污染 Runtime 架构。
 
+当前开发环境已启用 UE 原生 `ModelContextProtocol`、`AllToolsets` 和 Editor-only 的 VibeUE 5.0。VibeUE 以固定提交 `24ac69d750c1c558a1b78ed5b60644ce000198d3` vendored 到 `Plugins/VibeUE`，版本与归档校验记录在项目根 `Plugins/VibeUE.version.json`；它与原生工具共用 `http://127.0.0.1:8000/mcp`。2026-08-11 已验证 VibeUE Win64 BuildPlugin、WebToUEEditor Development 构建、85 个 Agent Skills、83 个 Toolsets、Python API 发现/执行、PerformanceService，以及通过原生 AutomationTestToolset 运行的 12 / 12 WebToUE 测试和 17 / 17 VibeUE 测试。
+
+VibeUE 只作为受信任开发机上的通用 Editor Automation Surface，用于日志、截图、PIE、性能采样和通用资产操作。它暴露的任意 Python 执行能力不构成 WebToUE 产品接口，也不改变下述领域化 `WebToUEMCP` 规划；后者仍必须围绕 Compiled UI IR、Diagnostics、Computed Style、Source Map 和 Benchmark 提供收敛后的受控能力。
+
 建议未来新增独立、可选、默认关闭的 `WebToUEMCP` Editor 模块：
 
 ```text
@@ -540,6 +544,7 @@ M2 期间先建立与传输协议无关的 Compiler、Diagnostics、Inspection�
 
 | 日期 | 基线 | 变化 | 路线影响 |
 | --- | --- | --- | --- |
+| 2026-08-11 | `2674521` + working tree | 接入固定版本的 Editor-only VibeUE 5.0，验证原生 MCP 共享端点、Agent Skills、PerformanceService、Win64 BuildPlugin、项目级 Editor 构建、12 / 12 WebToUE 测试及 17 / 17 VibeUE 测试。 | 提前获得 M2 性能调查与通用 Editor 调试能力；不替代 M5 的领域化最小权限 `WebToUEMCP`。 |
 | 2026-08-11 | `2674521` + working tree | 建立 Editor-only 的确定性 100/500/2,000 节点 Benchmark Corpus、50/200/500 规则集及专项 Automation Test。 | M2.0 达到 1/6；R-06 仍为 Critical，等待阶段计时与预算门禁。 |
 | 2026-08-11 | `2674521` + working tree | 将一次性技术总结重构为长期工程事实、风险、宏观/微观路线和验收进度文档；建立统一术语。 | M0/M1 固化为完成，M2 成为唯一活跃里程碑。 |
 | 2026-08-11 | `2674521` | 稳定 FText/String Table 身份与基础富文本。 | 完成 M1 本地化与文本语义。 |
