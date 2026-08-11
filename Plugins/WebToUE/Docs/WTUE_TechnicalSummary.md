@@ -1,495 +1,658 @@
-# WebToUE（WTUE）技术总结
+# WebToUE 工程技术总览与路线图
 
-## 1. 文档信息
+> 文档性质：长期维护的工程事实源（Living Engineering Document）
+>
+> 插件版本：`0.1.0-preview`
+>
+> 引擎基线：Unreal Engine 5.8
+>
+> 当前平台：Win64
+>
+> 当前里程碑：M2——增量原生运行时
+>
+> 最近核验：2026-08-11，基于 Git `26745212e962` 的 working tree
+>
+> 统一术语：[CONTEXT.md](../../../CONTEXT.md)
 
-- 插件版本：`0.1.0-preview`
-- 文档对应引擎：Unreal Engine 5.8
-- 当前目标平台：Win64
-- 项目状态：Developer Preview / 技术可行性第一版
-- 核心目标：使用 HTML/CSS 作为 UI 创作格式，在不嵌入浏览器内核的前提下，通过 Unreal Engine 自身的 Slate、UMG、UObject、资源系统和输入系统还原界面。
+本文同时回答四个问题：项目现在是什么、已经做到什么、为什么这样设计、下一步如何验收。它是工程状态和路线的入口，不是完整 Web 标准兼容承诺，也不替代源码、自动化测试或独立 ADR。
 
-本文描述的是当前源码已经实现的能力，而不是完整 Web 标准兼容承诺。
+---
 
-## 2. 项目定位
+## 1. 文档使用与维护规则
 
-WTUE 不是浏览器控件，也不是对 CEF、WebBrowser、JavaScriptCore 或其他 Web Runtime 的封装。HTML 和 CSS 在编辑器阶段被解析、校验并编译成 Unreal Asset；游戏运行时只读取编译后的节点和样式规则，再使用 Yoga 计算布局、Slate 绘制界面。
+### 1.1 信息分层
 
-它的直接价值是：
+本文按变化速度组织，维护时不要把不同生命周期的信息重新混在一起：
 
-- 允许前端开发者使用熟悉的 HTML/CSS 组织游戏 UI。
-- 保留 Unreal 的资源管理、输入、蓝图、UObject、Cook 和平台构建流程。
-- 避免浏览器内核带来的包体、内存、启动时间、安全面和跨平台维护成本。
-- 将前端文件定位为一种“UI 源语言”，而不是在游戏中运行网页。
+1. **工程宪法**：项目定位、非目标、不可轻易改变的架构约束。
+2. **当前快照**：版本、能力、测试、性能事实和风险，必须能由代码或构建结果核验。
+3. **路线图**：宏观里程碑、活跃里程碑的微观工作包及退出条件。
+4. **附录**：精确的 HTML/CSS/绑定支持矩阵和变更记录。
 
-当前版本优先验证主菜单、HUD 等屏幕空间 UI。它不是完整 DOM，也暂不尝试像素级复刻现代浏览器。
+### 1.2 状态标记
 
-## 3. 总体架构
+| 标记 | 含义 |
+| --- | --- |
+| ✅ 已验证 | 已实现，并有自动化测试、构建结果或可重复证据。 |
+| 🟡 已实现未度量 | 功能存在，但缺少性能、压力或跨平台证据。 |
+| 🚧 进行中 | 已开始，尚未满足退出条件。 |
+| ⬜ 已规划 | 已进入路线，但尚未开始。 |
+| ⛔ 非目标 | 明确不进入当前产品边界。 |
+
+路线进度使用“已通过验收项 / 总验收项”，不是工时百分比。每个验收项等权，只表示完成颗粒度，不表示剩余工作量。除非验收项明确另有约定，只有同时满足以下条件才可勾选：
+
+- 功能代码合入。
+- 对应自动化测试通过。
+- 本文的当前能力、风险和路线状态已同步。
+- 性能敏感功能有基准或确认没有破坏既定预算。
+
+### 1.3 必须更新本文的事件
+
+- 支持或移除 HTML 标签、CSS 属性、选择器、绑定或输入能力。
+- 修改 Compiled UI IR、资产自定义版本或 Cook 边界。
+- 改变样式、布局、绘制、命中或绑定的失效策略。
+- 新增 Runtime 或 Editor 模块、第三方依赖、平台或引擎版本。
+- 完成里程碑验收项、发现高风险问题或改变性能预算。
+- 作出难以逆转且存在真实权衡的架构决定；此时还应新增 ADR，并从本文链接。
+
+---
+
+## 2. 一页工程仪表盘
+
+### 2.1 当前判断
+
+| 维度 | 当前结论 | 证据状态 |
+| --- | --- | --- |
+| 产品方向 | 使用前端式源语言构建 UE 原生 UI，方向正确。 | ✅ |
+| 浏览器依赖 | 无 CEF、Chromium、WebBrowser 或通用页面运行时。 | ✅ |
+| 原生程度 | 编译资产 + C++ 节点 + Yoga + 单 Slate 控件绘制。 | ✅ |
+| 功能成熟度 | 已能覆盖受控的菜单/HUD 原型；尚非完整生产 UI 框架。 | 🟡 |
+| 性能成熟度 | 固定体积轻、无默认 Tick；增量样式和布局尚未建立。 | 🟡 |
+| Gameface 对标 | 架构形态接近专用原生 UI Runtime，工程成熟度与性能证据仍有明显差距。 | 🟡 |
+| 当前最大风险 | 小范围状态变化会放大全树样式、文本缓存、资源和布局工作。 | ✅ |
+| 当前策略 | 暂缓横向扩张 Web 特性，优先完成 M2 增量运行时。 | 🚧 |
+
+### 2.2 版本与验证快照
+
+| 项目 | 当前值 |
+| --- | --- |
+| 插件版本 | `0.1.0-preview` |
+| Engine | UE 5.8 |
+| SupportedTargetPlatforms | Win64 |
+| 自动化测试 | 12 / 12 通过（2026-08-11，working tree） |
+| 当前编译验证 | UE 5.8 Win64 Editor Development 通过（2026-08-11，working tree） |
+| 历史发布验证 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 均曾通过；发布前必须在当前提交重新执行 |
+| Git 基线 | `26745212e962` 基础上的 working tree；未提交，不生成伪哈希 |
+| 当前发布级别 | Developer Preview / 技术可行性与基础能力阶段 |
+
+### 2.3 宏观里程碑
+
+| 里程碑 | 对应前端演进经验 | 状态 | 验收进度 | 结果 |
+| --- | --- | --- | --- | --- |
+| M0 技术闭环 | 文档结构与样式可被独立渲染 | ✅ | 8 / 8 | 从 HTML/CSS 到 Cooked 原生 UI 的端到端闭环 |
+| M1 UI 基础语义 | 排版、交互、本地化与诊断 | ✅ | 10 / 10 | 常规菜单/HUD 原型所需的受控基础子集 |
+| M2 增量原生运行时 | 浏览器的 retained/incremental rendering | 🚧 | 1 / 7 退出门 | 可度量、局部失效、可扩展的 Runtime |
+| M3 响应式与组件 | React/Vue/Svelte 的数据和组件抽象 | ⬜ | 0 / 8 | UE MVVM 驱动的组件、列表与结构复用 |
+| M4 动画与响应式视觉 | 合成层、时间线与多视口适配 | ⬜ | 0 / 6 | 游戏级动效而不引入浏览器合成器 |
+| M5 工具链与 MCP | DevTools、自动化与生态接口 | ⬜ | 0 / 7 | 可检查、可分析、可由工具安全驱动 |
+| M6 1.0 产品化 | 标准化、兼容策略与平台工程 | ⬜ | 0 / 7 | 可被外部项目稳定依赖的插件 |
+
+M2 的 `1 / 7` 表示“原生、事件驱动的单控件运行时”这一前置门已经具备；其余退出门尚未完成。它不表示 M2 已完成约 14% 的工时。
+
+---
+
+## 3. 工程宪法
+
+### 3.1 产品定位
+
+WebToUE 将 HTML/CSS 视为 **UI Source**，而不是在游戏中运行的网页。编辑器负责解析、诊断并生成带版本的 **Compiled UI IR**；游戏运行时读取 WTUE Document，通过 UE 的对象、资源、输入和渲染能力生成 Runtime UI Instance。
+
+直接价值：
+
+- 前端开发者可以使用熟悉的结构与样式抽象。
+- 游戏仍遵守 Unreal 的 UObject、资产、Cook、输入和平台构建流程。
+- 避免通用浏览器内核的固定包体、内存、启动、安全和跨平台成本。
+- UI 逻辑可继续存在于 C++、Blueprint、UE MVVM 和游戏系统中。
+
+### 3.2 长期架构约束
+
+1. Runtime 核心不依赖 CEF、Chromium、WebKit、Gecko 或通用 WebView。
+2. Runtime 核心不以通用 JavaScript VM 作为状态和交互基础。
+3. UI Source 必须先经过可诊断、可版本化的编译边界；Shipping 不读取磁盘前端源文件。
+4. Compiled UI IR 与 Runtime State 必须分离；前者可共享，后者按视图实例存在。
+5. 每个源节点不默认对应一个 UObject、UWidget 或独立 Slate Widget。
+6. UE MVVM、FieldNotify、UObject 和类型化命令是响应式桥接方向。
+7. 吸收前端历史中的结构、级联、组件、响应式和 DevTools 经验，但不追求浏览器标准完整度。
+8. MCP 只作为可选 Editor Automation Surface，不得成为 Core、Runtime 或 Cooked 游戏依赖。
+
+### 3.3 明确非目标
+
+- 完整 DOM、浏览器导航、Cookie、Storage 和网页网络模型。
+- 为兼容网页而复制浏览器历史遗留行为。
+- 让任意 JavaScript 直接控制 UObject 或游戏世界。
+- 仅为了 CSS 覆盖率而牺牲可预测性能、Cook 安全或跨平台能力。
+- 在 1.0 前承诺任意网页可无修改运行。
+
+---
+
+## 4. 目标架构与当前差距
 
 ```mermaid
 flowchart LR
-    A["HTML / CSS 源文件"] --> B["WebToUEEditor 导入与重导入"]
-    B --> C["WebToUECore 解析、级联与诊断"]
-    C --> D["UWebToUEDocument 编译资产"]
-    D --> E["UWebToUEView / SWebToUEView"]
-    E --> F["Yoga Flex 布局"]
-    E --> G["Slate 原生绘制"]
-    H["UObject DataContext"] --> E
-    E --> I["Blueprint OnUIEvent"]
-    D --> J["Cooked UAsset"]
+    A["HTML/CSS UI Source"] --> B["Parser + Authoring Tree"]
+    B --> C["Typed Cascade + Lowering"]
+    C --> D["Versioned Compiled UI IR"]
+    D --> E["Runtime UI Instance"]
+    F["UE MVVM / FieldNotify"] --> E
+    E --> G["Persistent Layout + Text"]
+    G --> H["Display List + Slate/RHI"]
+    E --> I["Input + Focus + Animation"]
+    J["Inspector / Profiler / MCP"] --> B
+    J --> D
     J --> E
 ```
 
-插件由四个模块组成：
+| 层 | 当前实现 | 目标状态 | 目标里程碑 |
+| --- | --- | --- | --- |
+| Authoring | 受控 HTML/CSS、自定义 `data-ue-*` | 明确版本的 WTUE Web Subset 与精确 Source Map | M2/M5 |
+| Compiler | Parser、CSS 校验、级联、RichText lowering 集中于 Core | 分阶段编译管线、类型化属性、可缓存中间结果 | M2 |
+| Asset/IR | 扁平 CompiledNodes/Rules、自定义版本 | 不可变、版本化、依赖完备、可迁移的 UI IR | M2/M6 |
+| Runtime Instance | 运行节点混合源码、样式、布局和交互状态 | Compiled Node、Runtime State、Layout/Paint Cache 分离 | M2 |
+| Reactivity | 根属性绑定、FieldNotify 刷新 | 依赖图、嵌套路径、转换器、命令、结构化更新 | M3 |
+| Layout/Text | 每次脏布局重建 Yoga 树；节点级文本缓存 | 持久 Yoga、约束感知文本缓存、局部 Measure/Layout | M2 |
+| Paint/Input | 递归 Slate Paint、全树 Hit Test | Display List、局部重绘、稳定排序、分层命中 | M2 |
+| Tooling | 导入诊断、热重载、自动化测试 | Inspector、Profiler、Source Map、可选 MCP | M5 |
 
-| 模块 | 类型 | 职责 |
+当前最重要的结构问题是 `FWebToUENode` 同时承载编译数据、计算样式、布局结果、滚动偏移和伪状态。M2 必须拆开这些生命周期，否则组件、动画和响应式能力会继续放大全量重算成本。
+
+---
+
+## 5. 当前实现架构
+
+### 5.1 模块边界
+
+| 模块 | 类型 | 当前职责 |
 | --- | --- | --- |
-| `WebToUEYoga` | Runtime | 内置 Yoga 3.2.1 源码并提供 Flex 布局能力。 |
-| `WebToUECore` | Runtime | HTML/CSS 解析、DOM-like 节点、选择器匹配、样式计算、诊断和 Yoga 适配。 |
-| `WebToUERuntime` | Runtime | `UWebToUEDocument`、UMG 控件、Slate 渲染、输入、绑定、事件和字体配置。 |
-| `WebToUEEditor` | Editor | `.html` 导入、CSS 依赖收集、UAsset 编译、重导入和文件监听。 |
+| `WebToUEYoga` | Runtime | 内置 Yoga 3.2.1，并提供 Flex 布局能力。 |
+| `WebToUECore` | Runtime | HTML/CSS 解析、节点、选择器、样式计算、诊断、RichText lowering 和 Yoga 适配。 |
+| `WebToUERuntime` | Runtime | WTUE Document、UMG 外壳、Slate 渲染、输入、绑定、事件和字体配置。 |
+| `WebToUEEditor` | Editor | `.html` 导入/重导入、依赖收集、资产编译、文件监听和本地化导入。 |
 
-模块之间保持单向依赖：Yoga → Core → Runtime → Editor。Editor 模块不会进入游戏目标。
+当前依赖方向为 Yoga → Core → Runtime → Editor。Editor 不进入游戏目标。
 
-## 4. 编辑器编译链路
+### 5.2 编译与运行链路
 
-### 4.1 导入入口
+1. `UWebToUEFactory` 读取 HTML，并按源顺序收集 `<link>`、`<style>` 和元素内联样式。
+2. `FWebToUECompiler` 解析结构、校验受支持 CSS、执行级联和富文本 lowering。
+3. 工厂生成 `UWebToUEDocument`，保存扁平节点、规则、资源引用、诊断和自定义版本。
+4. Editor 监听已加载文档依赖，文件变化后以 200ms 防抖重导入；失败时保留上次成功运行数据。
+5. `UWebToUEView` 作为 UMG 控件宿主，底层创建单个 `SWebToUEView : SLeafWidget`。
+6. Runtime hydration 后使用 Yoga 计算布局，通过 Slate 递归绘制、裁剪、文本、图片和交互状态。
+7. Data Context 提供绑定值；语义化 UI Event 返回 Blueprint/C++ 游戏逻辑。
 
-`UWebToUEFactory` 注册 `.html` 文件类型。用户把 HTML 拖入 Content Browser 后，工厂会：
+### 5.3 Cook 边界
 
-1. 读取 HTML 文本。
-2. 扫描 `<link rel="stylesheet" href="...">`。
-3. 以 HTML 所在目录为基准解析相对 CSS 路径。
-4. 将每个外部 CSS 作为带独立文件名和起始位置的样式表输入传给编译器，并单独收集 HTML 内的 `<style>`。
-5. 调用 `FWebToUECompiler::Compile`，按样式表顺序参与级联。
-6. 将节点树和样式规则序列化到 `UWebToUEDocument`。
-7. 收集 `<img src>` 中的 Unreal Texture2D 软引用。
-8. 保存源文件、依赖文件和诊断信息供编辑器使用。
+Cooked 游戏保留 Compiled Nodes、Rules、Root、纹理/String Table 引用、诊断和 Runtime 模块。HTML/CSS 原文、源路径和依赖文件属于 Editor-only 数据。
 
-### 4.2 编译资产格式
+现有 Development 和 Shipping IoStore 历史验证未发现 WebUI 源文件、Chromium、CEF 或 WebBrowser 运行文件。该结论在发布候选版本必须重新核验。
 
-`UWebToUEDocument` 的运行时数据由扁平数组构成：
+---
 
-- `CompiledNodes`：节点类型、标签、文本、属性和 `ParentIndex`。
-- `CompiledRules`：选择器片段、声明、优先级和源码顺序。
-- `RootNodeIndex`：渲染根节点索引。
-- `ReferencedTextures`：需要随 Cook 收集的 Texture2D 软引用。
-- `Diagnostics`：可在编辑器和蓝图侧查看的编译信息。
+## 6. 当前能力矩阵
 
-HTML、CSS 原文、导入路径和依赖文件被放在 `WITH_EDITORONLY_DATA` 中，不进入游戏运行数据。
+### 6.1 已实现并验证
 
-当前资产格式使用独立的自定义版本 GUID，首个版本为 `InitialCompiledDocument`。加载没有该版本的旧资产时，Runtime 只标记重编译请求；Editor 模块会在后续 Tick 对已加载资产执行一次重导入，成功后写入当前格式，失败则继续保留最后一次成功的运行数据。后续结构变更仍需为每个版本补充字段级迁移或重编译策略。
+- `.html` 导入、外链/内联 CSS、重导入、依赖监听与失败回退。
+- 类型、Class、ID、复合、后代、直接子代、选择器组。
+- `:hover`、`:active`、`:focus`、`:disabled`。
+- Flex 主轴/交叉轴、Wrap、Gap、绝对定位、百分比尺寸和 Min/Max。
+- Slate 约束文本测量、多行换行、`white-space: nowrap`。
+- `FText` namespace/key、String Table、稳定自动 key 和基础富文本。
+- `overflow: hidden/auto/scroll`、垂直滚轮、嵌套边界传递和裁剪感知 Hit Test。
+- 鼠标点击、Tab/Shift+Tab、Enter/Space 焦点激活。
+- 根 UObject 属性绑定、FieldNotify 自动刷新、可见性与启用状态。
+- 语义化 `data-ue-on-click` → `OnUIEvent`。
+- 自定义资产版本、旧资产重编译请求。
+- Editor-only 的确定性 100/500/2,000 节点 Benchmark Corpus 与 50/200/500 规则集。
+- Win64 Editor 编译以及 12 项自动化测试。
 
-### 4.3 诊断与失败策略
+### 6.2 已实现但仍需工程化证据
 
-当前诊断覆盖：
+- 中小型菜单与 HUD 的实际帧耗；固定 Benchmark Corpus 已建立，但尚无阶段计时和 P50/P95 基线。
+- 高频伪状态与 FieldNotify 更新下的 Game Thread 峰值。
+- 大型兄弟节点集合的 Paint 排序与全树 Hit Test 成本。
+- 异常资源路径、超大文档和恶意输入的上限与恢复行为。
+- 当前提交的 Game Development/Shipping、Cook 和独立插件打包矩阵。
 
-- 无法读取 HTML 或关联 CSS。
-- HTML 标签名缺失。
-- 未匹配的闭合标签。
-- 未知标签降级为通用 Flex 容器。
-- CSS 规则块未闭合。
-- CSS 声明格式错误。
-- 不支持的 CSS at-rule 或选择器。
-- 不支持的 CSS 属性和非法属性值；对应声明会被忽略，不进入最终规则。
+### 6.3 尚未支持
 
-外链 CSS、HTML 内的 `<style>` 和元素 `style` 属性会保留各自的源文件与起始位置。CSS 诊断使用实际行列号，不再把拼接后的外链样式统一报告为 HTML 文件第一行。HTML 结构诊断已有行列号，未知 HTML 属性及更细粒度的属性值校验仍待补充。
+- 输入框、文本编辑、IME、表单语义。
+- 可见滚动条、拖拽/触摸滚动、惯性和虚拟列表。
+- 手柄导航、CommonUI 深度集成、无障碍语义。
+- 嵌套属性路径、Converter、双向绑定、类型化事件载荷。
+- 组件、Props、Slots、条件节点、循环和 Keyed Diff。
+- Transition、Keyframes、Transform、阴影、渐变、滤镜和 Mask。
+- CSS Grid、Table、Float、CSS Variables、`calc()`、媒体查询。
+- 独立样式/布局/事件检查器、性能时间线和跨平台矩阵。
 
-第一次导入发生错误时不会产生有效运行数据。已有资产重导入失败时，工厂保留上一次成功编译的节点与规则，同时更新诊断信息，避免一次 CSS 书写错误立即破坏正在预览的界面。
+精确的标签、属性和测试清单见附录 A～D。
 
-### 4.4 热重载
+---
 
-Editor 模块监听项目目录内的 `.html` 和 `.css` 变化，并使用 200ms 防抖。到期后，它检查当前已加载 `UWebToUEDocument` 的 `DependencyFiles`，只重导入受影响的资产。
+## 7. 性能基线与预算
 
-重导入成功后通过 `UWebToUEDocument::OnDocumentChanged` 通知现有 `UWebToUEView` 重建运行时文档和绑定。当前监听只覆盖已加载资产，没有独立的全局依赖数据库。
+### 7.1 已知事实
 
-## 5. HTML/CSS 编译核心
+2026-08-11 的 Win64 Editor DLL 文件体积：
 
-### 5.1 HTML 子集
+| 模块 | 大小 |
+| --- | ---: |
+| `UnrealEditor-WebToUECore.dll` | 222,720 B |
+| `UnrealEditor-WebToUEEditor.dll` | 185,856 B |
+| `UnrealEditor-WebToUERuntime.dll` | 280,576 B |
+| `UnrealEditor-WebToUEYoga.dll` | 340,480 B |
+| 合计 | 1,029,632 B（约 0.98 MiB） |
 
-第一版识别以下标签：
+这只能证明当前插件代码的固定文件成本很小，不代表 Shipping 包体、运行时内存、GPU 成本或 Gameface 性能对等。
 
-- 文档标签：`html`、`head`、`body`
-- 样式标签：`style`、`link`
-- UI 标签：`div`、`span`、`p`、`img`、`button`
-- 行内富文本标签：`strong` / `b`、`em` / `i`、`u`、`br`
+M2 已建立三档确定性 Benchmark Corpus：100 节点/50 规则、500 节点/200 规则和 2,000 节点/500 规则。Automation Test 会验证源码生成确定性、编译无错误、运行节点/规则精确计数以及固定 Binding/Hover 目标。该证据只证明测试输入稳定可重复；尚未采集 Hydrate、Style、Measure、Layout、Paint Build、Hit Test、Binding 的计时、分配或 P50/P95 数据。
 
-`img`、`link` 和 `br` 默认按自闭合标签处理。未知元素会保留属性和子节点，并作为通用 Flex 容器参与布局，同时生成警告。
+有利特征：
 
-解析器支持：
+- 没有浏览器内核和通用脚本 VM。
+- `SWebToUEView` 默认 `SetCanTick(false)`。
+- 一个视图使用一个 Slate 叶控件，而不是每节点一个 UObject/UWidget。
+- 滚动偏移变化目前只使 Paint 失效。
 
-- 双引号、单引号和无引号属性值。
-- 布尔属性，缺省值记录为 `true`。
-- HTML 注释与 doctype 跳过。
-- `&lt;`、`&gt;`、`&quot;`、`&apos;`、`&amp;` 和数值实体解码。
-- `<style>` 内联样式和元素 `style="..."` 声明。
+已知放大路径：
 
-文本节点目前会裁掉首尾空白，不保留浏览器式空白折叠语义；`white-space: normal` 会在宽度约束下自动换行，`nowrap` 保持单行。只包含文本和受支持行内标签的元素会编译为单个富文本叶节点，避免行内 run 被 Yoga 当作多个块布局。
+- Hover、Pressed、Focus 和绑定刷新调用全局 `RebuildStylesAndBrushes`。
+- 样式解析对每个节点遍历规则并排序匹配项，近似 `O(N × R × selector-depth)`。
+- 全局样式刷新会清空全部 Text Layout Cache。
+- Layout Dirty 时重新创建并递归释放完整 Yoga Tree。
+- Brush 重建可能同步 `LoadObject<UTexture2D>`。
+- Paint 复制并排序每组子节点；Hit Test 递归遍历节点树。
 
-### 5.2 CSS 选择器
+因此当前性能结论是：**固定成本轻、静态和低频界面有良好基础；动态扩展性尚未被证明。**
 
-当前支持：
+### 7.2 M2 初始性能预算
 
-- 类型选择器：`button`
-- Class：`.primary`
-- ID：`#start-button`
-- 复合选择器：`button.primary:hover`
-- 后代组合：`.panel button`
-- 直接子代：`.panel > button`
-- 逗号分隔的选择器组
-- 伪类：`:hover`、`:active`、`:focus`、`:disabled`
+预算以项目指定的固定测试机和 Development 构建为准；首次基准建立后允许校准数值，但改变预算必须记录原因。
 
-规则按选择器优先级和源码顺序参与级联，元素 `style` 属性最后覆盖。当前声明存储使用 `TMap`，同一规则内重复声明的精确顺序语义与浏览器不完全一致。
+| 场景 | 初始目标 |
+| --- | --- |
+| 未变化帧 | UI Runtime Tick 为 0；WTUE 自身临时分配为 0 |
+| 500 节点 / 200 规则，单节点 Hover | Game Thread P95 < 0.5 ms |
+| 500 节点 / 200 规则，单 FieldNotify 更新 | Game Thread P95 < 0.5 ms |
+| 500 节点暖缓存完整布局 | P95 < 2.0 ms |
+| 2,000 节点压力场景 | 状态局部变化不得触发全树资源加载或不可控的 16.6 ms 尖峰 |
+| 性能回归 | CI/本地标准脚本输出样式、布局、文本、绘制、命中和内存分项 |
 
-### 5.3 CSS 属性
+这些是路线目标，不是当前已达到的成绩。
+
+---
+
+## 8. 风险登记册
+
+| ID | 风险 | 等级 | 当前证据 | 缓解路线 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| R-01 | 伪状态/绑定导致全树样式、Brush、文本和布局刷新 | Critical | Runtime 调用链已确认 | Dirty Graph、Selector Index、属性影响分类 | 🚧 M2 |
+| R-02 | Yoga Tree 每次布局重建 | High | Core 布局代码已确认 | Persistent Yoga Nodes、局部 Dirty | ⬜ M2 |
+| R-03 | 编译数据与 Runtime State 混合在节点结构 | High | `FWebToUENode` 字段已确认 | 拆分 IR/Instance/Cache 生命周期 | ⬜ M2 |
+| R-04 | 状态变化路径可能同步加载纹理 | High | Brush 重建使用 `LoadObject` | 编译依赖 + Resource Cache + 异步策略 | ⬜ M2 |
+| R-05 | Compiler/View 职责集中，修改回归面扩大 | High | 两个核心实现文件体量和职责已确认 | 按编译阶段和 Runtime 服务拆分 | ⬜ M2 |
+| R-06 | 没有完整可重复性能基准，无法证明“原生且高效” | Critical | 固定 Corpus 已建立；阶段计时、统计和预算门禁仍缺失 | Benchmark、Stat、Trace、预算门禁 | 🚧 M2 |
+| R-07 | CSS 声明使用 Map，重复声明顺序不完全等价 | Medium | 当前声明模型已确认 | Ordered Declaration IR | ⬜ M2 |
+| R-08 | 仅 Win64，平台假设尚未暴露 | Medium | `.uplugin` 平台限制 | 平台抽象审计与构建矩阵 | ⬜ M6 |
+| R-09 | MCP 为 Experimental 且本地服务无认证 | Medium | UE 5.8 官方边界 | Editor-only、默认关闭、最小权限工具 | ⬜ M5 |
+
+风险关闭必须链接对应测试、基准或代码变更，不能只把状态改成“已解决”。
+
+---
+
+## 9. 宏观路线：按前端抽象演进，而非复制浏览器
+
+### M0——技术闭环 ✅ 8 / 8
+
+- [x] HTML/CSS 可导入。
+- [x] 可生成 Unreal Asset。
+- [x] Yoga 可计算布局。
+- [x] Slate 可原生绘制。
+- [x] UMG 可承载 WTUE View。
+- [x] UObject 绑定和语义事件闭环。
+- [x] 文件变化可重导入。
+- [x] Cooked 运行不依赖 UI Source 或浏览器内核。
+
+### M1——UI 基础语义 ✅ 10 / 10
+
+- [x] 多来源 CSS 级联和精确诊断。
+- [x] 约束文本测量和自动换行。
+- [x] 稳定 FText/String Table 身份。
+- [x] 基础富文本 run。
+- [x] 垂直滚动、嵌套边界和裁剪命中。
+- [x] 鼠标和基础键盘交互。
+- [x] 资产自定义版本和旧资产识别。
+- [x] Development/Shipping Cook 历史闭环。
+- [x] Core/Runtime/Editor 自动化测试基础。
+- [x] 工程技术总览和明确非目标。
+
+### M2——增量原生运行时 🚧 1 / 7 退出门
+
+- [ ] 有可重复基准、Trace/Stat 和预算门禁。
+- [ ] Compiled UI IR、Runtime State、Layout/Paint Cache 完全分离。
+- [ ] Typed Property、Selector Index 和 Ordered Declaration 建立。
+- [ ] Style/Measure/Layout/Paint/HitTest Dirty Graph 生效。
+- [ ] Yoga、Text 和 Resource Cache 持久化且局部失效。
+- [ ] Paint 顺序、Display List 和 Hit Test 可扩展。
+- [x] 单 Slate 控件、无默认 Tick、无浏览器内核的事件驱动基础。
+
+退出结果：500 节点常规菜单的局部状态变化满足性能预算；全量更新路径可被 Profiler 明确解释。
+
+### M3——响应式数据与组件 ⬜ 0 / 8
+
+- [ ] UE MVVM/FieldNotify 依赖图。
+- [ ] 嵌套属性路径与类型化 Converter。
+- [ ] Command 与类型化事件载荷。
+- [ ] 编译期 Component 与 Props。
+- [ ] Slots 与模板复用。
+- [ ] 条件节点与列表循环。
+- [ ] Stable Key、Keyed Diff 和实例复用。
+- [ ] 大列表虚拟化。
+
+退出结果：单字段变化只触达依赖节点；列表更新复用稳定实例，不进行全树重建。
+
+### M4——动画与响应式视觉 ⬜ 0 / 6
+
+- [ ] Typed Transition 和 easing。
+- [ ] Keyframes 时间线。
+- [ ] Transform、Opacity、Color 的 Paint/Composite 路径。
+- [ ] Layout Animation 与 Paint Animation 分层。
+- [ ] DPI、Safe Zone、视口和输入设备条件。
+- [ ] 阴影、渐变、九宫格等受控商业 UI 能力。
+
+退出结果：常用动画不触发无关 Cascade/Yoga；标准压力场景达到目标帧率。
+
+### M5——工具链与 MCP ⬜ 0 / 7
+
+- [ ] Authoring Tree、IR 和 Runtime Tree Inspector。
+- [ ] Cascade、Computed Style、Box Model 和焦点可视化。
+- [ ] Source Map 与源码跳转。
+- [ ] Incremental Compile、DDC 和依赖图。
+- [ ] Screenshot/Golden 测试。
+- [ ] 性能时间线、Paint Rect 和内存统计。
+- [ ] 可选 `WebToUEMCP` Editor-only 适配器。
+
+退出结果：问题能够从画面定位到源文件、规则、布局和耗时；AI 工具只能通过受控接口操作 Editor。
+
+### M6——1.0 产品化 ⬜ 0 / 7
+
+- [ ] Public API 与扩展点稳定。
+- [ ] UI IR/资产迁移和兼容策略稳定。
+- [ ] Win64 以外的平台矩阵。
+- [ ] Game/Shipping/Cook/BuildPlugin 自动发布门禁。
+- [ ] 安全、异常恢复和资源上限。
+- [ ] 文档、样例、升级指南、错误码和支持矩阵。
+- [ ] 分发、许可证和第三方声明完备。
+
+退出结果：外部项目可以依据公开版本、兼容策略和性能预算长期升级。
+
+---
+
+## 10. M2 微观执行路线
+
+M2 是当前唯一活跃里程碑。工作包按依赖顺序推进；原则上不在 M2.0～M2.4 完成前扩张大型 CSS、组件或动画能力。
+
+### M2.0——性能可观测性 🚧 1 / 6
+
+- [x] 固定 100/500/2,000 节点文档生成器与 50/200/500 规则集。
+- [ ] 分别统计 Hydrate、Style、Measure、Layout、Paint Build、Hit Test、Binding。
+- [ ] 记录节点、规则、匹配、Yoga、文本布局、Brush 和分配数量。
+- [ ] Unreal Insights/CSV/Automation 可消费的输出。
+- [ ] 固定测试机、构建配置、采样次数和 P50/P95 规则。
+- [ ] 把第 7.2 节预算转成回归门禁。
+
+### M2.1——拆分生命周期 ⬜ 0 / 6
+
+- [ ] 定义只读 `CompiledDocument/CompiledNode` 边界。
+- [ ] 定义每视图 `RuntimeInstance/NodeState`。
+- [ ] Layout、Text、Paint 和 Resource Cache 不再写回 Compiled IR。
+- [ ] Binding、Pseudo State、Focus、Scroll 只存在于 Runtime State。
+- [ ] Runtime 可共享同一 Document 创建两个互不污染的实例。
+- [ ] Compiler 和 View 按职责拆分，当前 WebToUE 回归测试无回归。
+
+### M2.2——类型化样式与选择器索引 ⬜ 0 / 5
+
+- [ ] CSS Property ID + Typed Value，停止在热路径解析字符串。
+- [ ] 声明保持源顺序，正确处理同规则重复属性。
+- [ ] 规则按 ID/Class/Tag/Pseudo 候选索引。
+- [ ] 属性元数据声明 Inherited 及影响 Style/Measure/Layout/Paint 的范围。
+- [ ] Cascade 结果和浏览器式无效声明语义有专项测试。
+
+### M2.3——Dirty Graph ⬜ 0 / 6
+
+- [ ] 明确 Structure/Style/Measure/Layout/Paint/HitTest Dirty Flags。
+- [ ] Hover/Active/Focus 只处理受影响选择器候选。
+- [ ] Paint-only 属性不触发 Measure/Layout。
+- [ ] 继承属性只向必要后代传播。
+- [ ] FieldNotify 只刷新依赖节点。
+- [ ] 每次更新可报告“为什么这些节点失效”。
+
+### M2.4——持久缓存 ⬜ 0 / 6
+
+- [ ] Yoga Node 与 Runtime Node 同生命周期。
+- [ ] 仅脏子树进入 Measure/Layout。
+- [ ] Text Layout 以文本、字体、样式和约束作为 Cache Key。
+- [ ] 伪状态变化不再无条件清空全部 Text Layout。
+- [ ] 编译资产生成明确资源依赖，Runtime 使用 Resource Cache。
+- [ ] 状态变化路径不执行同步纹理加载。
+
+### M2.5——Paint 与命中扩展性 ⬜ 0 / 5
+
+- [ ] 稳定 Paint Order，避免每帧复制排序不变子节点。
+- [ ] 引入可复用 Display List/Paint Commands。
+- [ ] 局部 Paint Invalidations 和重绘区域可视化。
+- [ ] Hit Test 使用裁剪感知的层次包围或空间索引。
+- [ ] 500/2,000 节点场景满足预算并无异常分配。
+
+### M2.6——生产 UI 基础补齐 ⬜ 0 / 7
+
+- [ ] 可见垂直/水平滚动条。
+- [ ] 鼠标拖拽、触摸和惯性滚动。
+- [ ] 手柄导航与 CommonUI 协作。
+- [ ] DPI 与 Safe Zone。
+- [ ] 输入框、文本编辑和 IME 的最小可用方案。
+- [ ] 无障碍语义的节点模型。
+- [ ] 输入、重导入、绑定和截图自动化覆盖。
+
+### M2.7——退出检查 ⬜ 0 / 6
+
+- [ ] 11 项现有测试及新增 M2 测试全部通过。
+- [ ] Editor/Game Development/Shipping 编译通过。
+- [ ] Cook、IoStore 和 BuildPlugin 通过。
+- [ ] 第 7.2 节性能预算通过。
+- [ ] R-01～R-06 关闭或降至可接受等级。
+- [ ] 文档、示例和升级说明同步。
+
+### 建议的前六个实现变更
+
+1. Benchmark/Stats 基础与固定压力文档。
+2. Compiler/View 拆分和 Compiled IR/Runtime State 类型设计。
+3. Dirty Flags 与属性影响元数据。
+4. Selector Index 与局部 Pseudo State 重算。
+5. Persistent Yoga/Text/Resource Cache。
+6. Display List、Paint/Hit Test 优化及 M2 性能门禁。
+
+---
+
+## 11. MCP 接入策略
+
+UE 5.8 的 Unreal MCP 仍是 Experimental。WebToUE 可以利用它改善编辑器开发体验，但不得让实验协议污染 Runtime 架构。
+
+建议未来新增独立、可选、默认关闭的 `WebToUEMCP` Editor 模块：
+
+```text
+WebToUECore
+WebToUERuntime
+WebToUEEditor
+WebToUEMCP       # EditorOnly, optional
+```
+
+M2 期间先建立与传输协议无关的 Compiler、Diagnostics、Inspection、Benchmark Editor Services。M5 再让 MCP 作为这些服务的适配器，而不是唯一入口。
+
+首批候选能力：
+
+- Resources：文档列表、Compiled UI IR、诊断、支持矩阵、性能快照。
+- Read-only Tools：检查文档、Computed Style、布局、依赖和测试结果。
+- Mutating Tools：编译、重导入和生成样例；必须支持参数校验、UE Transaction/Undo 和明确权限。
+
+禁止暴露任意文件系统、Shell、任意 UObject/Blueprint 调用或远程无认证访问。MCP 不参与 Cook，不进入玩家设备，也不用于 Runtime 消息传递。
+
+---
+
+## 12. 测试与发布门禁
+
+### 12.1 当前自动化测试（12 / 12）
+
+| 层 | 测试 |
+| --- | --- |
+| Core | `HtmlCss`、`FlexLayout`、`ConstrainedMeasure`、`RichTextCompile`、`ScrollLayout`、`CssDiagnostics` |
+| Runtime | `AssetVersion`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction` |
+| Editor | `BenchmarkScenarios`、`LocalizationImport` |
+
+### 12.2 仍需建立
+
+- Runtime Pseudo State 局部失效测试。
+- FieldNotify 依赖节点增量更新测试。
+- 两个 Runtime UI Instance 状态隔离测试。
+- Reimport 成功、失败回退和依赖变化测试。
+- 鼠标、键盘、手柄、触摸与 IME 自动化。
+- Screenshot/Golden 跨 DPI 测试。
+- 100/500/2,000 节点性能和内存回归。
+- Win64 Editor/Game Development/Shipping/Cook/BuildPlugin 一键门禁。
+
+功能测试通过不等于性能达标；发布门禁必须分别报告 Correctness、Performance、Packaging 和 Compatibility。
+
+---
+
+## 13. 变更记录
+
+只记录会改变工程判断、架构、里程碑或支持边界的变化；普通提交不在此重复 Git 历史。
+
+| 日期 | 基线 | 变化 | 路线影响 |
+| --- | --- | --- | --- |
+| 2026-08-11 | `2674521` + working tree | 建立 Editor-only 的确定性 100/500/2,000 节点 Benchmark Corpus、50/200/500 规则集及专项 Automation Test。 | M2.0 达到 1/6；R-06 仍为 Critical，等待阶段计时与预算门禁。 |
+| 2026-08-11 | `2674521` + working tree | 将一次性技术总结重构为长期工程事实、风险、宏观/微观路线和验收进度文档；建立统一术语。 | M0/M1 固化为完成，M2 成为唯一活跃里程碑。 |
+| 2026-08-11 | `2674521` | 稳定 FText/String Table 身份与基础富文本。 | 完成 M1 本地化与文本语义。 |
+| 2026-08-11 | `325d17b` | 垂直滚动、嵌套边界和裁剪命中。 | 完成 M1 基础滚动语义。 |
+| 2026-08-10 | `e23638a` | 约束文本测量与自动换行。 | 完成 M1 排版基础。 |
+| 2026-08-10 | `d81ec1c` | 多来源 CSS 诊断。 | 完成 M1 样式诊断基础。 |
+| 2026-08-10 | `f5be9a5` | Compiled Document 自定义版本。 | 建立 M6 资产兼容前置能力。 |
+| 2026-08-10 | `84f2eee` | 原生 HTML/CSS UI Preview 首版。 | 完成 M0 技术闭环主体。 |
+
+---
+
+## 附录 A：当前 HTML 与 Authoring 支持
+
+标签：
+
+- 文档：`html`、`head`、`body`
+- 样式：`style`、`link`
+- UI：`div`、`span`、`p`、`img`、`button`
+- 行内语义：`strong` / `b`、`em` / `i`、`u`、`br`
+
+解析能力：
+
+- 双引号、单引号、无引号和布尔属性。
+- HTML 注释、doctype 跳过和常见/数值实体解码。
+- `<style>`、外链 CSS 和元素 `style`。
+- 未知标签保留为通用 Flex 容器并产生警告。
+- 文本首尾空白裁剪；尚非完整浏览器空白折叠语义。
+
+本地化声明：
+
+- `data-ue-loc-key`
+- `data-ue-loc-namespace`
+- `data-ue-string-table` + `data-ue-string-key`
+- `data-ue-rich-text="true"`
+
+关键产品文案应使用显式 key；无 `id` 节点结构重排可能改变自动作者路径。
+
+## 附录 B：当前 CSS 支持
+
+选择器：类型、Class、ID、复合、后代、直接子代、逗号组，以及 `:hover`、`:active`、`:focus`、`:disabled`。
 
 布局与可见性：
 
-- `display`：`flex` / `none`
-- `position`：`relative` / `absolute`
-- `visibility`：支持 `hidden`
-- `overflow`：`visible` / `hidden` / `auto` / `scroll`
-- `width`、`height`
-- `min-width`、`min-height`
-- `max-width`、`max-height`
-- `left`、`top`、`right`、`bottom`
-- `margin`、`padding` 及四方向长属性
+- `display`、`position`、`visibility`、`overflow`
+- `width/height`、`min-*`、`max-*`
+- `left/top/right/bottom`
+- `margin`、`padding` 及四方向属性
 - `gap`、`row-gap`、`column-gap`
-- 长度单位：`px`、百分比、零值和部分场景下的 `auto`
 
 Flex：
 
-- `flex` 简写
-- `flex-direction`
-- `flex-wrap`
-- `flex-grow`
-- `flex-shrink`
-- `flex-basis`
-- `justify-content`
-- `align-items`
-- `align-self`
+- `flex`、`flex-direction`、`flex-wrap`
+- `flex-grow`、`flex-shrink`、`flex-basis`
+- `justify-content`、`align-items`、`align-self`
 
 绘制与文本：
 
-- `color`
-- `background`（当前仅解析纯色）
-- `background-color`
-- `border` 简写
-- `border-color`
-- `border-width`
-- `border-style`（当前仅特别处理 `none`）
-- `border-radius`
-- `opacity`
-- `font-family`
-- `font-size`
-- `font-weight`
-- `text-align`
-- `white-space`：`normal` / `nowrap`
-- `object-fit`：`fill`、`contain`、`cover`
-- `z-index`
+- `color`、纯色 `background/background-color`
+- `border`、`border-color/width/style/radius`
+- `opacity`、`z-index`
+- `font-family/size/weight`、`text-align`、`white-space`
+- `object-fit: fill/contain/cover`
 
-颜色支持 `#RGB`、`#RGBA`、`#RRGGBB`、`#RRGGBBAA`，以及 `transparent`、`white`、`black`、`red`、`green`、`blue`。当前不支持 `rgb()`、CSS 变量、calc、渐变或完整颜色名称集合。
+值：`px`、百分比、零、部分 `auto`；Hex 颜色和少量命名色。尚无 `rgb()`、变量、`calc()`、渐变和完整颜色集合。
 
-样式表和元素 `style` 属性会在编译阶段校验当前受支持的属性和值。未知属性、非法枚举、错误长度和错误颜色会产生 Warning，并按 CSS 的无效声明语义忽略；它们不会覆盖同一元素上其他有效声明。
+显式继承：`color`、`font-family`、`font-size`、`font-weight`、`text-align`、`white-space`。
 
-### 5.4 样式继承
+## 附录 C：绑定、事件、输入与资源
 
-当前显式继承：
+绑定：
 
-- `color`
-- `font-family`
-- `font-size`
-- `font-weight`
-- `text-align`
-- `white-space`
+| 声明 | 当前行为 |
+| --- | --- |
+| `data-ue-bind-text="Property"` | 根 UObject 属性转文本 |
+| `data-ue-bind-visible="BoolProperty"` | 控制可见性 |
+| `data-ue-bind-enabled="BoolProperty"` | 控制可用状态和 `:disabled` |
+| FieldNotify | 订阅实际使用字段并触发刷新；尚未局部更新节点 |
 
-`body` 默认占满视口；`button` 默认采用水平 Flex，并将内容居中。
+事件：`data-ue-on-click="EventName"` 广播 `EventName` 和 `ElementId`。
 
-### 5.4 本地化身份与基础富文本
+输入：鼠标移动/点击/滚轮、Tab/Shift+Tab、Enter/Space。尚无触摸、手柄、IME 和可访问性导航。
 
-每个导入后的文本叶节点都在 `CompiledNodes` 中保存真正的 `FText`：
+图片：`src` 使用 Unreal 软对象路径，例如 `/Game/UI/T_Logo.T_Logo`；不支持磁盘图片和 HTTP 下载。
 
-- Document 首次导入时生成持久的文档命名空间，后续重导入继续复用。
-- 没有显式 key 时生成一次自动 key，并通过文本作者路径在重导入时复用；带 `id` 的元素移动位置后仍使用 `#id/text[n]` 身份。
-- 对需要长期稳定、可跨结构调整的文本，推荐显式填写 `data-ue-loc-key`；可用 `data-ue-loc-namespace` 覆盖文档命名空间。
-- `data-ue-string-table` 与 `data-ue-string-key` 必须成对出现，编译结果使用 `FText::FromStringTable`，资产同时保存 String Table 软引用以参与 Cook。
+## 附录 D：诊断与资产行为
 
-```html
-<p data-ue-loc-key="Menu.Start">Start Game</p>
-<p data-ue-loc-namespace="Dialog" data-ue-loc-key="Guide.Welcome">Welcome</p>
-<button
-  data-ue-string-table="/Game/UI/ST_UI.ST_UI"
-  data-ue-string-key="Common.Continue">
-  Continue
-</button>
-```
+当前诊断覆盖：
 
-String Table 模式下，元素内文本只是 HTML 作者提示，不是运行时缺失条目的 fallback；表和 key 应在 Unreal 中真实存在。自动 key 对常规内容编辑稳定，但没有 `id` 的节点在结构重排后作者路径可能变化，因此关键产品文案应使用显式 key。
+- HTML/CSS 文件读取失败。
+- 标签名缺失、未匹配闭合标签、未知标签。
+- CSS 规则未闭合、声明格式错误。
+- 不支持的 at-rule、选择器、属性和值。
+- 外链、内联样式的实际文件、行和列。
 
-基础富文本会把 `strong` / `b`、`em` / `i`、`u` 和 `br` 编译成同一个 Slate 富文本布局中的 bold、italic、underline run 和换行。来自 DataContext 或 String Table 的动态富文本需要在元素上设置 `data-ue-rich-text="true"`，值中使用 Slate 闭合形式，例如 `Choose <strong>Start</> now`。当前不支持图片、超链接、自定义 decorator 或任意 CSS span run。
+第一次导入错误不会产生有效运行数据；已有资产重导入失败保留上次成功运行数据并更新诊断。
 
-## 6. 布局系统
+WTUE Document 使用自定义版本 GUID，当前包含初始 Compiled Document 和本地化富文本演进。旧资产可请求重编译；全局未加载资产扫描和完整字段级迁移仍属于 M6。
 
-`FWebToUELayoutEngine` 为运行时节点创建对应的 Yoga 节点树，将计算样式转换为 Yoga 属性，再把计算结果写回每个节点的 `Position`、`Size` 和 `PaintOrder`。
+## 附录 E：事实锚点与外部参考
 
-文本和图片叶节点通过 Yoga 原生 MeasureFunc 接收 `Exactly`、`AtMost` 或无约束的宽高条件。文本使用 Slate `FSlateTextBlockLayout` 在给定宽度下完成 shaping、断行和测量，测得的多行高度再返回 Yoga；`white-space: nowrap` 会禁用软换行。没有明确宽高的图片仍使用纹理固有尺寸。布局输入是控件当前视口尺寸，因此百分比尺寸会相对实际 UMG/Slate 分配空间计算。
+主要源码事实锚点：
 
-当前每次需要重新布局时会重建 Yoga 树，不进行节点级增量布局缓存。对主菜单和中小型 HUD 足够直接，但大型列表、频繁数据变化和复杂伪类切换需要后续优化。
+- 节点、样式和文档模型：`Source/WebToUECore/Public/WebToUECoreTypes.h`
+- 编译、级联和 Yoga 适配：`Source/WebToUECore/Private/WebToUECompiler.cpp`
+- WTUE Document 资产：`Source/WebToUERuntime/Public/WebToUEDocument.h`
+- Slate Runtime、绑定、绘制和输入：`Source/WebToUERuntime/Private/SWebToUEView.cpp`
+- HTML 导入和 Compiled Asset 生成：`Source/WebToUEEditor/Private/WebToUEFactory.cpp`
+- 固定 Benchmark Corpus：`Source/WebToUEEditor/Private/Benchmarks/WebToUEBenchmarkScenario.cpp`
+- 插件模块与平台声明：`WebToUE.uplugin`
 
-## 7. 原生 Slate 渲染
+外部参考只用于说明对标产品和引擎能力，不构成 WTUE 的兼容承诺：
 
-`UWebToUEView` 是可放入 Widget Blueprint 的 UMG 控件，其底层为单个 `SWebToUEView : SLeafWidget`。每个 HTML 节点不会生成一个 UObject 或 UWidget。
-
-`SWebToUEView` 在 `OnPaint` 中手动递归绘制：
-
-- 元素背景和边框使用 `FSlateRoundedBoxBrush`。
-- 文本使用按节点缓存的 `FSlateTextBlockLayout`；普通文本使用 PlainText marshaller，富文本使用受控样式集的 RichText marshaller，测量和绘制共享同一套换行、shaping 与逐行对齐逻辑。
-- 图片使用 Texture2D 对应的 Slate Brush。
-- `overflow: hidden` 通过 Slate clipping zone 实现。
-- `overflow: auto` 和 `overflow: scroll` 维护节点级滚动偏移，子树绘制位置会累计祖先滚动偏移，并沿用同一裁剪区域。
-- 子节点按 `z-index` 和 `PaintOrder` 排序。
-- 父子透明度相乘。
-- 禁用状态使用 Slate DisabledEffect。
-- 图片根据 `object-fit` 计算目标矩形。
-
-纹理路径必须是 Unreal 软对象路径，例如：
-
-```html
-<img src="/Game/UI/T_Logo.T_Logo" />
-```
-
-它不是磁盘图片路径，也不会从 HTTP 地址下载资源。
-
-字体通过 Project Settings → WebToUE 配置，把 CSS `font-family` 映射到 Unreal Font Object 和 Typeface；无法解析时回退到 Slate 默认字体。
-
-## 8. 输入、焦点与伪类
-
-当前交互节点由 `FWebToUENode::IsInteractive()` 判断，主要用于带点击事件的元素和按钮。
-
-鼠标流程：
-
-- 移动：矩形 Hit Test，更新 `:hover`。
-- 滚轮：选择光标下最深的可滚动祖先，按垂直方向更新偏移；内层到达边界后可由外层滚动容器继续处理。
-- 左键按下：设置焦点和 `:active`，捕获鼠标。
-- 左键抬起：仅当抬起节点与按下节点一致时触发点击。
-- 离开控件：清理 hover。
-
-键盘流程：
-
-- `Tab`：按绘制顺序移动焦点并循环。
-- `Shift + Tab`：反向移动焦点。
-- `Enter` / `Space`：激活当前焦点节点。
-
-Hit Test 会累计祖先滚动偏移并与祖先裁剪矩形求交，再按布局矩形、`z-index` 和绘制顺序选择最上层节点。当前尚未考虑变换、非矩形命中区域和可访问性导航。
-
-## 9. UObject 数据绑定与事件桥
-
-### 9.1 DataContext
-
-`UWebToUEView::DataContext` 接受任意 UObject。第一版提供三个只读方向绑定：
-
-| HTML 属性 | 目标属性要求 | 行为 |
-| --- | --- | --- |
-| `data-ue-bind-text="PlayerName"` | UPROPERTY；优先支持 FText、FString、FName，其他类型使用 ExportText | 更新元素的首个文本节点；FText 的 namespace/key 或 String Table 历史保持不变。 |
-| `data-ue-bind-visible="bShowWarning"` | bool UPROPERTY | 控制运行时可见性。 |
-| `data-ue-bind-enabled="bCanStart"` | bool UPROPERTY | 控制可用状态和 `:disabled`。 |
-
-绑定名目前只能是 DataContext 根对象上的单个属性名，不支持 `Player.Profile.Name`、数组索引、表达式、转换器或双向写回。
-
-如果 DataContext 实现 `INotifyFieldValueChanged`，控件会订阅实际使用到的 FieldNotify 字段，字段变化后自动刷新。普通 UObject 需要调用 `RefreshBindings()`。
-
-找不到字段或类型不匹配时会写入一次性 Warning，避免每帧刷屏。
-
-### 9.2 UI 事件
-
-点击事件使用：
-
-```html
-<button id="start-button" data-ue-on-click="StartGame">Start</button>
-```
-
-`UWebToUEView::OnUIEvent` 广播两个参数：
-
-- `EventName`：上例中的 `StartGame`
-- `ElementId`：上例中的 `start-button`
-
-蓝图或 C++ 负责把语义事件连接到游戏逻辑。第一版没有 JavaScript、DOM Event 对象、冒泡回调、事件参数对象或异步 Promise 模型。
-
-## 10. Cook 与运行时边界
-
-Cooked 游戏只需要：
-
-- `CompiledNodes`
-- `CompiledRules`
-- `RootNodeIndex`
-- `ReferencedTextures`
-- `ReferencedStringTables`
-- `Diagnostics`
-- 运行时模块
-
-原始 HTML/CSS、导入路径和依赖列表是 Editor-only 数据。当前 Development 和 Shipping 的 IoStore 检查均确认示例 `HUD.uasset`、`MainMenu.uasset` 存在，项目 WebUI 源文件、Chromium、CEF 和 WebBrowser 运行文件不存在。
-
-这意味着运行时不会解析磁盘上的前端文件，也不会执行脚本或发起网页网络请求。当前攻击面更接近自定义资产解析器和 Slate 控件，而不是浏览器。
-
-## 11. 使用示例
-
-HTML：
-
-```html
-<body class="menu">
-  <p data-ue-bind-text="PlayerName">Player</p>
-  <button
-    id="start-button"
-    data-ue-bind-enabled="bCanStart"
-    data-ue-on-click="StartGame">
-    Start Game
-  </button>
-</body>
-```
-
-CSS：
-
-```css
-.menu {
-  width: 100%;
-  height: 100%;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-}
-
-#start-button {
-  width: 240px;
-  height: 56px;
-  background: #2563eb;
-  border-radius: 10px;
-}
-
-#start-button:hover { background: #3b82f6; }
-#start-button:disabled { opacity: 0.45; }
-```
-
-使用流程：
-
-1. 将 HTML/CSS 放在项目 `WebUI` 目录或其他稳定的源文件目录。
-2. 把 HTML 导入 Content Browser，生成 `WebToUEDocument`。
-3. 在 Widget Blueprint 中加入 **WebToUE View**。
-4. 设置 Document 和可选 DataContext。
-5. 监听 `On UI Event`。
-6. 确保需要打包的 Document 被地图、资源或 AlwaysCook 目录引用。
-
-项目内已有 `WebUI/Examples/MainMenu.*`、`WebUI/Examples/HUD.*`、`WebUI/Examples/ScrollableSettings.*` 和 `WebUI/Examples/LocalizedRichText.*` 源文件。
-
-## 12. 测试与构建状态
-
-现有自动化测试：
-
-- `WebToUE.Core.HtmlCss`：HTML、实体、ID/伪类级联和样式重算。
-- `WebToUE.Core.FlexLayout`：百分比宽度、水平 Flex 和 gap。
-- `WebToUE.Core.ConstrainedMeasure`：Yoga 叶节点测量约束与多行高度回传。
-- `WebToUE.Core.RichTextCompile`：行内标签合并、富文本 markup 和 String Table 属性诊断。
-- `WebToUE.Core.ScrollLayout`：滚动 CSS、内容范围计算和偏移钳制。
-- `WebToUE.Core.CssDiagnostics`：多来源样式表顺序、外链 CSS 文件/行/列、未知属性、非法值和内联样式诊断。
-- `WebToUE.Runtime.AssetVersion`：自定义版本注册和旧资产重编译判定。
-- `WebToUE.Runtime.TextWrapping`：Slate 文本在宽/窄约束及 `nowrap` 下的测量行为。
-- `WebToUE.Runtime.LocalizedRichText`：FText namespace/key、String Table 历史和 RichText marshaller 测量。
-- `WebToUE.Runtime.ScrollInteraction`：裁剪感知命中、滚轮滚动、可视位置和边界处理。
-- `WebToUE.Editor.LocalizationImport`：自动 key/文档命名空间跨重导入稳定、显式身份和 String Table 编译。
-
-第一版已经通过：
-
-- UE 5.8 Win64 Editor Development 编译。
-- Win64 Development 游戏目标编译。
-- Win64 Shipping 游戏目标编译。
-- Development 与 Shipping BuildCookRun。
-- BuildPlugin 的 UnrealEditor、UnrealGame Development、UnrealGame Shipping 验证。
-
-目前功能测试仍主要集中在 Core，尚缺少 Slate 输入、绑定、重导入、截图对比、性能和跨平台自动化测试。
-
-## 13. 性能特征与已知风险
-
-- 节点运行时使用轻量 C++ 结构，不为每个 DOM 节点创建 UObject，这是当前架构的主要性能优势。
-- 样式匹配目前会遍历规则和节点；复杂度会随节点数与规则数共同增长。
-- 伪类或绑定变化会重新计算样式、画刷，并把布局标记为脏；尚未区分“仅重绘”和“需要重排”。
-- Yoga 树在布局时重建，尚无持久节点或增量更新。
-- 图片画刷重建时会按软路径加载 Texture2D；未来应引入资源缓存和异步加载策略。
-- 文本布局缓存目前按运行时节点维护；伪类或字体样式频繁变化时仍会参与全量样式和布局刷新，需要后续做失效粒度与性能基准。
-- 文本节点同时保留 HTML 源字符串与编译后的 `FText`；自动 key 会按作者路径复用，但无 `id` 节点的结构重排仍可能改变路径，关键文案应显式指定 key。
-- 基础富文本只覆盖 bold、italic、underline 和换行；尚无 CSS span run、自定义 decorator、图片或超链接。
-- CSS 解析器是面向受控子集的自研实现，不应被当作完整、容错等价或安全隔离级别的浏览器解析器。
-- 当前插件描述只允许 Win64，其他平台尚未形成支持矩阵。
-- 编译资产已有初始自定义版本和已加载旧资产的自动重导入；它仍依赖源文件存在，成功后需要保存资产，且尚无全局未加载资产扫描或字段级迁移。
-
-## 14. 当前明确不支持的能力
-
-- JavaScript、TypeScript 和任意脚本执行。
-- 浏览器 DOM API、网络加载、Cookie、Storage。
-- 表单、输入框、文本编辑和 IME。
-- 可见滚动条、拖拽/触摸滚动、惯性滚动和虚拟列表。
-- 复杂富文本 decorator、行内图片/超链接和高级排版。
-- CSS Grid、浮动、table layout。
-- transition、keyframes、transform。
-- 阴影、渐变、滤镜、mask。
-- CSS 变量、calc、媒体查询。
-- 组件模板、循环、条件渲染。
-- 双向绑定、嵌套属性路径和事件载荷。
-- 触摸、手柄导航、无障碍语义。
-- 世界空间 UI。
-- 独立 DOM/布局/样式调试器。
-
-## 15. 接下来的几个阶段
-
-后续不需要机械复制浏览器发展史，而应沿着“文档与样式 → 响应式数据 → 组件与动画 → 工具链 → 产品化”的顺序推进，并始终以游戏 UI 的实际需求约束子集。
-
-### 阶段一：0.2，补齐可用的 UI 基础设施
-
-- 多行文本、自动换行、本地化和基础富文本（约束测量、Slate 自动换行、稳定 FText/String Table 身份和基础语义 run 已完成；复杂 decorator 待补）。
-- 滚动容器、裁剪修正、滚轮输入和简单列表（基础垂直滚轮滚动、嵌套边界传递和裁剪感知命中已完成；滚动条、拖拽、惯性与虚拟化待补）。
-- 触摸与手柄焦点导航、安全区和 DPI 适配。
-- 更完整的颜色、边框、背景图和常用 CSS 属性。
-- 改进 CSS/HTML 行列号、未知属性和值诊断（多来源 CSS、内联样式、属性和值校验已完成；HTML 属性诊断待补）。
-- 为 Document 引入自定义版本号和自动迁移/重编译策略（基础版本检测与已加载资产重编译已完成，后续补全批量扫描和字段级迁移）。
-- 增加 Slate 输入、绑定、重导入和截图对比自动化测试。
-
-阶段目标：可以稳定完成常规主菜单、设置页、暂停菜单和 HUD，而不依赖 UMG 内部拼接补洞。
-
-### 阶段二：0.3，建立响应式数据与组件层
-
-- 嵌套属性路径、转换器、格式化和可选双向绑定。
-- 条件节点、数组循环、可复用模板和组件参数。
-- 带类型的事件载荷，而不只传递 EventName/ElementId。
-- 与 UE MVVM、CommonUI、输入映射和异步资源更深入集成。
-- 增量更新节点、样式和布局，避免每次字段变化全量重算。
-- 资源缓存、异步纹理加载和大列表虚拟化。
-
-阶段目标：让 HTML/CSS 不只描述静态外观，还能承担大型游戏 UI 的结构复用和响应式状态组织。
-
-### 阶段三：0.4，动画、响应式布局与视觉表现
-
-- `transition`、关键帧时间线和常用 easing。
-- 2D transform、锚点、透明度和颜色动画。
-- 响应式断点、视口条件、平台/输入设备条件样式。
-- 阴影、渐变、九宫格背景和更完整的图片适配。
-- 动画与 Slate invalidation、布局重排之间的性能分层。
-
-阶段目标：覆盖商业游戏菜单常见的动效和多分辨率适配，同时避免引入完整浏览器合成器。
-
-### 阶段四：0.5，编辑器工具链与性能工程
-
-- DOM、Computed Style、布局框、焦点和事件的可视化检查器。
-- HTML/CSS 编辑错误定位、资源跳转和 UMG Designer 实时预览增强。
-- 编译缓存、依赖图、增量编译和后台编译。
-- 节点数、规则匹配、布局、绘制和绑定刷新的 Profiler 指标。
-- 建立性能基准、内存预算和复杂 UI 压力测试。
-- 扩展 Win64 之外的平台并建立自动构建矩阵。
-
-阶段目标：把“技术可行”提升为团队可调试、可度量、可持续维护的生产工具。
-
-### 阶段五：1.0，稳定化与产品化
-
-- 冻结公开 API、资产格式和兼容策略。
-- 完整文档、示例工程、升级指南和错误码体系。
-- 插件独立安装、Marketplace/企业分发、许可证和第三方声明整理。
-- Shipping 性能、崩溃恢复、Cook 校验和长期支持版本矩阵。
-- 根据真实项目反馈确定最终 Web 子集，明确支持标准与非目标。
-
-阶段目标：形成可以被外部项目依赖的稳定版本，而不再只是宿主工程中的开发预览。
+- [Epic：Unreal MCP in Unreal Editor（UE 5.8）](https://dev.epicgames.com/documentation/unreal-engine/unreal-mcp-in-unreal-editor)
+- [Epic：ModelContextProtocol API（UE 5.8）](https://dev.epicgames.com/documentation/unreal-engine/API/Plugins/ModelContextProtocol)
+- [Coherent Labs：Gameface Unreal Overview](https://docs.coherent-labs.com/unreal-gameface/overview/)
+- [Coherent Labs：Gameface Performance Profiling](https://docs.coherent-labs.com/unreal-gameface/performance-optimization/profilingoverview/)
