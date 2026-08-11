@@ -120,6 +120,60 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The log snapshot exposes stable workload fields"),
 		Snapshot.ToLogString().Contains(TEXT("workload={hydrated_nodes=3")));
 
+	TMap<FString, double> TelemetryMeasurements;
+	Snapshot.ForEachTelemetryMeasurement(
+		[&](const TCHAR* Name, double Value)
+		{
+			TestFalse(*FString::Printf(TEXT("Telemetry measurement %s is unique"), Name),
+				TelemetryMeasurements.Contains(Name));
+			TelemetryMeasurements.Add(Name, Value);
+		});
+	TestEqual(TEXT("The telemetry schema has the expected version"),
+		FWebToUEPerformanceSnapshot::TelemetrySchemaVersion, 1);
+	TestEqual(TEXT("The telemetry schema exposes every phase field and workload counter"),
+		TelemetryMeasurements.Num(), FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);
+	static constexpr const TCHAR* ExpectedTelemetryNames[] = {
+		TEXT("phase.hydrate.calls"),
+		TEXT("phase.hydrate.inclusive_ms"),
+		TEXT("phase.style.calls"),
+		TEXT("phase.style.inclusive_ms"),
+		TEXT("phase.measure.calls"),
+		TEXT("phase.measure.inclusive_ms"),
+		TEXT("phase.layout.calls"),
+		TEXT("phase.layout.inclusive_ms"),
+		TEXT("phase.paint_build.calls"),
+		TEXT("phase.paint_build.inclusive_ms"),
+		TEXT("phase.hit_test.calls"),
+		TEXT("phase.hit_test.inclusive_ms"),
+		TEXT("phase.binding.calls"),
+		TEXT("phase.binding.inclusive_ms"),
+		TEXT("workload.hydrated_nodes"),
+		TEXT("workload.hydrated_rules"),
+		TEXT("workload.style_node_visits"),
+		TEXT("workload.selector_evaluations"),
+		TEXT("workload.selector_matches"),
+		TEXT("workload.yoga_nodes_built"),
+		TEXT("workload.text_layout_builds"),
+		TEXT("workload.text_layout_computes"),
+		TEXT("workload.brush_builds"),
+		TEXT("workload.tracked_allocations")
+	};
+	static_assert(UE_ARRAY_COUNT(ExpectedTelemetryNames) ==
+		FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);
+	for (const TCHAR* ExpectedName : ExpectedTelemetryNames)
+	{
+		TestTrue(*FString::Printf(TEXT("Telemetry exposes stable field %s"), ExpectedName),
+			TelemetryMeasurements.Contains(ExpectedName));
+	}
+	TestEqual(TEXT("Telemetry exposes hydrate call count"),
+		TelemetryMeasurements.FindRef(TEXT("phase.hydrate.calls")), 1.0);
+	TestTrue(TEXT("Telemetry exposes hydrate inclusive time"),
+		TelemetryMeasurements.FindRef(TEXT("phase.hydrate.inclusive_ms")) > 0.0);
+	TestEqual(TEXT("Telemetry exposes selector evaluations"),
+		TelemetryMeasurements.FindRef(TEXT("workload.selector_evaluations")), 9.0);
+	TestEqual(TEXT("Telemetry exposes tracked allocation events"),
+		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocations")), 20.0);
+
 	FWebToUEPerformanceCapture EmptyCapture;
 	const FWebToUEPerformanceSnapshot EmptySnapshot = EmptyCapture.GetSnapshot();
 	for (int32 Index = 0; Index < FWebToUEPerformanceSnapshot::PhaseCount; ++Index)
@@ -134,6 +188,15 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		TestEqual(*FString::Printf(TEXT("A new capture isolates %s"), LexToString(Counter)),
 			EmptySnapshot.GetCounter(Counter), uint64(0));
 	}
+	int32 EmptyTelemetryMeasurements = 0;
+	EmptySnapshot.ForEachTelemetryMeasurement(
+		[&](const TCHAR* Name, double Value)
+		{
+			TestEqual(*FString::Printf(TEXT("An empty snapshot reports zero for %s"), Name), Value, 0.0);
+			++EmptyTelemetryMeasurements;
+		});
+	TestEqual(TEXT("An empty snapshot preserves the telemetry schema"), EmptyTelemetryMeasurements,
+		FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);
 
 	FWebToUEPerformanceSnapshot OuterSnapshot;
 	FWebToUEPerformanceSnapshot InnerSnapshot;

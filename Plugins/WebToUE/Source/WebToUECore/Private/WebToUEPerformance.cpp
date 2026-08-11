@@ -14,6 +14,38 @@ namespace WebToUE::Performance::Private
 {
 	static thread_local FWebToUEPerformanceCapture* ActiveCapture = nullptr;
 
+	struct FPhaseTelemetryNames
+	{
+		const TCHAR* Calls;
+		const TCHAR* InclusiveMilliseconds;
+	};
+
+	static constexpr FPhaseTelemetryNames PhaseTelemetryNames[] = {
+		{ TEXT("phase.hydrate.calls"), TEXT("phase.hydrate.inclusive_ms") },
+		{ TEXT("phase.style.calls"), TEXT("phase.style.inclusive_ms") },
+		{ TEXT("phase.measure.calls"), TEXT("phase.measure.inclusive_ms") },
+		{ TEXT("phase.layout.calls"), TEXT("phase.layout.inclusive_ms") },
+		{ TEXT("phase.paint_build.calls"), TEXT("phase.paint_build.inclusive_ms") },
+		{ TEXT("phase.hit_test.calls"), TEXT("phase.hit_test.inclusive_ms") },
+		{ TEXT("phase.binding.calls"), TEXT("phase.binding.inclusive_ms") }
+	};
+
+	static constexpr const TCHAR* CounterTelemetryNames[] = {
+		TEXT("workload.hydrated_nodes"),
+		TEXT("workload.hydrated_rules"),
+		TEXT("workload.style_node_visits"),
+		TEXT("workload.selector_evaluations"),
+		TEXT("workload.selector_matches"),
+		TEXT("workload.yoga_nodes_built"),
+		TEXT("workload.text_layout_builds"),
+		TEXT("workload.text_layout_computes"),
+		TEXT("workload.brush_builds"),
+		TEXT("workload.tracked_allocations")
+	};
+
+	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
+	static_assert(UE_ARRAY_COUNT(CounterTelemetryNames) == FWebToUEPerformanceSnapshot::CounterCount);
+
 	static int32 ToIndex(EWebToUEPerformancePhase Phase)
 	{
 		const int32 Index = static_cast<int32>(Phase);
@@ -42,6 +74,25 @@ const FWebToUEPerformanceMetric& FWebToUEPerformanceSnapshot::Get(EWebToUEPerfor
 uint64 FWebToUEPerformanceSnapshot::GetCounter(EWebToUEPerformanceCounter Counter) const
 {
 	return Counters[WebToUE::Performance::Private::ToIndex(Counter)];
+}
+
+void FWebToUEPerformanceSnapshot::ForEachTelemetryMeasurement(
+	TFunctionRef<void(const TCHAR* Name, double Value)> Visitor) const
+{
+	for (int32 Index = 0; Index < PhaseCount; ++Index)
+	{
+		const FWebToUEPerformanceMetric& Metric = Metrics[Index];
+		const WebToUE::Performance::Private::FPhaseTelemetryNames& Names =
+			WebToUE::Performance::Private::PhaseTelemetryNames[Index];
+		Visitor(Names.Calls, static_cast<double>(Metric.CallCount));
+		Visitor(Names.InclusiveMilliseconds, Metric.GetInclusiveMilliseconds());
+	}
+
+	for (int32 Index = 0; Index < CounterCount; ++Index)
+	{
+		Visitor(WebToUE::Performance::Private::CounterTelemetryNames[Index],
+			static_cast<double>(Counters[Index]));
+	}
 }
 
 FString FWebToUEPerformanceSnapshot::ToLogString() const

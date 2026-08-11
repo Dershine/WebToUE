@@ -3,6 +3,7 @@
 #include "Containers/StaticArray.h"
 #include "CoreMinimal.h"
 #include "Stats/Stats.h"
+#include "Templates/Function.h"
 
 DECLARE_STATS_GROUP(TEXT("WebToUE"), STATGROUP_WebToUE, STATCAT_Advanced);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("Hydrate"), STAT_WebToUE_Hydrate, STATGROUP_WebToUE, WEBTOUECORE_API);
@@ -54,11 +55,14 @@ struct WEBTOUECORE_API FWebToUEPerformanceSnapshot
 {
 	static constexpr int32 PhaseCount = static_cast<int32>(EWebToUEPerformancePhase::Count);
 	static constexpr int32 CounterCount = static_cast<int32>(EWebToUEPerformanceCounter::Count);
+	static constexpr int32 TelemetrySchemaVersion = 1;
+	static constexpr int32 TelemetryMeasurementCount = (PhaseCount * 2) + CounterCount;
 	TStaticArray<FWebToUEPerformanceMetric, PhaseCount> Metrics;
 	TStaticArray<uint64, CounterCount> Counters{};
 
 	const FWebToUEPerformanceMetric& Get(EWebToUEPerformancePhase Phase) const;
 	uint64 GetCounter(EWebToUEPerformanceCounter Counter) const;
+	void ForEachTelemetryMeasurement(TFunctionRef<void(const TCHAR* Name, double Value)> Visitor) const;
 	FString ToLogString() const;
 };
 

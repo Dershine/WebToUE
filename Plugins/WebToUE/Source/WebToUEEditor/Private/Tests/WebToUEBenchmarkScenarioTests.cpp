@@ -10,6 +10,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEBenchmarkScenarioTest, "WebToUE.Editor.
 
 bool FWebToUEBenchmarkScenarioTest::RunTest(const FString& Parameters)
 {
+	SetTelemetryStorage(TEXT("WebToUEPerformance"));
+
 	const TArray<FWebToUEBenchmarkScenarioDefinition>& Definitions =
 		FWebToUEBenchmarkScenarioGenerator::GetStandardDefinitions();
 	TestEqual(TEXT("The benchmark corpus has three standard scales"), Definitions.Num(), 3);
@@ -41,6 +43,23 @@ bool FWebToUEBenchmarkScenarioTest::RunTest(const FString& Parameters)
 			return Compiled;
 		}();
 		AddInfo(Prefix + PerformanceSnapshot.ToLogString());
+
+		const FString TelemetryContext = FString::Printf(TEXT("schema=%d;scenario=%s"),
+			FWebToUEPerformanceSnapshot::TelemetrySchemaVersion, *Definitions[ScenarioIndex].Name);
+		AddTelemetryData(TEXT("schema.version"), FWebToUEPerformanceSnapshot::TelemetrySchemaVersion,
+			TelemetryContext);
+		AddTelemetryData(TEXT("scenario.node_count"), First.Definition.NodeCount, TelemetryContext);
+		AddTelemetryData(TEXT("scenario.rule_count"), First.Definition.RuleCount, TelemetryContext);
+		int32 TelemetryMeasurementCount = 0;
+		PerformanceSnapshot.ForEachTelemetryMeasurement(
+			[&](const TCHAR* Name, double Value)
+			{
+				AddTelemetryData(Name, Value, TelemetryContext);
+				++TelemetryMeasurementCount;
+			});
+		TestEqual(*(Prefix + TEXT("emits every snapshot telemetry measurement")),
+			TelemetryMeasurementCount, FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);
+
 		TestEqual(*(Prefix + TEXT("visits every style node exactly once")),
 			PerformanceSnapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits),
 			static_cast<uint64>(First.Definition.NodeCount));
