@@ -20,6 +20,13 @@ namespace WebToUE::Performance::Private
 		check(Index >= 0 && Index < FWebToUEPerformanceSnapshot::PhaseCount);
 		return Index;
 	}
+
+	static int32 ToIndex(EWebToUEPerformanceCounter Counter)
+	{
+		const int32 Index = static_cast<int32>(Counter);
+		check(Index >= 0 && Index < FWebToUEPerformanceSnapshot::CounterCount);
+		return Index;
+	}
 }
 
 double FWebToUEPerformanceMetric::GetInclusiveMilliseconds() const
@@ -30,6 +37,11 @@ double FWebToUEPerformanceMetric::GetInclusiveMilliseconds() const
 const FWebToUEPerformanceMetric& FWebToUEPerformanceSnapshot::Get(EWebToUEPerformancePhase Phase) const
 {
 	return Metrics[WebToUE::Performance::Private::ToIndex(Phase)];
+}
+
+uint64 FWebToUEPerformanceSnapshot::GetCounter(EWebToUEPerformanceCounter Counter) const
+{
+	return Counters[WebToUE::Performance::Private::ToIndex(Counter)];
 }
 
 FString FWebToUEPerformanceSnapshot::ToLogString() const
@@ -46,6 +58,18 @@ FString FWebToUEPerformanceSnapshot::ToLogString() const
 		Result += FString::Printf(TEXT("%s={calls=%llu,inclusive_ms=%.6f}"), LexToString(Phase),
 			static_cast<unsigned long long>(Metric.CallCount), Metric.GetInclusiveMilliseconds());
 	}
+	Result += TEXT("; workload={");
+	for (int32 Index = 0; Index < CounterCount; ++Index)
+	{
+		if (Index > 0)
+		{
+			Result += TEXT(",");
+		}
+		const EWebToUEPerformanceCounter Counter = static_cast<EWebToUEPerformanceCounter>(Index);
+		Result += FString::Printf(TEXT("%s=%llu"), LexToString(Counter),
+			static_cast<unsigned long long>(Counters[Index]));
+	}
+	Result += TEXT("}");
 	return Result;
 }
 
@@ -83,6 +107,19 @@ void FWebToUEPerformanceCapture::Record(EWebToUEPerformancePhase Phase, uint64 I
 	Metric.InclusiveCycles += InclusiveCycles;
 }
 
+void FWebToUEPerformanceCapture::AddCounter(EWebToUEPerformanceCounter Counter, uint64 Amount)
+{
+	Snapshot.Counters[WebToUE::Performance::Private::ToIndex(Counter)] += Amount;
+}
+
+void FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter Counter, uint64 Amount)
+{
+	if (FWebToUEPerformanceCapture* Capture = FWebToUEPerformanceCapture::GetActiveCapture())
+	{
+		Capture->AddCounter(Counter, Amount);
+	}
+}
+
 FWebToUEPerformanceScope::FWebToUEPerformanceScope(EWebToUEPerformancePhase InPhase)
 	: Capture(FWebToUEPerformanceCapture::GetActiveCapture())
 	, Phase(InPhase)
@@ -113,5 +150,23 @@ const TCHAR* LexToString(EWebToUEPerformancePhase Phase)
 	case EWebToUEPerformancePhase::HitTest: return TEXT("HitTest");
 	case EWebToUEPerformancePhase::Binding: return TEXT("Binding");
 	default: return TEXT("Unknown");
+	}
+}
+
+const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
+{
+	switch (Counter)
+	{
+	case EWebToUEPerformanceCounter::HydratedNodes: return TEXT("hydrated_nodes");
+	case EWebToUEPerformanceCounter::HydratedRules: return TEXT("hydrated_rules");
+	case EWebToUEPerformanceCounter::StyleNodeVisits: return TEXT("style_node_visits");
+	case EWebToUEPerformanceCounter::SelectorEvaluations: return TEXT("selector_evaluations");
+	case EWebToUEPerformanceCounter::SelectorMatches: return TEXT("selector_matches");
+	case EWebToUEPerformanceCounter::YogaNodesBuilt: return TEXT("yoga_nodes_built");
+	case EWebToUEPerformanceCounter::TextLayoutBuilds: return TEXT("text_layout_builds");
+	case EWebToUEPerformanceCounter::TextLayoutComputes: return TEXT("text_layout_computes");
+	case EWebToUEPerformanceCounter::BrushBuilds: return TEXT("brush_builds");
+	case EWebToUEPerformanceCounter::TrackedAllocations: return TEXT("tracked_allocations");
+	default: return TEXT("unknown");
 	}
 }

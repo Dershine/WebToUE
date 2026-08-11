@@ -3,6 +3,7 @@
 #include "Benchmarks/WebToUEBenchmarkScenario.h"
 #include "Misc/AutomationTest.h"
 #include "WebToUECompiler.h"
+#include "WebToUEPerformance.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEBenchmarkScenarioTest, "WebToUE.Editor.BenchmarkScenarios",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -30,8 +31,24 @@ bool FWebToUEBenchmarkScenarioTest::RunTest(const FString& Parameters)
 		TestEqual(*(Prefix + TEXT("HTML generation is deterministic")), First.Html, Second.Html);
 		TestEqual(*(Prefix + TEXT("CSS generation is deterministic")), First.Css, Second.Css);
 
-		const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
-			First.Html, First.Css, First.Definition.Name + TEXT(".html"));
+		FWebToUEPerformanceSnapshot PerformanceSnapshot;
+		const TSharedRef<FWebToUEDocument> Document = [&]()
+		{
+			FWebToUEPerformanceCapture Capture;
+			const TSharedRef<FWebToUEDocument> Compiled = FWebToUECompiler::Compile(
+				First.Html, First.Css, First.Definition.Name + TEXT(".html"));
+			PerformanceSnapshot = Capture.GetSnapshot();
+			return Compiled;
+		}();
+		AddInfo(Prefix + PerformanceSnapshot.ToLogString());
+		TestEqual(*(Prefix + TEXT("visits every style node exactly once")),
+			PerformanceSnapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits),
+			static_cast<uint64>(First.Definition.NodeCount));
+		TestEqual(*(Prefix + TEXT("evaluates every rule for every node")),
+			PerformanceSnapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations),
+			static_cast<uint64>(First.Definition.NodeCount) * static_cast<uint64>(First.Definition.RuleCount));
+		TestTrue(*(Prefix + TEXT("records successful selector matches")),
+			PerformanceSnapshot.GetCounter(EWebToUEPerformanceCounter::SelectorMatches) > 0);
 		TestFalse(*(Prefix + TEXT("compiles without errors")), Document->HasErrors());
 		TestEqual(*(Prefix + TEXT("compiles the exact rule count")),
 			Document->Rules.Num(), First.Definition.RuleCount);

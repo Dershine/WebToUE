@@ -25,6 +25,23 @@ enum class EWebToUEPerformancePhase : uint8
 	Count
 };
 
+enum class EWebToUEPerformanceCounter : uint8
+{
+	HydratedNodes,
+	HydratedRules,
+	StyleNodeVisits,
+	SelectorEvaluations,
+	SelectorMatches,
+	YogaNodesBuilt,
+	TextLayoutBuilds,
+	TextLayoutComputes,
+	BrushBuilds,
+	// WebToUE source-level allocation events explicitly marked at owned hot-path call sites.
+	// This is intentionally not a process-wide allocator or Slate/Yoga-internal allocation total.
+	TrackedAllocations,
+	Count
+};
+
 struct WEBTOUECORE_API FWebToUEPerformanceMetric
 {
 	uint64 CallCount = 0;
@@ -36,9 +53,12 @@ struct WEBTOUECORE_API FWebToUEPerformanceMetric
 struct WEBTOUECORE_API FWebToUEPerformanceSnapshot
 {
 	static constexpr int32 PhaseCount = static_cast<int32>(EWebToUEPerformancePhase::Count);
+	static constexpr int32 CounterCount = static_cast<int32>(EWebToUEPerformanceCounter::Count);
 	TStaticArray<FWebToUEPerformanceMetric, PhaseCount> Metrics;
+	TStaticArray<uint64, CounterCount> Counters{};
 
 	const FWebToUEPerformanceMetric& Get(EWebToUEPerformancePhase Phase) const;
+	uint64 GetCounter(EWebToUEPerformanceCounter Counter) const;
 	FString ToLogString() const;
 };
 
@@ -55,6 +75,7 @@ public:
 
 	void Reset();
 	FWebToUEPerformanceSnapshot GetSnapshot() const;
+	static void RecordCounter(EWebToUEPerformanceCounter Counter, uint64 Amount = 1);
 
 private:
 	friend class FWebToUEPerformanceScope;
@@ -64,6 +85,7 @@ private:
 
 	static FWebToUEPerformanceCapture* GetActiveCapture();
 	void Record(EWebToUEPerformancePhase Phase, uint64 InclusiveCycles);
+	void AddCounter(EWebToUEPerformanceCounter Counter, uint64 Amount);
 };
 
 class WEBTOUECORE_API FWebToUEPerformanceScope
@@ -82,3 +104,4 @@ private:
 };
 
 WEBTOUECORE_API const TCHAR* LexToString(EWebToUEPerformancePhase Phase);
+WEBTOUECORE_API const TCHAR* LexToString(EWebToUEPerformanceCounter Counter);

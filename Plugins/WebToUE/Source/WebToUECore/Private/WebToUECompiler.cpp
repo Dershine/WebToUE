@@ -1124,6 +1124,7 @@ namespace WebToUE::Private
 
 	static void ResolveNode(FWebToUENode& Node, const FWebToUEDocument& Document, const FWebToUEComputedStyle* ParentStyle)
 	{
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::StyleNodeVisits);
 		FWebToUEComputedStyle Style;
 		if (Node.Type == EWebToUENodeType::Text)
 		{
@@ -1151,9 +1152,18 @@ namespace WebToUE::Private
 		}
 
 		TArray<const FWebToUEStyleRule*> Matches;
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::SelectorEvaluations, Document.Rules.Num());
 		for (const FWebToUEStyleRule& Rule : Document.Rules)
 		{
-			if (FWebToUEStyleResolver::Matches(Rule, Node)) Matches.Add(&Rule);
+			if (FWebToUEStyleResolver::Matches(Rule, Node))
+			{
+				FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::SelectorMatches);
+				if (Matches.Num() == Matches.Max())
+				{
+					FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
+				}
+				Matches.Add(&Rule);
+			}
 		}
 		Matches.Sort([](const FWebToUEStyleRule& A, const FWebToUEStyleRule& B)
 		{
@@ -1270,6 +1280,8 @@ namespace WebToUE::Private
 		TArray<TUniquePtr<FYogaMeasureContext>>& MeasureContexts)
 	{
 		YGNodeRef Node = YGNodeNew();
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::YogaNodesBuilt);
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 		const FWebToUEComputedStyle& S = WebNode.Style;
 		YGNodeStyleSetDisplay(Node, S.Display == EWebToUEDisplay::None ? YGDisplayNone : YGDisplayFlex);
 		YGNodeStyleSetPositionType(Node, S.Position == EWebToUEPosition::Absolute ? YGPositionTypeAbsolute : YGPositionTypeRelative);
@@ -1311,6 +1323,7 @@ namespace WebToUE::Private
 
 		if ((WebNode.Type == EWebToUENodeType::Text || WebNode.Tag == TEXT("img")) && WebNode.Children.IsEmpty())
 		{
+			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 			TUniquePtr<FYogaMeasureContext>& Context = MeasureContexts.Add_GetRef(MakeUnique<FYogaMeasureContext>());
 			Context->WebNode = &WebNode;
 			Context->MeasureNode = &MeasureNode;

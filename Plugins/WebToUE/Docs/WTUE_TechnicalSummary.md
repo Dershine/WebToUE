@@ -10,7 +10,7 @@
 >
 > 当前里程碑：M2——增量原生运行时
 >
-> 最近核验：2026-08-11，基于 Git `342c04a916df` + working tree
+> 最近核验：2026-08-11，基于 Git `57a334d699c2` + working tree
 >
 > 统一术语：[CONTEXT.md](../../../CONTEXT.md)
 
@@ -82,7 +82,7 @@
 | 自动化测试 | 13 / 13 通过（2026-08-11，working tree） |
 | 当前编译验证 | UE 5.8 Win64 Editor Development 通过（2026-08-11，working tree） |
 | 历史发布验证 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 均曾通过；发布前必须在当前提交重新执行 |
-| Git 基线 | `342c04a916df` + working tree；未提交，不生成伪哈希 |
+| Git 基线 | `57a334d699c2` + working tree；未提交，不生成伪哈希 |
 | 当前发布级别 | Developer Preview / 技术可行性与基础能力阶段 |
 
 ### 2.3 宏观里程碑
@@ -214,7 +214,7 @@ Cooked 游戏保留 Compiled Nodes、Rules、Root、纹理/String Table 引用�
 - 语义化 `data-ue-on-click` → `OnUIEvent`。
 - 自定义资产版本、旧资产重编译请求。
 - Editor-only 的确定性 100/500/2,000 节点 Benchmark Corpus 与 50/200/500 规则集。
-- Win64 Editor 编译以及 12 项自动化测试。
+- Win64 Editor 编译以及 13 项自动化测试。
 
 ### 6.2 已实现但仍需工程化证据
 
@@ -247,17 +247,19 @@ Cooked 游戏保留 Compiled Nodes、Rules、Root、纹理/String Table 引用�
 
 | 模块 | 大小 |
 | --- | ---: |
-| `UnrealEditor-WebToUECore.dll` | 222,720 B |
-| `UnrealEditor-WebToUEEditor.dll` | 185,856 B |
-| `UnrealEditor-WebToUERuntime.dll` | 280,576 B |
+| `UnrealEditor-WebToUECore.dll` | 234,496 B |
+| `UnrealEditor-WebToUEEditor.dll` | 188,416 B |
+| `UnrealEditor-WebToUERuntime.dll` | 301,056 B |
 | `UnrealEditor-WebToUEYoga.dll` | 340,480 B |
-| 合计 | 1,029,632 B（约 0.98 MiB） |
+| 合计 | 1,064,448 B（约 1.02 MiB） |
 
 这只能证明当前插件代码的固定文件成本很小，不代表 Shipping 包体、运行时内存、GPU 成本或 Gameface 性能对等。
 
-M2 已建立三档确定性 Benchmark Corpus：100 节点/50 规则、500 节点/200 规则和 2,000 节点/500 规则。Automation Test 会验证源码生成确定性、编译无错误、运行节点/规则精确计数以及固定 Binding/Hover 目标。Runtime 现已在真实调用边界记录 Hydrate、Style、Measure、Layout、Paint Build、Hit Test、Binding 七阶段的 UE cycle stat、Insights trace scope 和线程局部 Automation capture；专项测试会执行真实 Hydrate/Binding/Yoga Measure/Layout/Slate Paint/Hit Test，并验证七阶段均被捕获及嵌套 capture 隔离。
+M2 已建立三档确定性 Benchmark Corpus：100 节点/50 规则、500 节点/200 规则和 2,000 节点/500 规则。Automation Test 会验证源码生成确定性、编译无错误、运行节点/规则精确计数以及固定 Binding/Hover 目标。Runtime 现已在真实调用边界记录 Hydrate、Style、Measure、Layout、Paint Build、Hit Test、Binding 七阶段的 UE cycle stat、Insights trace scope 和线程局部 Automation capture；同一固定 Snapshot 还记录 Hydrate 节点/规则、Style 节点访问、Selector 求值/匹配、Yoga 节点、Text Layout 构建/计算、Brush 构建和标记分配事件，并验证真正的嵌套 capture 隔离。
 
-同一 Editor Development 环境中，插桩前固定 Corpus 10 样本为 median `0.600095 s`、P95 `0.605533 s`；插桩后 10 样本为 median `0.611922 s`、P95 `0.619202 s`，分别变化 `+1.97%` 与 `+2.26%`，低于本次实施使用的临时 `+5% / +10%` 回归守门。该数据只说明本次插桩没有造成明显 Corpus 回归，不是第 7.2 节的永久性能预算，也未提供节点/规则/文本/Brush/分配数量或阶段 P50/P95。
+固定 Corpus 的单次 Compile 可重复得到：100/50 场景 `100` 次 Style 节点访问、`5,000` 次 Selector 求值、`138` 次匹配；500/200 场景为 `500 / 100,000 / 694`；2,000/500 场景为 `2,000 / 1,000,000 / 2,794`。三节点 Runtime 集成场景验证 `3` 个 Hydrate 节点、`1` 条规则、`3` 个 Yoga 节点、`1/2` 次 Text Layout 构建/计算、`4` 个 Brush 和 `20` 个标记分配事件。`tracked_allocations` 只统计 WebToUE 源码中明确标注、可归因的分配点，不等同于进程级 malloc 或 Slate/Yoga 内部分配总数。
+
+同一 Editor Development 环境中，阶段计时插桩前固定 Corpus 10 样本为 median `0.600095 s`、P95 `0.605533 s`；插桩后 10 样本为 median `0.611922 s`、P95 `0.619202 s`，分别变化 `+1.97%` 与 `+2.26%`。本次工作量计数使用相同永久测量外壳、新 Editor 会话、1 次 warmup 与 10 次采样：修改前 median/P50 `0.613698 s`、P95 `0.623550 s`，修改后为 `0.613103 s`、`0.625830 s`，分别变化 `-0.10%` 与 `+0.37%`，低于临时 `+5% / +10%` 回归守门。两组数据只说明插桩未造成明显 Corpus 回归，不是第 7.2 节的永久性能预算；阶段 P50/P95、内存字节和自动化预算门禁仍未建立。
 
 有利特征：
 
@@ -303,7 +305,7 @@ M2 已建立三档确定性 Benchmark Corpus：100 节点/50 规则、500 节点
 | R-03 | 编译数据与 Runtime State 混合在节点结构 | High | `FWebToUENode` 字段已确认 | 拆分 IR/Instance/Cache 生命周期 | ⬜ M2 |
 | R-04 | 状态变化路径可能同步加载纹理 | High | Brush 重建使用 `LoadObject` | 编译依赖 + Resource Cache + 异步策略 | ⬜ M2 |
 | R-05 | Compiler/View 职责集中，修改回归面扩大 | High | 两个核心实现文件体量和职责已确认 | 按编译阶段和 Runtime 服务拆分 | ⬜ M2 |
-| R-06 | 没有完整可重复性能基准，无法证明“原生且高效” | Critical | 固定 Corpus 与七阶段计时/capture 已建立；计数、分配、阶段分位数和永久预算门禁仍缺失 | Benchmark、Stat、Trace、预算门禁 | 🚧 M2 |
+| R-06 | 没有完整可重复性能基准，无法证明“原生且高效” | Critical | 固定 Corpus、七阶段计时/capture 与可归因工作量计数已建立；阶段分位数、内存字节和永久预算门禁仍缺失 | Benchmark、Stat、Trace、预算门禁 | 🚧 M2 |
 | R-07 | CSS 声明使用 Map，重复声明顺序不完全等价 | Medium | 当前声明模型已确认 | Ordered Declaration IR | ⬜ M2 |
 | R-08 | 仅 Win64，平台假设尚未暴露 | Medium | `.uplugin` 平台限制 | 平台抽象审计与构建矩阵 | ⬜ M6 |
 | R-09 | MCP 为 Experimental、本地服务无认证，通用 Python 执行面权限较高 | Medium | UE 5.8 原生 MCP 与 VibeUE 5.0 已在开发环境验证 | 仅回环、本地受信任、Editor-only；项目专用工具仍默认关闭并遵守最小权限 | ⬜ M5 |
@@ -405,11 +407,11 @@ M2 已建立三档确定性 Benchmark Corpus：100 节点/50 规则、500 节点
 
 M2 是当前唯一活跃里程碑。工作包按依赖顺序推进；原则上不在 M2.0～M2.4 完成前扩张大型 CSS、组件或动画能力。
 
-### M2.0——性能可观测性 🚧 2 / 6
+### M2.0——性能可观测性 🚧 3 / 6
 
 - [x] 固定 100/500/2,000 节点文档生成器与 50/200/500 规则集。
 - [x] 分别统计 Hydrate、Style、Measure、Layout、Paint Build、Hit Test、Binding。
-- [ ] 记录节点、规则、匹配、Yoga、文本布局、Brush 和分配数量。
+- [x] 记录 Hydrate 节点/规则、Style 节点、Selector 求值/匹配、Yoga、Text Layout、Brush 和 WebToUE 标记分配事件数量。
 - [ ] Unreal Insights/CSV/Automation 可消费的输出。
 - [ ] 固定测试机、构建配置、采样次数和 P50/P95 规则。
 - [ ] 把第 7.2 节预算转成回归门禁。
@@ -551,6 +553,7 @@ Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Prefligh
 
 | 日期 | 基线 | 变化 | 路线影响 |
 | --- | --- | --- | --- |
+| 2026-08-11 | `57a334d` + working tree | 为固定性能 Snapshot 增加 Hydrate/Style/Selector/Yoga/Text Layout/Brush/标记分配工作量计数，固定 Corpus 断言 `N` 与 `N×R`，Runtime 集成测试验证精确计数和真正的嵌套 capture 隔离；13 / 13 WebToUE 测试和 Win64 Editor Development 构建通过，计数前后 median/P95 为 `0.613698/0.623550 s` 与 `0.613103/0.625830 s`。 | M2.0 达到 3/6；R-06 保持 Critical，继续建设标准输出、阶段分位数和永久预算门禁。 |
 | 2026-08-11 | `342c04a` + working tree | 建立 Editor 生命周期精确非沙箱执行边界、关 Editor 前 Preflight、项目互斥锁、持久 Operation State、3 / 3 Pester 与 ADR-0001；真实 UE build/readiness/MCP/Python/World 通过。 | R-10 降为 Mitigated；长期开发不再因观察超时或 sandbox 权限失败重复启动 UBT。 |
 | 2026-08-11 | `342c04a` + working tree | 为 Hydrate/Style/Measure/Layout/Paint Build/Hit Test/Binding 增加 Stats、Trace 与 Automation capture，新增 Runtime 集成测试；13 / 13 WebToUE 测试通过，固定 Corpus 前后 median/P95 为 `0.600095/0.605533 s` 与 `0.611922/0.619202 s`。 | M2.0 达到 2/6；R-06 保持 Critical，继续建设计数、阶段分位数和永久预算门禁。 |
 | 2026-08-11 | `2674521` + working tree | 接入固定版本的 Editor-only VibeUE 5.0，验证原生 MCP 共享端点、Agent Skills、PerformanceService、Win64 BuildPlugin、项目级 Editor 构建、12 / 12 WebToUE 测试及 17 / 17 VibeUE 测试。 | 提前获得 M2 性能调查与通用 Editor 调试能力；不替代 M5 的领域化最小权限 `WebToUEMCP`。 |

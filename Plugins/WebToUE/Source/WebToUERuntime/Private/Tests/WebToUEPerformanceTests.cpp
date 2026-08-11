@@ -97,6 +97,29 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 			Snapshot.Get(Phase).CallCount > 0);
 	}
 
+	TestEqual(TEXT("Hydrate records the compiled node count"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::HydratedNodes), uint64(3));
+	TestEqual(TEXT("Hydrate records the compiled rule count"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::HydratedRules), uint64(1));
+	TestEqual(TEXT("Three style passes visit all three nodes"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(9));
+	TestEqual(TEXT("Three style passes evaluate the rule for every node"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), uint64(9));
+	TestEqual(TEXT("The button selector matches once per style pass"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorMatches), uint64(3));
+	TestEqual(TEXT("Layout builds one Yoga node per runtime node"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(3));
+	TestEqual(TEXT("The text cache is built once"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutBuilds), uint64(1));
+	TestEqual(TEXT("Text layout is computed for measure and paint"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(2));
+	TestEqual(TEXT("Two style refreshes each build body and button brushes"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(4));
+	TestEqual(TEXT("The representative workflow records all marked allocation events"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations), uint64(20));
+	TestTrue(TEXT("The log snapshot exposes stable workload fields"),
+		Snapshot.ToLogString().Contains(TEXT("workload={hydrated_nodes=3")));
+
 	FWebToUEPerformanceCapture EmptyCapture;
 	const FWebToUEPerformanceSnapshot EmptySnapshot = EmptyCapture.GetSnapshot();
 	for (int32 Index = 0; Index < FWebToUEPerformanceSnapshot::PhaseCount; ++Index)
@@ -105,6 +128,30 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		TestEqual(*FString::Printf(TEXT("A new capture isolates %s"), LexToString(Phase)),
 			EmptySnapshot.Get(Phase).CallCount, uint64(0));
 	}
+	for (int32 Index = 0; Index < FWebToUEPerformanceSnapshot::CounterCount; ++Index)
+	{
+		const EWebToUEPerformanceCounter Counter = static_cast<EWebToUEPerformanceCounter>(Index);
+		TestEqual(*FString::Printf(TEXT("A new capture isolates %s"), LexToString(Counter)),
+			EmptySnapshot.GetCounter(Counter), uint64(0));
+	}
+
+	FWebToUEPerformanceSnapshot OuterSnapshot;
+	FWebToUEPerformanceSnapshot InnerSnapshot;
+	{
+		FWebToUEPerformanceCapture OuterCapture;
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::StyleNodeVisits, 1);
+		{
+			FWebToUEPerformanceCapture InnerCapture;
+			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::StyleNodeVisits, 2);
+			InnerSnapshot = InnerCapture.GetSnapshot();
+		}
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::StyleNodeVisits, 4);
+		OuterSnapshot = OuterCapture.GetSnapshot();
+	}
+	TestEqual(TEXT("The inner capture records only inner work"),
+		InnerSnapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(2));
+	TestEqual(TEXT("The outer capture excludes inner work and resumes afterward"),
+		OuterSnapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(5));
 	return true;
 }
 

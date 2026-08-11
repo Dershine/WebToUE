@@ -46,11 +46,19 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	HoveredNode = PressedNode = FocusedNode = nullptr;
 	if (InDocument && InDocument->CompiledNodes.IsValidIndex(InDocument->RootNodeIndex))
 	{
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::HydratedNodes, InDocument->CompiledNodes.Num());
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::HydratedRules, InDocument->CompiledRules.Num());
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 		RuntimeDocument = MakeShared<FWebToUEDocument>();
 		TArray<TSharedPtr<FWebToUENode>> Nodes;
+		if (!InDocument->CompiledNodes.IsEmpty())
+		{
+			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
+		}
 		Nodes.Reserve(InDocument->CompiledNodes.Num());
 		for (const FWebToUECompiledNode& Source : InDocument->CompiledNodes)
 		{
+			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 			TSharedPtr<FWebToUENode> Node = MakeShared<FWebToUENode>();
 			Node->Type = static_cast<EWebToUENodeType>(Source.Type);
 			Node->Tag = Source.Tag;
@@ -117,6 +125,7 @@ static FTextBlockStyle MakeTextBlockStyle(const FWebToUENode& Node)
 
 static TSharedRef<FSlateStyleSet> MakeRichTextStyleSet(const FWebToUENode& Node)
 {
+	FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 	TSharedRef<FSlateStyleSet> StyleSet = MakeShared<FSlateStyleSet>(TEXT("WebToUERichText"));
 	const FTextBlockStyle BaseStyle = MakeTextBlockStyle(Node);
 	const UWebToUESettings* Settings = GetDefault<UWebToUESettings>();
@@ -152,6 +161,8 @@ FSlateTextBlockLayout& SWebToUEView::PrepareTextLayout(const FWebToUENode& Node,
 	TUniquePtr<FWebToUETextLayoutCache>& Cache = TextLayouts.FindOrAdd(&Node);
 	if (!Cache || Cache->bRichText != Node.bRichText)
 	{
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TextLayoutBuilds);
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 		Cache = MakeUnique<FWebToUETextLayoutCache>();
 		Cache->bRichText = Node.bRichText;
 		TSharedRef<ITextLayoutMarshaller> Marshaller = FPlainTextLayoutMarshaller::Create();
@@ -160,6 +171,7 @@ FSlateTextBlockLayout& SWebToUEView::PrepareTextLayout(const FWebToUENode& Node,
 			Cache->RichTextStyleSet = MakeRichTextStyleSet(Node);
 			Marshaller = FRichTextLayoutMarshaller::Create(TArray<TSharedRef<ITextDecorator>>(), Cache->RichTextStyleSet.Get());
 		}
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 		Cache->Layout = MakeUnique<FSlateTextBlockLayout>(const_cast<SWebToUEView*>(this), FTextBlockStyle::GetDefault(),
 			TOptional<ETextShapingMethod>(), TOptional<ETextFlowDirection>(), FCreateSlateTextLayout(),
 			Marshaller, nullptr);
@@ -170,6 +182,7 @@ FSlateTextBlockLayout& SWebToUEView::PrepareTextLayout(const FWebToUENode& Node,
 		GetDisplayText(Node), FText::GetEmpty(), EffectiveWrapWidth, false,
 		ETextWrappingPolicy::DefaultWrapping, ETextTransformPolicy::None, FMargin(), 1.0f, true,
 		ToTextJustification(Node.Style.TextAlign));
+	FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TextLayoutComputes);
 	Cache->Layout->ComputeDesiredSize(DesiredSizeArgs, 1.0f, MakeTextBlockStyle(Node));
 	return *Cache->Layout;
 }
@@ -355,6 +368,10 @@ int32 SWebToUEView::PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, 
 		bPushedClip = true;
 	}
 
+	if (!Node.Children.IsEmpty())
+	{
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
+	}
 	TArray<TSharedPtr<FWebToUENode>> SortedChildren = Node.Children;
 	SortedChildren.Sort([](const TSharedPtr<FWebToUENode>& A, const TSharedPtr<FWebToUENode>& B)
 	{
@@ -383,6 +400,8 @@ void SWebToUEView::RebuildBrushes() const
 			if (UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Source))
 			{
 				LoadedResources.Emplace(Texture);
+				FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
+				FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 				TSharedPtr<FSlateBrush> Brush = MakeShared<FSlateBrush>();
 				Brush->DrawAs = ESlateBrushDrawType::Image;
 				Brush->SetResourceObject(Texture);
@@ -392,6 +411,8 @@ void SWebToUEView::RebuildBrushes() const
 		}
 		else if (Node.Type == EWebToUENodeType::Element)
 		{
+			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
+			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 			Brushes.Add(&Node, MakeShared<FSlateRoundedBoxBrush>(Node.Style.BackgroundColor,
 				Node.Style.BorderRadius, Node.Style.BorderColor, Node.Style.BorderWidth, FVector2f(32.0f, 32.0f)));
 		}
@@ -472,6 +493,7 @@ void SWebToUEView::RefreshBindings(UObject* DataContext)
 				}
 				if (!TextNode)
 				{
+					FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 					TextNode = MakeShared<FWebToUENode>();
 					TextNode->Type = EWebToUENodeType::Text;
 					TextNode->Tag = TEXT("#text");
