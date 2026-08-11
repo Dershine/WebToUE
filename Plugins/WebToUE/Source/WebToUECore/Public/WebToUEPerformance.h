@@ -40,6 +40,11 @@ enum class EWebToUEPerformanceCounter : uint8
 	// WebToUE source-level allocation events explicitly marked at owned hot-path call sites.
 	// This is intentionally not a process-wide allocator or Slate/Yoga-internal allocation total.
 	TrackedAllocations,
+	// Subset of tracked allocation events whose owned payload size is known at the call site.
+	TrackedAllocationPayloadEvents,
+	// Sum of the known owned payload capacities in bytes. This excludes allocator overhead and
+	// allocations performed internally by Slate, Yoga, or other callees.
+	TrackedAllocationPayloadBytes,
 	Count
 };
 
@@ -55,7 +60,7 @@ struct WEBTOUECORE_API FWebToUEPerformanceSnapshot
 {
 	static constexpr int32 PhaseCount = static_cast<int32>(EWebToUEPerformancePhase::Count);
 	static constexpr int32 CounterCount = static_cast<int32>(EWebToUEPerformanceCounter::Count);
-	static constexpr int32 TelemetrySchemaVersion = 1;
+	static constexpr int32 TelemetrySchemaVersion = 2;
 	static constexpr int32 TelemetryMeasurementCount = (PhaseCount * 2) + CounterCount;
 	TStaticArray<FWebToUEPerformanceMetric, PhaseCount> Metrics;
 	TStaticArray<uint64, CounterCount> Counters{};
@@ -80,6 +85,7 @@ public:
 	void Reset();
 	FWebToUEPerformanceSnapshot GetSnapshot() const;
 	static void RecordCounter(EWebToUEPerformanceCounter Counter, uint64 Amount = 1);
+	static void RecordAllocationPayload(uint64 PayloadBytes);
 
 private:
 	friend class FWebToUEPerformanceScope;

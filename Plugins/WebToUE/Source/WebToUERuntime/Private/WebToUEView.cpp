@@ -73,6 +73,16 @@ void UWebToUEView::HandleRuntimeEvent(FName EventName, FName ElementId)
 	OnUIEvent.Broadcast(EventName, ElementId);
 }
 
+#if WITH_DEV_AUTOMATION_TESTS
+void UWebToUEView::LayoutForTesting(const FVector2f& ViewportSize)
+{
+	if (SlateView)
+	{
+		SlateView->LayoutForTesting(ViewportSize);
+	}
+}
+#endif
+
 void UWebToUEView::BindFieldNotifications()
 {
 	UnbindFieldNotifications();

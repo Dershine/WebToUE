@@ -13,6 +13,16 @@ struct FWebToUEBenchmarkSamplingPolicy
 	static FString ToLogString();
 };
 
+struct FWebToUEBenchmarkBudgetPolicy
+{
+	static constexpr int32 SchemaVersion = 4;
+	static constexpr double MediumSingleNodeHoverP95Milliseconds = 0.5;
+	static constexpr double MediumSingleFieldNotifyP95Milliseconds = 0.5;
+	static constexpr double MediumWarmFullLayoutP95Milliseconds = 2.0;
+	static constexpr uint64 MediumUnchangedPaintMaximumTrackedAllocations = 0;
+	static constexpr uint64 MediumUnchangedPaintMaximumTrackedAllocationPayloadBytes = 0;
+};
+
 struct FWebToUEBenchmarkEnvironment
 {
 	FString EngineVersion;

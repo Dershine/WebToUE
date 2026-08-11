@@ -41,6 +41,10 @@ public:
 	virtual void SynchronizeProperties() override;
 	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
 
+#if WITH_DEV_AUTOMATION_TESTS
+	void LayoutForTesting(const FVector2f& ViewportSize);
+#endif
+
 #if WITH_EDITOR
 	virtual const FText GetPaletteCategory() override;
 #endif

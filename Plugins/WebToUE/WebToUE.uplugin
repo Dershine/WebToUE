@@ -14,5 +14,8 @@
     { "Name": "WebToUECore", "Type": "Runtime", "LoadingPhase": "Default" },
     { "Name": "WebToUERuntime", "Type": "Runtime", "LoadingPhase": "Default" },
     { "Name": "WebToUEEditor", "Type": "Editor", "LoadingPhase": "Default" }
+  ],
+  "Plugins": [
+    { "Name": "ModelViewViewModel", "Enabled": true }
   ]
 }

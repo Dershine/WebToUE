@@ -8,7 +8,8 @@ public class WebToUEEditor : ModuleRules
         CppStandard = CppStandardVersion.Cpp20;
         PublicDependencyModuleNames.AddRange(new[] { "Core", "CoreUObject", "Engine", "WebToUECore", "WebToUERuntime" });
         PrivateDependencyModuleNames.AddRange(new[] {
-            "UnrealEd", "AssetTools", "DirectoryWatcher", "Projects", "Slate", "SlateCore",
+            "UnrealEd", "AssetTools", "DirectoryWatcher", "Projects", "Slate", "SlateCore", "UMG", "InputCore",
+            "ModelViewViewModel",
             "EditorFramework", "ToolMenus", "UMGEditor"
         });
     }

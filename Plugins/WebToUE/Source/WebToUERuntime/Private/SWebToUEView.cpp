@@ -368,11 +368,11 @@ int32 SWebToUEView::PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, 
 		bPushedClip = true;
 	}
 
-	if (!Node.Children.IsEmpty())
-	{
-		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
-	}
 	TArray<TSharedPtr<FWebToUENode>> SortedChildren = Node.Children;
+	if (!SortedChildren.IsEmpty())
+	{
+		FWebToUEPerformanceCapture::RecordAllocationPayload(SortedChildren.GetAllocatedSize());
+	}
 	SortedChildren.Sort([](const TSharedPtr<FWebToUENode>& A, const TSharedPtr<FWebToUENode>& B)
 	{
 		return A->Style.ZIndex == B->Style.ZIndex ? A->PaintOrder < B->PaintOrder : A->Style.ZIndex < B->Style.ZIndex;

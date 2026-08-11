@@ -117,6 +117,10 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(4));
 	TestEqual(TEXT("The representative workflow records all marked allocation events"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations), uint64(20));
+	TestEqual(TEXT("Paint reports a known payload for both non-leaf child-array copies"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadEvents), uint64(2));
+	TestTrue(TEXT("Paint reports positive child-array payload bytes"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadBytes) > 0);
 	TestTrue(TEXT("The log snapshot exposes stable workload fields"),
 		Snapshot.ToLogString().Contains(TEXT("workload={hydrated_nodes=3")));
 
@@ -129,7 +133,7 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 			TelemetryMeasurements.Add(Name, Value);
 		});
 	TestEqual(TEXT("The telemetry schema has the expected version"),
-		FWebToUEPerformanceSnapshot::TelemetrySchemaVersion, 1);
+		FWebToUEPerformanceSnapshot::TelemetrySchemaVersion, 2);
 	TestEqual(TEXT("The telemetry schema exposes every phase field and workload counter"),
 		TelemetryMeasurements.Num(), FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);
 	static constexpr const TCHAR* ExpectedTelemetryNames[] = {
@@ -156,7 +160,9 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		TEXT("workload.text_layout_builds"),
 		TEXT("workload.text_layout_computes"),
 		TEXT("workload.brush_builds"),
-		TEXT("workload.tracked_allocations")
+		TEXT("workload.tracked_allocations"),
+		TEXT("workload.tracked_allocation_payload_events"),
+		TEXT("workload.tracked_allocation_payload_bytes")
 	};
 	static_assert(UE_ARRAY_COUNT(ExpectedTelemetryNames) ==
 		FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);
@@ -173,6 +179,11 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		TelemetryMeasurements.FindRef(TEXT("workload.selector_evaluations")), 9.0);
 	TestEqual(TEXT("Telemetry exposes tracked allocation events"),
 		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocations")), 20.0);
+	TestEqual(TEXT("Telemetry exposes tracked allocation payload events"),
+		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocation_payload_events")), 2.0);
+	TestEqual(TEXT("Telemetry exposes tracked allocation payload bytes"),
+		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocation_payload_bytes")),
+		static_cast<double>(Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadBytes)));
 
 	FWebToUEPerformanceCapture EmptyCapture;
 	const FWebToUEPerformanceSnapshot EmptySnapshot = EmptyCapture.GetSnapshot();
@@ -203,18 +214,31 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 	{
 		FWebToUEPerformanceCapture OuterCapture;
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::StyleNodeVisits, 1);
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 		{
 			FWebToUEPerformanceCapture InnerCapture;
 			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::StyleNodeVisits, 2);
+			FWebToUEPerformanceCapture::RecordAllocationPayload(64);
 			InnerSnapshot = InnerCapture.GetSnapshot();
 		}
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::StyleNodeVisits, 4);
+		FWebToUEPerformanceCapture::RecordAllocationPayload(32);
 		OuterSnapshot = OuterCapture.GetSnapshot();
 	}
 	TestEqual(TEXT("The inner capture records only inner work"),
 		InnerSnapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(2));
 	TestEqual(TEXT("The outer capture excludes inner work and resumes afterward"),
 		OuterSnapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(5));
+	TestEqual(TEXT("The inner capture owns its known allocation event"),
+		InnerSnapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations), uint64(1));
+	TestEqual(TEXT("The inner capture owns its known allocation payload bytes"),
+		InnerSnapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadBytes), uint64(64));
+	TestEqual(TEXT("The outer capture counts one unknown and one known allocation event"),
+		OuterSnapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations), uint64(2));
+	TestEqual(TEXT("The outer capture counts only its known allocation payload event"),
+		OuterSnapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadEvents), uint64(1));
+	TestEqual(TEXT("The outer capture excludes inner allocation payload bytes"),
+		OuterSnapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadBytes), uint64(32));
 	return true;
 }
 

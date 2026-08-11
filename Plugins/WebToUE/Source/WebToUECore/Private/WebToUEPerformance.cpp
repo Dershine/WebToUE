@@ -40,7 +40,9 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.text_layout_builds"),
 		TEXT("workload.text_layout_computes"),
 		TEXT("workload.brush_builds"),
-		TEXT("workload.tracked_allocations")
+		TEXT("workload.tracked_allocations"),
+		TEXT("workload.tracked_allocation_payload_events"),
+		TEXT("workload.tracked_allocation_payload_bytes")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -171,6 +173,17 @@ void FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter Counte
 	}
 }
 
+void FWebToUEPerformanceCapture::RecordAllocationPayload(uint64 PayloadBytes)
+{
+	check(PayloadBytes > 0);
+	if (FWebToUEPerformanceCapture* Capture = FWebToUEPerformanceCapture::GetActiveCapture())
+	{
+		Capture->AddCounter(EWebToUEPerformanceCounter::TrackedAllocations, 1);
+		Capture->AddCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadEvents, 1);
+		Capture->AddCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadBytes, PayloadBytes);
+	}
+}
+
 FWebToUEPerformanceScope::FWebToUEPerformanceScope(EWebToUEPerformancePhase InPhase)
 	: Capture(FWebToUEPerformanceCapture::GetActiveCapture())
 	, Phase(InPhase)
@@ -218,6 +231,8 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::TextLayoutComputes: return TEXT("text_layout_computes");
 	case EWebToUEPerformanceCounter::BrushBuilds: return TEXT("brush_builds");
 	case EWebToUEPerformanceCounter::TrackedAllocations: return TEXT("tracked_allocations");
+	case EWebToUEPerformanceCounter::TrackedAllocationPayloadEvents: return TEXT("tracked_allocation_payload_events");
+	case EWebToUEPerformanceCounter::TrackedAllocationPayloadBytes: return TEXT("tracked_allocation_payload_bytes");
 	default: return TEXT("unknown");
 	}
 }
