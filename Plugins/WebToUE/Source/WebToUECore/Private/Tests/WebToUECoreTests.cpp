@@ -89,6 +89,37 @@ bool FWebToUEConstrainedMeasureTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEScrollLayoutTest, "WebToUE.Core.ScrollLayout",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FWebToUEScrollLayoutTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body><div id='scroll'><div class='row'></div><div class='row'></div><div class='row'></div></div></body>"),
+		TEXT("#scroll { width: 100px; height: 100px; overflow: auto; } .row { width: 100px; height: 80px; flex-shrink: 0; }"));
+	FWebToUELayoutEngine::Layout(*Document, FVector2f(200, 200),
+		[](const FWebToUENode&, const FWebToUELayoutEngine::FMeasureConstraints&) { return FVector2f::ZeroVector; });
+
+	FWebToUENode* Scroll = nullptr;
+	Document->ForEachNode([&Scroll](FWebToUENode& Node)
+	{
+		if (Node.GetAttribute(TEXT("id")) == TEXT("scroll")) Scroll = &Node;
+	});
+	TestNotNull(TEXT("Scroll container exists"), Scroll);
+	if (Scroll)
+	{
+		TestEqual(TEXT("Overflow auto resolves to a scroll container"), Scroll->Style.Overflow, EWebToUEOverflow::Auto);
+		TestTrue(TEXT("Overflowing children produce a vertical scroll range"),
+			FMath::IsNearlyEqual(Scroll->MaxScrollOffset.Y, 140.0f, 0.1f));
+		Scroll->ScrollOffset.Y = 1000.0f;
+		FWebToUELayoutEngine::Layout(*Document, FVector2f(200, 200),
+			[](const FWebToUENode&, const FWebToUELayoutEngine::FMeasureConstraints&) { return FVector2f::ZeroVector; });
+		TestTrue(TEXT("Relayout clamps an existing scroll offset"),
+			FMath::IsNearlyEqual(Scroll->ScrollOffset.Y, Scroll->MaxScrollOffset.Y, 0.1f));
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUECssDiagnosticsTest, "WebToUE.Core.CssDiagnostics",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 

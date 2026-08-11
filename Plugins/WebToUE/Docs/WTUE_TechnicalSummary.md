@@ -122,7 +122,7 @@ Editor 模块监听项目目录内的 `.html` 和 `.css` 变化，并使用 200m
 - `&lt;`、`&gt;`、`&quot;`、`&apos;`、`&amp;` 和数值实体解码。
 - `<style>` 内联样式和元素 `style="..."` 声明。
 
-文本节点目前会裁掉首尾空白，不保留浏览器式空白折叠语义；文本以单行方式测量和绘制。
+文本节点目前会裁掉首尾空白，不保留浏览器式空白折叠语义；`white-space: normal` 会在宽度约束下自动换行，`nowrap` 保持单行。
 
 ### 5.2 CSS 选择器
 
@@ -146,7 +146,7 @@ Editor 模块监听项目目录内的 `.html` 和 `.css` 变化，并使用 200m
 - `display`：`flex` / `none`
 - `position`：`relative` / `absolute`
 - `visibility`：支持 `hidden`
-- `overflow`：`visible` / `hidden`
+- `overflow`：`visible` / `hidden` / `auto` / `scroll`
 - `width`、`height`
 - `min-width`、`min-height`
 - `max-width`、`max-height`
@@ -221,6 +221,7 @@ Flex：
 - 文本使用按节点缓存的 `FSlateTextBlockLayout`，测量和绘制共享同一套换行、shaping 与逐行对齐逻辑。
 - 图片使用 Texture2D 对应的 Slate Brush。
 - `overflow: hidden` 通过 Slate clipping zone 实现。
+- `overflow: auto` 和 `overflow: scroll` 维护节点级滚动偏移，子树绘制位置会累计祖先滚动偏移，并沿用同一裁剪区域。
 - 子节点按 `z-index` 和 `PaintOrder` 排序。
 - 父子透明度相乘。
 - 禁用状态使用 Slate DisabledEffect。
@@ -243,6 +244,7 @@ Flex：
 鼠标流程：
 
 - 移动：矩形 Hit Test，更新 `:hover`。
+- 滚轮：选择光标下最深的可滚动祖先，按垂直方向更新偏移；内层到达边界后可由外层滚动容器继续处理。
 - 左键按下：设置焦点和 `:active`，捕获鼠标。
 - 左键抬起：仅当抬起节点与按下节点一致时触发点击。
 - 离开控件：清理 hover。
@@ -253,7 +255,7 @@ Flex：
 - `Shift + Tab`：反向移动焦点。
 - `Enter` / `Space`：激活当前焦点节点。
 
-Hit Test 以布局矩形、`z-index` 和绘制顺序选择最上层节点。当前尚未完整考虑复杂裁剪区域、变换、非矩形命中区域和可访问性导航。
+Hit Test 会累计祖先滚动偏移并与祖先裁剪矩形求交，再按布局矩形、`z-index` 和绘制顺序选择最上层节点。当前尚未考虑变换、非矩形命中区域和可访问性导航。
 
 ## 9. UObject 数据绑定与事件桥
 
@@ -359,9 +361,11 @@ CSS：
 - `WebToUE.Core.HtmlCss`：HTML、实体、ID/伪类级联和样式重算。
 - `WebToUE.Core.FlexLayout`：百分比宽度、水平 Flex 和 gap。
 - `WebToUE.Core.ConstrainedMeasure`：Yoga 叶节点测量约束与多行高度回传。
+- `WebToUE.Core.ScrollLayout`：滚动 CSS、内容范围计算和偏移钳制。
 - `WebToUE.Core.CssDiagnostics`：多来源样式表顺序、外链 CSS 文件/行/列、未知属性、非法值和内联样式诊断。
 - `WebToUE.Runtime.AssetVersion`：自定义版本注册和旧资产重编译判定。
 - `WebToUE.Runtime.TextWrapping`：Slate 文本在宽/窄约束及 `nowrap` 下的测量行为。
+- `WebToUE.Runtime.ScrollInteraction`：裁剪感知命中、滚轮滚动、可视位置和边界处理。
 
 第一版已经通过：
 
@@ -391,7 +395,7 @@ CSS：
 - JavaScript、TypeScript 和任意脚本执行。
 - 浏览器 DOM API、网络加载、Cookie、Storage。
 - 表单、输入框、文本编辑和 IME。
-- 滚动容器、虚拟列表。
+- 可见滚动条、拖拽/触摸滚动、惯性滚动和虚拟列表。
 - 富文本、文本本地化资源身份和复杂排版。
 - CSS Grid、浮动、table layout。
 - transition、keyframes、transform。
@@ -410,7 +414,7 @@ CSS：
 ### 阶段一：0.2，补齐可用的 UI 基础设施
 
 - 多行文本、自动换行、本地化和基础富文本（约束测量、Slate 自动换行和 `white-space` 已完成；本地化身份与富文本待补）。
-- 滚动容器、裁剪修正、滚轮输入和简单列表。
+- 滚动容器、裁剪修正、滚轮输入和简单列表（基础垂直滚轮滚动、嵌套边界传递和裁剪感知命中已完成；滚动条、拖拽、惯性与虚拟化待补）。
 - 触摸与手柄焦点导航、安全区和 DPI 适配。
 - 更完整的颜色、边框、背景图和常用 CSS 属性。
 - 改进 CSS/HTML 行列号、未知属性和值诊断（多来源 CSS、内联样式、属性和值校验已完成；HTML 属性诊断待补）。

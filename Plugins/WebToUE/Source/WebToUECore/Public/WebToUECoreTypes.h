@@ -39,7 +39,9 @@ enum class EWebToUEPosition : uint8
 enum class EWebToUEOverflow : uint8
 {
 	Visible,
-	Hidden
+	Hidden,
+	Auto,
+	Scroll
 };
 
 enum class EWebToUEFlexDirection : uint8
@@ -142,12 +144,16 @@ struct WEBTOUECORE_API FWebToUENode : public TSharedFromThis<FWebToUENode>
 	bool bRuntimeEnabled = true;
 	FVector2f Position = FVector2f::ZeroVector;
 	FVector2f Size = FVector2f::ZeroVector;
+	FVector2f ScrollOffset = FVector2f::ZeroVector;
+	FVector2f MaxScrollOffset = FVector2f::ZeroVector;
 	int32 PaintOrder = 0;
 
 	FString GetAttribute(const FString& Name) const;
 	bool HasClass(const FString& ClassName) const;
 	bool IsInteractive() const;
 	bool IsDisplayed() const;
+	bool ClipsOverflow() const { return Style.Overflow != EWebToUEOverflow::Visible; }
+	bool IsScrollable() const { return Style.Overflow == EWebToUEOverflow::Auto || Style.Overflow == EWebToUEOverflow::Scroll; }
 };
 
 enum class EWebToUECombinator : uint8

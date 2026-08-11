@@ -31,12 +31,18 @@ public:
 	virtual void OnMouseLeave(const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+	virtual FReply OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& KeyEvent) override;
 	virtual FReply OnFocusReceived(const FGeometry& MyGeometry, const FFocusEvent& InFocusEvent) override;
 	virtual void OnFocusLost(const FFocusEvent& InFocusEvent) override;
 
 #if WITH_DEV_AUTOMATION_TESTS
 	FVector2f MeasureTextForTesting(const FString& Text, float Width, bool bWrap) const;
+	void SetRuntimeDocumentForTesting(TSharedRef<FWebToUEDocument> InDocument);
+	void LayoutForTesting(const FVector2f& ViewportSize) const;
+	FWebToUENode* HitTestForTesting(const FVector2f& LocalPosition) const { return HitTest(LocalPosition); }
+	bool ScrollAtForTesting(const FVector2f& LocalPosition, float WheelDelta) { return ScrollAt(LocalPosition, WheelDelta); }
+	FVector2f GetVisualPositionForTesting(const FWebToUENode& Node) const;
 #endif
 
 private:
@@ -59,8 +65,10 @@ private:
 	FSlateTextBlockLayout& PrepareTextLayout(const FWebToUENode& Node, float WrapWidth) const;
 	int32 PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, const FGeometry& Geometry,
 		const FSlateRect& CullingRect, FSlateWindowElementList& Out, int32 LayerId,
-		const FWidgetStyle& WidgetStyle, float ParentOpacity, bool bParentEnabled) const;
+		const FWidgetStyle& WidgetStyle, float ParentOpacity, bool bParentEnabled,
+		const FVector2f& InheritedScrollOffset) const;
 	FWebToUENode* HitTest(const FVector2f& LocalPosition) const;
+	bool ScrollAt(const FVector2f& LocalPosition, float WheelDelta);
 	void SetHoveredNode(FWebToUENode* Node);
 	void SetPressedNode(FWebToUENode* Node);
 	void SetFocusedNode(FWebToUENode* Node);

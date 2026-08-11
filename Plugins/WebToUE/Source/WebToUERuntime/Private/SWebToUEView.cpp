@@ -165,6 +165,34 @@ FVector2f SWebToUEView::MeasureTextForTesting(const FString& Text, float Width, 
 	Constraints.WidthMode = FWebToUELayoutEngine::EMeasureMode::AtMost;
 	return MeasureNode(Node, Constraints);
 }
+
+void SWebToUEView::SetRuntimeDocumentForTesting(TSharedRef<FWebToUEDocument> InDocument)
+{
+	RuntimeDocument = MoveTemp(InDocument);
+	RebuildStylesAndBrushes();
+}
+
+void SWebToUEView::LayoutForTesting(const FVector2f& ViewportSize) const
+{
+	if (!RuntimeDocument || !RuntimeDocument->Root) return;
+	FWebToUELayoutEngine::Layout(*RuntimeDocument, ViewportSize,
+		[this](const FWebToUENode& Node, const FWebToUELayoutEngine::FMeasureConstraints& Constraints)
+		{
+			return MeasureNode(Node, Constraints);
+		});
+	LastViewportSize = ViewportSize;
+	bLayoutDirty = false;
+}
+
+FVector2f SWebToUEView::GetVisualPositionForTesting(const FWebToUENode& Node) const
+{
+	FVector2f ScrollOffset = FVector2f::ZeroVector;
+	for (const FWebToUENode* Parent = Node.Parent; Parent; Parent = Parent->Parent)
+	{
+		ScrollOffset += Parent->ScrollOffset;
+	}
+	return Node.Position - ScrollOffset;
+}
 #endif
 
 int32 SWebToUEView::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
@@ -187,17 +215,18 @@ int32 SWebToUEView::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeo
 		bLayoutDirty = false;
 	}
 	return PaintNode(*RuntimeDocument->Root, Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId,
-		InWidgetStyle, 1.0f, bParentEnabled);
+		InWidgetStyle, 1.0f, bParentEnabled, FVector2f::ZeroVector);
 }
 
 int32 SWebToUEView::PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, const FGeometry& Geometry,
 	const FSlateRect& CullingRect, FSlateWindowElementList& Out, int32 LayerId,
-	const FWidgetStyle& WidgetStyle, float ParentOpacity, bool bParentEnabled) const
+	const FWidgetStyle& WidgetStyle, float ParentOpacity, bool bParentEnabled,
+	const FVector2f& InheritedScrollOffset) const
 {
 	if (!Node.IsDisplayed()) return LayerId;
 	const float Opacity = ParentOpacity * Node.Style.Opacity;
 	const float DrawOpacity = Opacity * WidgetStyle.GetColorAndOpacityTint().A;
-	const FVector2f Position = Node.Position;
+	const FVector2f Position = Node.Position - InheritedScrollOffset;
 	const FVector2f Size = Node.Size;
 	const FPaintGeometry PaintGeometry = Geometry.ToPaintGeometry(Size, FSlateLayoutTransform(Position));
 
@@ -246,7 +275,7 @@ int32 SWebToUEView::PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, 
 	}
 
 	bool bPushedClip = false;
-	if (Node.Style.Overflow == EWebToUEOverflow::Hidden)
+	if (Node.ClipsOverflow())
 	{
 		const FGeometry ClipGeometry = Geometry.MakeChild(Size, FSlateLayoutTransform(Position));
 		Out.PushClip(FSlateClippingZone(ClipGeometry));
@@ -260,8 +289,9 @@ int32 SWebToUEView::PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, 
 	});
 	for (const TSharedPtr<FWebToUENode>& Child : SortedChildren)
 	{
+		const FVector2f ChildScrollOffset = InheritedScrollOffset + (Node.IsScrollable() ? Node.ScrollOffset : FVector2f::ZeroVector);
 		LayerId = PaintNode(*Child, Args, Geometry, CullingRect, Out, LayerId, WidgetStyle,
-			Opacity, bParentEnabled && Node.Style.bEnabled);
+			Opacity, bParentEnabled && Node.Style.bEnabled, ChildScrollOffset);
 	}
 	if (bPushedClip) Out.PopClip();
 	return LayerId;
@@ -418,18 +448,113 @@ void SWebToUEView::ReportBindingErrorOnce(const FString& Field, const FString& M
 FWebToUENode* SWebToUEView::HitTest(const FVector2f& LocalPosition) const
 {
 	FWebToUENode* Best = nullptr;
-	if (!RuntimeDocument) return nullptr;
-	RuntimeDocument->ForEachNode([&](FWebToUENode& Node)
+	if (!RuntimeDocument || !RuntimeDocument->Root) return nullptr;
+
+	TFunction<void(FWebToUENode&, const FVector2f&, const FVector2f&, const FVector2f&, bool)> Visit;
+	Visit = [&](FWebToUENode& Node, const FVector2f& InheritedScrollOffset,
+		const FVector2f& ClipMin, const FVector2f& ClipMax, bool bHasClip)
 	{
-		if (!Node.IsInteractive() || !Node.IsDisplayed() || !Node.Style.bEnabled) return;
-		if (LocalPosition.X >= Node.Position.X && LocalPosition.Y >= Node.Position.Y &&
-			LocalPosition.X <= Node.Position.X + Node.Size.X && LocalPosition.Y <= Node.Position.Y + Node.Size.Y)
+		if (!Node.IsDisplayed()) return;
+		if (bHasClip && (LocalPosition.X < ClipMin.X || LocalPosition.Y < ClipMin.Y ||
+			LocalPosition.X > ClipMax.X || LocalPosition.Y > ClipMax.Y)) return;
+
+		const FVector2f Position = Node.Position - InheritedScrollOffset;
+		const FVector2f NodeMax = Position + Node.Size;
+		const bool bInsideNode = LocalPosition.X >= Position.X && LocalPosition.Y >= Position.Y &&
+			LocalPosition.X <= NodeMax.X && LocalPosition.Y <= NodeMax.Y;
+		if (bInsideNode && Node.IsInteractive() && Node.Style.bEnabled)
 		{
 			if (!Best || Node.Style.ZIndex > Best->Style.ZIndex ||
 				(Node.Style.ZIndex == Best->Style.ZIndex && Node.PaintOrder > Best->PaintOrder)) Best = &Node;
 		}
-	});
+
+		FVector2f ChildClipMin = ClipMin;
+		FVector2f ChildClipMax = ClipMax;
+		bool bChildHasClip = bHasClip;
+		if (Node.ClipsOverflow())
+		{
+			ChildClipMin = bHasClip ? FVector2f(FMath::Max(ClipMin.X, Position.X), FMath::Max(ClipMin.Y, Position.Y)) : Position;
+			ChildClipMax = bHasClip ? FVector2f(FMath::Min(ClipMax.X, NodeMax.X), FMath::Min(ClipMax.Y, NodeMax.Y)) : NodeMax;
+			bChildHasClip = true;
+			if (ChildClipMin.X > ChildClipMax.X || ChildClipMin.Y > ChildClipMax.Y) return;
+		}
+
+		const FVector2f ChildScrollOffset = InheritedScrollOffset + (Node.IsScrollable() ? Node.ScrollOffset : FVector2f::ZeroVector);
+		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
+		{
+			Visit(*Child, ChildScrollOffset, ChildClipMin, ChildClipMax, bChildHasClip);
+		}
+	};
+	Visit(*RuntimeDocument->Root, FVector2f::ZeroVector, FVector2f::ZeroVector, FVector2f::ZeroVector, false);
 	return Best;
+}
+
+bool SWebToUEView::ScrollAt(const FVector2f& LocalPosition, float WheelDelta)
+{
+	if (!RuntimeDocument || !RuntimeDocument->Root || FMath::IsNearlyZero(WheelDelta)) return false;
+
+	struct FScrollCandidate
+	{
+		FWebToUENode* Node = nullptr;
+		int32 Depth = 0;
+	};
+	TArray<FScrollCandidate> Candidates;
+	TFunction<void(FWebToUENode&, const FVector2f&, const FVector2f&, const FVector2f&, bool, int32)> Visit;
+	Visit = [&](FWebToUENode& Node, const FVector2f& InheritedScrollOffset,
+		const FVector2f& ClipMin, const FVector2f& ClipMax, bool bHasClip, int32 Depth)
+	{
+		if (!Node.IsDisplayed()) return;
+		if (bHasClip && (LocalPosition.X < ClipMin.X || LocalPosition.Y < ClipMin.Y ||
+			LocalPosition.X > ClipMax.X || LocalPosition.Y > ClipMax.Y)) return;
+
+		const FVector2f Position = Node.Position - InheritedScrollOffset;
+		const FVector2f NodeMax = Position + Node.Size;
+		const bool bInsideNode = LocalPosition.X >= Position.X && LocalPosition.Y >= Position.Y &&
+			LocalPosition.X <= NodeMax.X && LocalPosition.Y <= NodeMax.Y;
+		if (bInsideNode && Node.IsScrollable() && Node.MaxScrollOffset.Y > 0.0f)
+		{
+			Candidates.Add({ &Node, Depth });
+		}
+
+		FVector2f ChildClipMin = ClipMin;
+		FVector2f ChildClipMax = ClipMax;
+		bool bChildHasClip = bHasClip;
+		if (Node.ClipsOverflow())
+		{
+			ChildClipMin = bHasClip ? FVector2f(FMath::Max(ClipMin.X, Position.X), FMath::Max(ClipMin.Y, Position.Y)) : Position;
+			ChildClipMax = bHasClip ? FVector2f(FMath::Min(ClipMax.X, NodeMax.X), FMath::Min(ClipMax.Y, NodeMax.Y)) : NodeMax;
+			bChildHasClip = true;
+			if (ChildClipMin.X > ChildClipMax.X || ChildClipMin.Y > ChildClipMax.Y) return;
+		}
+
+		const FVector2f ChildScrollOffset = InheritedScrollOffset + (Node.IsScrollable() ? Node.ScrollOffset : FVector2f::ZeroVector);
+		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
+		{
+			Visit(*Child, ChildScrollOffset, ChildClipMin, ChildClipMax, bChildHasClip, Depth + 1);
+		}
+	};
+	Visit(*RuntimeDocument->Root, FVector2f::ZeroVector, FVector2f::ZeroVector, FVector2f::ZeroVector, false, 0);
+	Candidates.Sort([](const FScrollCandidate& A, const FScrollCandidate& B)
+	{
+		if (A.Depth != B.Depth) return A.Depth > B.Depth;
+		if (A.Node->Style.ZIndex != B.Node->Style.ZIndex) return A.Node->Style.ZIndex > B.Node->Style.ZIndex;
+		return A.Node->PaintOrder > B.Node->PaintOrder;
+	});
+
+	constexpr float WheelScrollAmount = 48.0f;
+	for (const FScrollCandidate& Candidate : Candidates)
+	{
+		const float PreviousOffset = Candidate.Node->ScrollOffset.Y;
+		Candidate.Node->ScrollOffset.Y = FMath::Clamp(
+			PreviousOffset - WheelDelta * WheelScrollAmount, 0.0f, Candidate.Node->MaxScrollOffset.Y);
+		if (!FMath::IsNearlyEqual(PreviousOffset, Candidate.Node->ScrollOffset.Y))
+		{
+			Invalidate(EInvalidateWidgetReason::Paint);
+			SetHoveredNode(HitTest(LocalPosition));
+			return true;
+		}
+	}
+	return false;
 }
 
 void SWebToUEView::ClearStateFlag(EWebToUEPseudoState Flag)
@@ -500,6 +625,12 @@ FReply SWebToUEView::OnMouseButtonUp(const FGeometry& MyGeometry, const FPointer
 	SetPressedNode(nullptr);
 	if (bActivate) DispatchClick(*Released);
 	return FReply::Handled().ReleaseMouseCapture();
+}
+
+FReply SWebToUEView::OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
+{
+	const FVector2f LocalPosition = FVector2f(MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()));
+	return ScrollAt(LocalPosition, MouseEvent.GetWheelDelta()) ? FReply::Handled() : FReply::Unhandled();
 }
 
 void SWebToUEView::MoveFocus(int32 Direction)

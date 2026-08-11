@@ -762,7 +762,7 @@ namespace WebToUE::Private
 		if (Name == TEXT("display")) return IsOneOf(Value, { TEXT("flex"), TEXT("none") });
 		if (Name == TEXT("position")) return IsOneOf(Value, { TEXT("relative"), TEXT("absolute") });
 		if (Name == TEXT("visibility")) return IsOneOf(Value, { TEXT("visible"), TEXT("hidden") });
-		if (Name == TEXT("overflow")) return IsOneOf(Value, { TEXT("visible"), TEXT("hidden") });
+		if (Name == TEXT("overflow")) return IsOneOf(Value, { TEXT("visible"), TEXT("hidden"), TEXT("auto"), TEXT("scroll") });
 		if (Name == TEXT("flex-direction")) return IsOneOf(Value,
 			{ TEXT("row"), TEXT("row-reverse"), TEXT("column"), TEXT("column-reverse") });
 		if (Name == TEXT("flex-wrap")) return IsOneOf(Value, { TEXT("nowrap"), TEXT("wrap"), TEXT("wrap-reverse") });
@@ -887,7 +887,13 @@ namespace WebToUE::Private
 		if (const FString* V = Value(TEXT("background"))) ParseColor(*V, Style.BackgroundColor);
 		if (const FString* V = Value(TEXT("display"))) Style.Display = V->Equals(TEXT("none"), ESearchCase::IgnoreCase) ? EWebToUEDisplay::None : EWebToUEDisplay::Flex;
 		if (const FString* V = Value(TEXT("position"))) Style.Position = V->Equals(TEXT("absolute"), ESearchCase::IgnoreCase) ? EWebToUEPosition::Absolute : EWebToUEPosition::Relative;
-		if (const FString* V = Value(TEXT("overflow"))) Style.Overflow = V->Equals(TEXT("hidden"), ESearchCase::IgnoreCase) ? EWebToUEOverflow::Hidden : EWebToUEOverflow::Visible;
+		if (const FString* V = Value(TEXT("overflow")))
+		{
+			if (V->Equals(TEXT("hidden"), ESearchCase::IgnoreCase)) Style.Overflow = EWebToUEOverflow::Hidden;
+			else if (V->Equals(TEXT("auto"), ESearchCase::IgnoreCase)) Style.Overflow = EWebToUEOverflow::Auto;
+			else if (V->Equals(TEXT("scroll"), ESearchCase::IgnoreCase)) Style.Overflow = EWebToUEOverflow::Scroll;
+			else Style.Overflow = EWebToUEOverflow::Visible;
+		}
 		if (const FString* V = Value(TEXT("visibility"))) Style.bVisible = !V->Equals(TEXT("hidden"), ESearchCase::IgnoreCase);
 		if (const FString* V = Value(TEXT("flex-direction")))
 		{
@@ -1111,7 +1117,9 @@ namespace WebToUE::Private
 		const FWebToUEComputedStyle& S = WebNode.Style;
 		YGNodeStyleSetDisplay(Node, S.Display == EWebToUEDisplay::None ? YGDisplayNone : YGDisplayFlex);
 		YGNodeStyleSetPositionType(Node, S.Position == EWebToUEPosition::Absolute ? YGPositionTypeAbsolute : YGPositionTypeRelative);
-		YGNodeStyleSetOverflow(Node, S.Overflow == EWebToUEOverflow::Hidden ? YGOverflowHidden : YGOverflowVisible);
+		YGNodeStyleSetOverflow(Node,
+			S.Overflow == EWebToUEOverflow::Hidden ? YGOverflowHidden :
+			S.Overflow == EWebToUEOverflow::Visible ? YGOverflowVisible : YGOverflowScroll);
 		YGNodeStyleSetFlexDirection(Node,
 			S.FlexDirection == EWebToUEFlexDirection::Row ? YGFlexDirectionRow :
 			S.FlexDirection == EWebToUEFlexDirection::RowReverse ? YGFlexDirectionRowReverse :
@@ -1169,6 +1177,33 @@ namespace WebToUE::Private
 		{
 			CopyYogaLayout(*WebNode.Children[Index], YGNodeGetChild(const_cast<YGNodeRef>(Node), Index), WebNode.Position, PaintOrder);
 		}
+	}
+
+	static FVector2f UpdateScrollExtents(FWebToUENode& Node)
+	{
+		FVector2f ContentMax = Node.Position + Node.Size;
+		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
+		{
+			const FVector2f ChildContentMax = UpdateScrollExtents(*Child);
+			ContentMax.X = FMath::Max(ContentMax.X, Child->ClipsOverflow() ? Child->Position.X + Child->Size.X : ChildContentMax.X);
+			ContentMax.Y = FMath::Max(ContentMax.Y, Child->ClipsOverflow() ? Child->Position.Y + Child->Size.Y : ChildContentMax.Y);
+		}
+
+		if (Node.IsScrollable())
+		{
+			Node.MaxScrollOffset = FVector2f(
+				FMath::Max(0.0f, ContentMax.X - (Node.Position.X + Node.Size.X)),
+				FMath::Max(0.0f, ContentMax.Y - (Node.Position.Y + Node.Size.Y)));
+			Node.ScrollOffset.X = FMath::Clamp(Node.ScrollOffset.X, 0.0f, Node.MaxScrollOffset.X);
+			Node.ScrollOffset.Y = FMath::Clamp(Node.ScrollOffset.Y, 0.0f, Node.MaxScrollOffset.Y);
+		}
+		else
+		{
+			Node.ScrollOffset = FVector2f::ZeroVector;
+			Node.MaxScrollOffset = FVector2f::ZeroVector;
+		}
+
+		return Node.ClipsOverflow() ? Node.Position + Node.Size : ContentMax;
 	}
 }
 
@@ -1240,5 +1275,6 @@ void FWebToUELayoutEngine::Layout(FWebToUEDocument& Document, const FVector2f& V
 	YGNodeCalculateLayout(Root, ViewportSize.X, ViewportSize.Y, YGDirectionLTR);
 	int32 PaintOrder = 0;
 	WebToUE::Private::CopyYogaLayout(*Document.Root, Root, FVector2f::ZeroVector, PaintOrder);
+	WebToUE::Private::UpdateScrollExtents(*Document.Root);
 	YGNodeFreeRecursive(Root);
 }
