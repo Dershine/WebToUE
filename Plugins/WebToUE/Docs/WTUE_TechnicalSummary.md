@@ -10,7 +10,7 @@
 >
 > 当前里程碑：M2——增量原生运行时
 >
-> 最近核验：2026-08-11，基于 Git `0d7dd9fababb` + working tree
+> 最近核验：2026-08-11，基于 Git `fa4929af7c4b` + working tree
 >
 > 统一术语：[CONTEXT.md](../../../CONTEXT.md)
 
@@ -79,10 +79,10 @@
 | 插件版本 | `0.1.0-preview` |
 | Engine | UE 5.8 |
 | SupportedTargetPlatforms | Win64 |
-| 自动化测试 | 13 / 13 通过（2026-08-11，working tree） |
+| 自动化测试 | 14 / 14 通过（2026-08-11，working tree） |
 | 当前编译验证 | UE 5.8 Win64 Editor Development 通过（2026-08-11，working tree） |
 | 历史发布验证 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 均曾通过；发布前必须在当前提交重新执行 |
-| Git 基线 | `0d7dd9fababb` + working tree；未提交，不生成伪哈希 |
+| Git 基线 | `fa4929af7c4b` + working tree；未提交，不生成伪哈希 |
 | 当前发布级别 | Developer Preview / 技术可行性与基础能力阶段 |
 
 ### 2.3 宏观里程碑
@@ -248,10 +248,10 @@ Cooked 游戏保留 Compiled Nodes、Rules、Root、纹理/String Table 引用�
 | 模块 | 大小 |
 | --- | ---: |
 | `UnrealEditor-WebToUECore.dll` | 240,640 B |
-| `UnrealEditor-WebToUEEditor.dll` | 189,952 B |
-| `UnrealEditor-WebToUERuntime.dll` | 308,736 B |
+| `UnrealEditor-WebToUEEditor.dll` | 211,968 B |
+| `UnrealEditor-WebToUERuntime.dll` | 307,200 B |
 | `UnrealEditor-WebToUEYoga.dll` | 340,480 B |
-| 合计 | 1,079,808 B（约 1.03 MiB） |
+| 合计 | 1,100,288 B（约 1.05 MiB） |
 
 这只能证明当前插件代码的固定文件成本很小，不代表 Shipping 包体、运行时内存、GPU 成本或 Gameface 性能对等。
 
@@ -259,9 +259,11 @@ M2 已建立三档确定性 Benchmark Corpus：100 节点/50 规则、500 节点
 
 固定 Corpus 的单次 Compile 可重复得到：100/50 场景 `100` 次 Style 节点访问、`5,000` 次 Selector 求值、`138` 次匹配；500/200 场景为 `500 / 100,000 / 694`；2,000/500 场景为 `2,000 / 1,000,000 / 2,794`。三节点 Runtime 集成场景验证 `3` 个 Hydrate 节点、`1` 条规则、`3` 个 Yoga 节点、`1/2` 次 Text Layout 构建/计算、`4` 个 Brush 和 `20` 个标记分配事件。`tracked_allocations` 只统计 WebToUE 源码中明确标注、可归因的分配点，不等同于进程级 malloc 或 Slate/Yoga 内部分配总数。
 
-Snapshot Telemetry schema `1` 以稳定名称枚举七阶段的调用数/毫秒和十个工作量计数；Editor Benchmark 通过 UE 原生 `SetTelemetryStorage` / `AddTelemetryData` 输出 `Saved/Automation/Telemetry/WebToUEPerformance.csv`。每个固定场景写入 schema、节点数、规则数和 24 个 Snapshot 指标，共 `27` 个数据点；实际验证标准七列表头、三个场景各 `27` 个不同字段且无畸形行。Core/Runtime 不负责文件 I/O，捕获热路径也不执行 Telemetry 枚举。
+Snapshot Telemetry schema `1` 以稳定名称枚举七阶段的调用数/毫秒和十个工作量计数；Editor Benchmark 通过 UE 原生 `SetTelemetryStorage` / `AddTelemetryData` 输出 `Saved/Automation/Telemetry/WebToUEPerformance.csv`。Benchmark policy schema `1` 固定为 Win64 `WindowsEditor` Development、1 次 warmup、20 个计量样本、常规 median P50 和 nearest-rank P95；运行时通过不含主机名的 Engine/OS/CPU/GPU/核心数/内存指纹标识可比环境。每个场景写入 20 个各含 `31` 字段的原始样本上下文和一个含 `20` 字段的汇总上下文；三个场景共 `1,920` 行、`63` 个上下文。Core/Runtime 不负责文件 I/O，捕获热路径也不执行 Telemetry 枚举或分位数计算。
 
-同一 Editor Development 环境中，阶段计时插桩前固定 Corpus 10 样本为 median `0.600095 s`、P95 `0.605533 s`；插桩后 10 样本为 median `0.611922 s`、P95 `0.619202 s`，分别变化 `+1.97%` 与 `+2.26%`。工作量计数使用相同永久测量外壳、新 Editor 会话、1 次 warmup 与 10 次采样：修改前 median/P50 `0.613698 s`、P95 `0.623550 s`，修改后为 `0.613103 s`、`0.625830 s`，分别变化 `-0.10%` 与 `+0.37%`。本次原生 Telemetry 输出继续使用 1 次 warmup 与 10 次采样，修改后 median/P50 `0.614980 s`、nearest-rank P95 `0.626666 s`，相对修改前分别变化 `+0.31%` 与 `+0.13%`，低于临时 `+5% / +10%` 回归守门。这些数据只说明插桩和输出没有造成明显 Corpus 回归，不是第 7.2 节的永久性能预算；正式采样政策、阶段 P50/P95、内存字节和自动化预算门禁仍未建立。
+同一 Editor Development 环境中，阶段计时插桩前固定 Corpus 10 样本为 median `0.600095 s`、P95 `0.605533 s`；插桩后 10 样本为 median `0.611922 s`、P95 `0.619202 s`，分别变化 `+1.97%` 与 `+2.26%`。工作量计数和原生 Telemetry 的历史 10 样本外壳也均低于临时 `+5% / +10%` 回归守门，但这些数据早于正式采样政策，只保留为插桩开销证据。
+
+2026-08-11 的正式基线使用环境指纹 `79E20297`：UE `5.8.1-56057345`、Windows 11 25H2、i7-12700KF `12/20` 核心/线程、32 GB、RTX 5050，Win64 Editor Development。完整 14 项回归中的 Compile Style P50/P95 为：100/50 场景 `2.7250 / 2.9380 ms`，500/200 场景 `50.2063 / 51.0051 ms`，2,000/500 场景 `493.1027 / 494.4741 ms`。同一新 Editor 会话的两次 policy schema `1` 运行中，三场景 P50 变化范围为 `-0.08%～+0.55%`，P95 为 `+0.40%～+2.64%`。这证明采样规则和输出可重复，不代表 Runtime 局部更新预算已达标；该 Corpus 只执行 Compile/Style，其他 Runtime 阶段为零，内存字节、Hover/FieldNotify/Layout 专项场景和自动预算门禁仍未建立。
 
 有利特征：
 
@@ -307,7 +309,7 @@ Snapshot Telemetry schema `1` 以稳定名称枚举七阶段的调用数/毫秒�
 | R-03 | 编译数据与 Runtime State 混合在节点结构 | High | `FWebToUENode` 字段已确认 | 拆分 IR/Instance/Cache 生命周期 | ⬜ M2 |
 | R-04 | 状态变化路径可能同步加载纹理 | High | Brush 重建使用 `LoadObject` | 编译依赖 + Resource Cache + 异步策略 | ⬜ M2 |
 | R-05 | Compiler/View 职责集中，修改回归面扩大 | High | 两个核心实现文件体量和职责已确认 | 按编译阶段和 Runtime 服务拆分 | ⬜ M2 |
-| R-06 | 没有完整可重复性能基准，无法证明“原生且高效” | Critical | 固定 Corpus、七阶段计时/capture、可归因工作量计数和 schema `1` 原生 Automation Telemetry/CSV 已建立；正式采样政策、阶段分位数、内存字节和永久预算门禁仍缺失 | Benchmark、Stat、Trace、预算门禁 | 🚧 M2 |
+| R-06 | 没有完整可重复性能基准，无法证明“原生且高效” | Critical | 固定 Corpus、七阶段计时/capture、可归因工作量计数、schema `1` 原生 Automation Telemetry/CSV、固定环境指纹和阶段 P50/P95 政策已建立；Runtime 专项场景、内存字节和永久预算门禁仍缺失 | Benchmark、Stat、Trace、预算门禁 | 🚧 M2 |
 | R-07 | CSS 声明使用 Map，重复声明顺序不完全等价 | Medium | 当前声明模型已确认 | Ordered Declaration IR | ⬜ M2 |
 | R-08 | 仅 Win64，平台假设尚未暴露 | Medium | `.uplugin` 平台限制 | 平台抽象审计与构建矩阵 | ⬜ M6 |
 | R-09 | MCP 为 Experimental、本地服务无认证，通用 Python 执行面权限较高 | Medium | UE 5.8 原生 MCP 与 VibeUE 5.0 已在开发环境验证 | 仅回环、本地受信任、Editor-only；项目专用工具仍默认关闭并遵守最小权限 | ⬜ M5 |
@@ -409,13 +411,13 @@ Snapshot Telemetry schema `1` 以稳定名称枚举七阶段的调用数/毫秒�
 
 M2 是当前唯一活跃里程碑。工作包按依赖顺序推进；原则上不在 M2.0～M2.4 完成前扩张大型 CSS、组件或动画能力。
 
-### M2.0——性能可观测性 🚧 4 / 6
+### M2.0——性能可观测性 🚧 5 / 6
 
 - [x] 固定 100/500/2,000 节点文档生成器与 50/200/500 规则集。
 - [x] 分别统计 Hydrate、Style、Measure、Layout、Paint Build、Hit Test、Binding。
 - [x] 记录 Hydrate 节点/规则、Style 节点、Selector 求值/匹配、Yoga、Text Layout、Brush 和 WebToUE 标记分配事件数量。
 - [x] Unreal Insights/Stat 保留七阶段事件，schema `1` Automation Telemetry 生成标准 CSV。
-- [ ] 固定测试机、构建配置、采样次数和 P50/P95 规则。
+- [x] 固定测试机、构建配置、采样次数和 P50/P95 规则。
 - [ ] 把第 7.2 节预算转成回归门禁。
 
 ### M2.1——拆分生命周期 ⬜ 0 / 6
@@ -524,15 +526,15 @@ M2 期间先建立与传输协议无关的 Compiler、Diagnostics、Inspection�
 
 ## 12. 测试与发布门禁
 
-### 12.1 当前自动化测试（13 / 13）
+### 12.1 当前自动化测试（14 / 14）
 
 | 层 | 测试 |
 | --- | --- |
 | Core | `HtmlCss`、`FlexLayout`、`ConstrainedMeasure`、`RichTextCompile`、`ScrollLayout`、`CssDiagnostics` |
 | Runtime | `AssetVersion`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`PerformanceInstrumentation` |
-| Editor | `BenchmarkScenarios`、`LocalizationImport` |
+| Editor | `BenchmarkScenarios`、`BenchmarkStatistics`、`LocalizationImport` |
 
-Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Preflight、探针失败不创建操作、持久存活 PID 识别与精确中断残留清理。它不计入 UE Automation 的 13 项。
+Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Preflight、探针失败不创建操作、持久存活 PID 识别与精确中断残留清理。它不计入 UE Automation 的 14 项。
 
 ### 12.2 仍需建立
 
@@ -555,6 +557,7 @@ Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Prefligh
 
 | 日期 | 基线 | 变化 | 路线影响 |
 | --- | --- | --- | --- |
+| 2026-08-11 | `fa4929a` + working tree | 建立 benchmark policy schema `1`：Win64 Editor Development、环境指纹、1 次 warmup、20 样本、median P50/nearest-rank P95；三个固定 Corpus 输出 `1,920` 行原始/汇总 Telemetry。环境 `79E20297` 的 Compile Style P50/P95 为 `2.7250/2.9380`、`50.2063/51.0051`、`493.1027/494.4741 ms`；Win64 Editor 构建、readiness/MCP/Python/World、聚焦 2/2 和完整 14/14 测试通过。 | M2.0 达到 5/6；R-06 保持 Critical，下一步把 Runtime 专项预算转为回归门禁。 |
 | 2026-08-11 | `0d7dd9f` + working tree | 为性能 Snapshot 建立 schema `1` 的稳定 24 指标枚举，固定 Corpus 通过 UE 原生 Automation Telemetry 输出每场景 27 个标准 CSV 数据点；最终 Win64 Editor Development 构建、Python/World/MCP 和 13 / 13 WebToUE 测试通过。相对修改前固定 Corpus，median/P95 为 `0.614980/0.626666 s`，变化 `+0.31%/+0.13%`。 | M2.0 达到 4/6；R-06 保持 Critical，下一步固定采样政策与阶段分位数规则。 |
 | 2026-08-11 | `57a334d` + working tree | 为固定性能 Snapshot 增加 Hydrate/Style/Selector/Yoga/Text Layout/Brush/标记分配工作量计数，固定 Corpus 断言 `N` 与 `N×R`，Runtime 集成测试验证精确计数和真正的嵌套 capture 隔离；13 / 13 WebToUE 测试和 Win64 Editor Development 构建通过，计数前后 median/P95 为 `0.613698/0.623550 s` 与 `0.613103/0.625830 s`。 | M2.0 达到 3/6；R-06 保持 Critical，继续建设标准输出、阶段分位数和永久预算门禁。 |
 | 2026-08-11 | `342c04a` + working tree | 建立 Editor 生命周期精确非沙箱执行边界、关 Editor 前 Preflight、项目互斥锁、持久 Operation State、3 / 3 Pester 与 ADR-0001；真实 UE build/readiness/MCP/Python/World 通过。 | R-10 降为 Mitigated；长期开发不再因观察超时或 sandbox 权限失败重复启动 UBT。 |
