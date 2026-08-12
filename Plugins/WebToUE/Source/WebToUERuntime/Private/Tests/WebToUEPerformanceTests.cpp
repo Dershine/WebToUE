@@ -26,13 +26,14 @@ namespace WebToUE::Performance::Tests
 	static UWebToUEDocument* MakeDocument()
 	{
 		UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
-		Document->LocalizationNamespace = TEXT("Measured Label");
+		FWebToUECompiledDocumentData CompiledDocument;
+		CompiledDocument.LocalizationNamespace = TEXT("Measured Label");
 
-		FWebToUECompiledNode& Body = Document->CompiledNodes.AddDefaulted_GetRef();
+		FWebToUECompiledNode& Body = CompiledDocument.Nodes.AddDefaulted_GetRef();
 		Body.Type = static_cast<uint8>(EWebToUENodeType::Element);
 		Body.Tag = TEXT("body");
 
-		FWebToUECompiledNode& Button = Document->CompiledNodes.AddDefaulted_GetRef();
+		FWebToUECompiledNode& Button = CompiledDocument.Nodes.AddDefaulted_GetRef();
 		Button.Type = static_cast<uint8>(EWebToUENodeType::Element);
 		Button.Tag = TEXT("button");
 		Button.ParentIndex = 0;
@@ -40,14 +41,14 @@ namespace WebToUE::Performance::Tests
 		AddAttribute(Button, TEXT("data-ue-bind-text"), TEXT("LocalizationNamespace"));
 		AddAttribute(Button, TEXT("data-ue-on-click"), TEXT("MeasuredClick"));
 
-		FWebToUECompiledNode& Text = Document->CompiledNodes.AddDefaulted_GetRef();
+		FWebToUECompiledNode& Text = CompiledDocument.Nodes.AddDefaulted_GetRef();
 		Text.Type = static_cast<uint8>(EWebToUENodeType::Text);
 		Text.Tag = TEXT("#text");
 		Text.Text = TEXT("Initial Label");
 		Text.LocalizedText = FText::FromString(Text.Text);
 		Text.ParentIndex = 1;
 
-		FWebToUECompiledRule& Rule = Document->CompiledRules.AddDefaulted_GetRef();
+		FWebToUECompiledRule& Rule = CompiledDocument.Rules.AddDefaulted_GetRef();
 		Rule.Specificity = 1;
 		FWebToUECompiledSelectorSegment& Selector = Rule.Selector.AddDefaulted_GetRef();
 		Selector.Type = TEXT("button");
@@ -58,7 +59,8 @@ namespace WebToUE::Performance::Tests
 		Height.Name = TEXT("height");
 		Height.Value = TEXT("40px");
 
-		Document->RootNodeIndex = 0;
+		CompiledDocument.RootNodeIndex = 0;
+		Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
 		return Document;
 	}
 }

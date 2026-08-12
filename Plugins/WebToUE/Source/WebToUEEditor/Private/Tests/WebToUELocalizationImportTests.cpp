@@ -27,7 +27,7 @@ bool FWebToUELocalizationImportTest::RunTest(const FString& Parameters)
 		TEXT("<body><p id='greeting'>Hello</p><p data-ue-loc-namespace='GameUI' data-ue-loc-key='Menu.Start'>Start</p></body>")));
 
 	TArray<const FWebToUECompiledNode*> InitialTextNodes;
-	for (const FWebToUECompiledNode& Node : Document->CompiledNodes)
+	for (const FWebToUECompiledNode& Node : Document->GetCompiledNodes())
 	{
 		if (Node.Type == static_cast<uint8>(EWebToUENodeType::Text)) InitialTextNodes.Add(&Node);
 	}
@@ -43,7 +43,7 @@ bool FWebToUELocalizationImportTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Localized document reimports after source text changes"), ImportHtml(
 		TEXT("<body><p id='greeting'>Hello again</p><p data-ue-loc-namespace='GameUI' data-ue-loc-key='Menu.Start'>Begin</p></body>")));
 	TArray<const FWebToUECompiledNode*> ReimportedTextNodes;
-	for (const FWebToUECompiledNode& Node : Document->CompiledNodes)
+	for (const FWebToUECompiledNode& Node : Document->GetCompiledNodes())
 	{
 		if (Node.Type == static_cast<uint8>(EWebToUENodeType::Text)) ReimportedTextNodes.Add(&Node);
 	}
@@ -60,7 +60,7 @@ bool FWebToUELocalizationImportTest::RunTest(const FString& Parameters)
 	FStringTableRegistry::Get().Internal_SetLocTableEntry(TestTableId, TEXT("Menu.Start"), TEXT("Continue"));
 	TestTrue(TEXT("String Table document imports"), ImportHtml(
 		TEXT("<body><p data-ue-string-table='/WebToUETests/ST_Localization.ST_Localization' data-ue-string-key='Menu.Start'>Fallback</p></body>")));
-	const FWebToUECompiledNode* TableTextNode = Document->CompiledNodes.FindByPredicate([](const FWebToUECompiledNode& Node)
+	const FWebToUECompiledNode* TableTextNode = Document->GetCompiledNodes().FindByPredicate([](const FWebToUECompiledNode& Node)
 	{
 		return Node.Type == static_cast<uint8>(EWebToUENodeType::Text);
 	});
@@ -73,6 +73,41 @@ bool FWebToUELocalizationImportTest::RunTest(const FString& Parameters)
 			FTextInspector::GetTableIdAndKey(TableTextNode->LocalizedText, TableId, TableKey));
 		TestEqual(TEXT("Compiled String Table id is retained"), TableId, TestTableId);
 		TestEqual(TEXT("Compiled String Table key is retained"), TableKey, TEXT("Menu.Start"));
+	}
+	const int32 LastGoodNodeCount = Document->GetCompiledNodes().Num();
+	const int32 LastGoodRuleCount = Document->GetCompiledRules().Num();
+	const int32 LastGoodRootNodeIndex = Document->GetRootNodeIndex();
+	const FString LastGoodNamespace = Document->GetLocalizationNamespace();
+	const int32 LastGoodStringTableCount = Document->GetReferencedStringTables().Num();
+	AddExpectedError(TEXT("data-ue-string-table and data-ue-string-key must be specified together"),
+		EAutomationExpectedErrorFlags::Contains, 1);
+	TestFalse(TEXT("Invalid reimport reports failure"), ImportHtml(
+		TEXT("<body><p data-ue-string-table='/WebToUETests/ST_Localization.ST_Localization'>Broken</p></body>")));
+	TestTrue(TEXT("Invalid reimport exposes an error diagnostic"), Document->HasCompileErrors());
+	TestEqual(TEXT("Invalid reimport preserves last-good compiled nodes"),
+		Document->GetCompiledNodes().Num(), LastGoodNodeCount);
+	TestEqual(TEXT("Invalid reimport preserves last-good compiled rules"),
+		Document->GetCompiledRules().Num(), LastGoodRuleCount);
+	TestEqual(TEXT("Invalid reimport preserves the last-good root"),
+		Document->GetRootNodeIndex(), LastGoodRootNodeIndex);
+	TestEqual(TEXT("Invalid reimport preserves the document namespace"),
+		Document->GetLocalizationNamespace(), LastGoodNamespace);
+	TestEqual(TEXT("Invalid reimport preserves compiled String Table dependencies"),
+		Document->GetReferencedStringTables().Num(), LastGoodStringTableCount);
+	const FWebToUECompiledNode* PreservedTextNode = Document->GetCompiledNodes().FindByPredicate(
+		[](const FWebToUECompiledNode& Node)
+		{
+			return Node.Type == static_cast<uint8>(EWebToUENodeType::Text);
+		});
+	TestNotNull(TEXT("Invalid reimport retains the last-good text node"), PreservedTextNode);
+	if (PreservedTextNode)
+	{
+		FName PreservedTableId;
+		FString PreservedTableKey;
+		TestTrue(TEXT("Invalid reimport retains last-good String Table text history"),
+			FTextInspector::GetTableIdAndKey(PreservedTextNode->LocalizedText, PreservedTableId, PreservedTableKey));
+		TestEqual(TEXT("Invalid reimport retains the last-good String Table id"), PreservedTableId, TestTableId);
+		TestEqual(TEXT("Invalid reimport retains the last-good String Table key"), PreservedTableKey, TEXT("Menu.Start"));
 	}
 
 	FStringTableRegistry::Get().UnregisterStringTable(TestTableId);

@@ -38,24 +38,24 @@ static FWebToUEAssetDiagnostic ConvertDiagnostic(const FWebToUEDiagnostic& Sourc
 	return Result;
 }
 
-static void SerializeCompiledDocument(const FWebToUEDocument& Source, UWebToUEDocument& Target)
+static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument& Source,
+	const UWebToUEDocument& Target)
 {
+	FWebToUECompiledDocumentData Result;
 	TMap<FString, FString> PreviousAutoKeys;
-	for (const FWebToUECompiledNode& Existing : Target.CompiledNodes)
+	for (const FWebToUECompiledNode& Existing : Target.GetCompiledNodes())
 	{
 		if (Existing.bAutoLocalizationKey && !Existing.TextIdentity.IsEmpty() && !Existing.LocalizationKey.IsEmpty())
 		{
 			PreviousAutoKeys.Add(Existing.TextIdentity, Existing.LocalizationKey);
 		}
 	}
-	if (Target.LocalizationNamespace.IsEmpty())
+	Result.LocalizationNamespace = Target.GetLocalizationNamespace();
+	if (Result.LocalizationNamespace.IsEmpty())
 	{
-		Target.LocalizationNamespace = TEXT("WebToUE_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		Result.LocalizationNamespace = TEXT("WebToUE_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	}
 
-	Target.CompiledNodes.Reset();
-	Target.CompiledRules.Reset();
-	Target.RootNodeIndex = INDEX_NONE;
 	TFunction<int32(const TSharedPtr<FWebToUENode>&, int32, const FString&, int32)> AddNode =
 		[&](const TSharedPtr<FWebToUENode>& Node, int32 ParentIndex, const FString& ParentIdentity, int32 SiblingOrdinal)
 	{
@@ -90,7 +90,7 @@ static void SerializeCompiledDocument(const FWebToUEDocument& Source, UWebToUEDo
 			else
 			{
 				Serialized.LocalizationNamespace = Owner ? Owner->GetAttribute(TEXT("data-ue-loc-namespace")) : FString();
-				if (Serialized.LocalizationNamespace.IsEmpty()) Serialized.LocalizationNamespace = Target.LocalizationNamespace;
+				if (Serialized.LocalizationNamespace.IsEmpty()) Serialized.LocalizationNamespace = Result.LocalizationNamespace;
 				Serialized.LocalizationKey = Owner ? Owner->GetAttribute(TEXT("data-ue-loc-key")) : FString();
 				Serialized.bAutoLocalizationKey = Serialized.LocalizationKey.IsEmpty();
 				if (Serialized.bAutoLocalizationKey)
@@ -108,21 +108,21 @@ static void SerializeCompiledDocument(const FWebToUEDocument& Source, UWebToUEDo
 					Serialized.LocalizationKey, FText::FromString(Node->Text));
 			}
 		}
-		const int32 NodeIndex = Target.CompiledNodes.Add(MoveTemp(Serialized));
+		const int32 NodeIndex = Result.Nodes.Add(MoveTemp(Serialized));
 		TMap<FString, int32> ChildOrdinals;
 		for (const TSharedPtr<FWebToUENode>& Child : Node->Children)
 		{
 			const FString Kind = Child->Type == EWebToUENodeType::Text ? TEXT("text") : Child->Tag;
 			const int32 ChildOrdinal = ChildOrdinals.FindOrAdd(Kind)++;
-			AddNode(Child, NodeIndex, Target.CompiledNodes[NodeIndex].TextIdentity, ChildOrdinal);
+			AddNode(Child, NodeIndex, Result.Nodes[NodeIndex].TextIdentity, ChildOrdinal);
 		}
 		return NodeIndex;
 	};
-	if (Source.Root) Target.RootNodeIndex = AddNode(Source.Root, INDEX_NONE, TEXT("document"), 0);
+	if (Source.Root) Result.RootNodeIndex = AddNode(Source.Root, INDEX_NONE, TEXT("document"), 0);
 
 	for (const FWebToUEStyleRule& Rule : Source.Rules)
 	{
-		FWebToUECompiledRule& SerializedRule = Target.CompiledRules.AddDefaulted_GetRef();
+		FWebToUECompiledRule& SerializedRule = Result.Rules.AddDefaulted_GetRef();
 		SerializedRule.Specificity = Rule.Specificity;
 		SerializedRule.SourceOrder = Rule.SourceOrder;
 		for (const FWebToUESelectorSegment& Segment : Rule.Selector)
@@ -141,6 +141,22 @@ static void SerializeCompiledDocument(const FWebToUEDocument& Source, UWebToUEDo
 			SerializedDeclaration.Value = Declaration.Value;
 		}
 	}
+
+	Source.ForEachNode([&Result](FWebToUENode& Node)
+	{
+		if (Node.Tag == TEXT("img"))
+		{
+			const FSoftObjectPath Path(Node.GetAttribute(TEXT("src")));
+			if (Path.IsValid()) Result.ReferencedTextures.AddUnique(TSoftObjectPtr<UTexture2D>(Path));
+		}
+		const FString StringTable = Node.GetAttribute(TEXT("data-ue-string-table"));
+		if (!StringTable.IsEmpty())
+		{
+			const FSoftObjectPath Path(StringTable);
+			if (Path.IsValid()) Result.ReferencedStringTables.AddUnique(TSoftObjectPtr<UStringTable>(Path));
+		}
+	});
+	return Result;
 }
 
 bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FString& Filename, bool bPreserveLastGood)
@@ -195,39 +211,20 @@ bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FStri
 	}
 
 	const bool bHasErrors = Compiled->HasErrors();
-	if (!bHasErrors || !bPreserveLastGood || Document.CompiledNodes.IsEmpty())
+	if (!bHasErrors || !bPreserveLastGood || Document.GetCompiledNodes().IsEmpty())
 	{
 		Document.CompiledHtml = bHasErrors ? FString() : Html;
 		Document.CompiledCss = bHasErrors ? FString() : CombinedCss;
 		if (bHasErrors)
 		{
-			Document.CompiledNodes.Reset();
-			Document.CompiledRules.Reset();
-			Document.RootNodeIndex = INDEX_NONE;
+			FWebToUECompiledDocumentData EmptyDocument;
+			EmptyDocument.LocalizationNamespace = Document.GetLocalizationNamespace();
+			Document.CommitCompiledDocument(MoveTemp(EmptyDocument));
 		}
 		else
 		{
-			SerializeCompiledDocument(*Compiled, Document);
+			Document.CommitCompiledDocument(BuildCompiledDocument(*Compiled, Document));
 			Document.MarkRecompiled();
-		}
-		Document.ReferencedTextures.Reset();
-		Document.ReferencedStringTables.Reset();
-		if (!bHasErrors)
-		{
-			Compiled->ForEachNode([&Document](FWebToUENode& Node)
-			{
-				if (Node.Tag == TEXT("img"))
-				{
-					const FSoftObjectPath Path(Node.GetAttribute(TEXT("src")));
-					if (Path.IsValid()) Document.ReferencedTextures.AddUnique(TSoftObjectPtr<UTexture2D>(Path));
-				}
-				const FString StringTable = Node.GetAttribute(TEXT("data-ue-string-table"));
-				if (!StringTable.IsEmpty())
-				{
-					const FSoftObjectPath Path(StringTable);
-					if (Path.IsValid()) Document.ReferencedStringTables.AddUnique(TSoftObjectPtr<UStringTable>(Path));
-				}
-			});
 		}
 	}
 

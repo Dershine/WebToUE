@@ -64,6 +64,16 @@ struct FWebToUECompiledRule
 	UPROPERTY() int32 SourceOrder = 0;
 };
 
+struct WEBTOUERUNTIME_API FWebToUECompiledDocumentData
+{
+	FString LocalizationNamespace;
+	TArray<FWebToUECompiledNode> Nodes;
+	TArray<FWebToUECompiledRule> Rules;
+	int32 RootNodeIndex = INDEX_NONE;
+	TArray<TSoftObjectPtr<UTexture2D>> ReferencedTextures;
+	TArray<TSoftObjectPtr<UStringTable>> ReferencedStringTables;
+};
+
 UENUM(BlueprintType)
 enum class EWebToUEAssetDiagnosticSeverity : uint8
 {
@@ -99,17 +109,12 @@ class WEBTOUERUNTIME_API UWebToUEDocument : public UObject
 	GENERATED_BODY()
 
 public:
-	UPROPERTY()
-	FString LocalizationNamespace;
-
-	UPROPERTY()
-	TArray<FWebToUECompiledNode> CompiledNodes;
-
-	UPROPERTY()
-	TArray<FWebToUECompiledRule> CompiledRules;
-
-	UPROPERTY()
-	int32 RootNodeIndex = INDEX_NONE;
+	const FString& GetLocalizationNamespace() const { return LocalizationNamespace; }
+	const TArray<FWebToUECompiledNode>& GetCompiledNodes() const { return CompiledNodes; }
+	const TArray<FWebToUECompiledRule>& GetCompiledRules() const { return CompiledRules; }
+	int32 GetRootNodeIndex() const { return RootNodeIndex; }
+	const TArray<TSoftObjectPtr<UTexture2D>>& GetReferencedTextures() const { return ReferencedTextures; }
+	const TArray<TSoftObjectPtr<UStringTable>>& GetReferencedStringTables() const { return ReferencedStringTables; }
 
 #if WITH_EDITORONLY_DATA
 	UPROPERTY(VisibleAnywhere, Category="WebToUE", meta=(MultiLine=true))
@@ -121,12 +126,6 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="WebToUE")
 	TArray<FWebToUEAssetDiagnostic> Diagnostics;
-
-	UPROPERTY()
-	TArray<TSoftObjectPtr<UTexture2D>> ReferencedTextures;
-
-	UPROPERTY()
-	TArray<TSoftObjectPtr<UStringTable>> ReferencedStringTables;
 
 #if WITH_EDITORONLY_DATA
 	UPROPERTY(VisibleAnywhere, Instanced, Category="Import Settings")
@@ -146,6 +145,7 @@ public:
 #if WITH_EDITOR
 	bool NeedsRecompile() const { return bNeedsRecompile; }
 	void MarkRecompiled() { bNeedsRecompile = false; }
+	void CommitCompiledDocument(FWebToUECompiledDocumentData&& CompiledDocument);
 
 	DECLARE_MULTICAST_DELEGATE_OneParam(FOnDocumentNeedsRecompile, UWebToUEDocument*);
 	static FOnDocumentNeedsRecompile& OnDocumentNeedsRecompile();
@@ -157,4 +157,23 @@ public:
 private:
 	bool bNeedsRecompile = false;
 #endif
+
+private:
+	UPROPERTY()
+	FString LocalizationNamespace;
+
+	UPROPERTY()
+	TArray<FWebToUECompiledNode> CompiledNodes;
+
+	UPROPERTY()
+	TArray<FWebToUECompiledRule> CompiledRules;
+
+	UPROPERTY()
+	int32 RootNodeIndex = INDEX_NONE;
+
+	UPROPERTY()
+	TArray<TSoftObjectPtr<UTexture2D>> ReferencedTextures;
+
+	UPROPERTY()
+	TArray<TSoftObjectPtr<UStringTable>> ReferencedStringTables;
 };

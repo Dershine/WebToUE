@@ -10,7 +10,7 @@
 >
 > 当前里程碑：M2——增量原生运行时
 >
-> 最近核验：2026-08-12，基于 Git `068732527868` + working tree
+> 最近核验：2026-08-12，基于 Git `d1cdda358011` + working tree
 >
 > 统一术语：[CONTEXT.md](../../../CONTEXT.md)
 
@@ -79,10 +79,10 @@
 | 插件版本 | `0.1.0-preview` |
 | Engine | UE 5.8 |
 | SupportedTargetPlatforms | Win64 |
-| 自动化测试 | 19 / 19 通过（2026-08-12，working tree） |
+| 自动化测试 | 20 / 20 通过（2026-08-12，working tree） |
 | 当前编译验证 | UE 5.8 Win64 Editor Development 通过（2026-08-12，working tree） |
 | 历史发布验证 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 均曾通过；发布前必须在当前提交重新执行 |
-| Git 基线 | `068732527868` + working tree；未提交，不生成伪哈希 |
+| Git 基线 | `d1cdda358011` + working tree；未提交，不生成伪哈希 |
 | 当前发布级别 | Developer Preview / 技术可行性与基础能力阶段 |
 
 ### 2.3 宏观里程碑
@@ -186,7 +186,7 @@ flowchart LR
 
 1. `UWebToUEFactory` 读取 HTML，并按源顺序收集 `<link>`、`<style>` 和元素内联样式。
 2. `FWebToUECompiler` 解析结构、校验受支持 CSS、执行级联和富文本 lowering。
-3. 工厂生成 `UWebToUEDocument`，保存扁平节点、规则、资源引用、诊断和自定义版本。
+3. 工厂在局部 payload 中生成扁平节点、规则和资源引用，再原子提交给 `UWebToUEDocument`；Runtime 只能通过 const 边界读取 Compiled UI IR。
 4. Editor 监听已加载文档依赖，文件变化后以 200ms 防抖重导入；失败时保留上次成功运行数据。
 5. `UWebToUEView` 作为 UMG 控件宿主，底层创建单个 `SWebToUEView : SLeafWidget`。
 6. Runtime hydration 后使用 Yoga 计算布局，通过 Slate 递归绘制、裁剪、文本、图片和交互状态。
@@ -216,7 +216,7 @@ Cooked 游戏保留 Compiled Nodes、Rules、Root、纹理/String Table 引用�
 - 语义化 `data-ue-on-click` → `OnUIEvent`。
 - 自定义资产版本、旧资产重编译请求。
 - Editor-only 的确定性 100/500/2,000 节点 Benchmark Corpus 与 50/200/500 规则集。
-- Win64 Editor 编译以及 19 项自动化测试。
+- Win64 Editor 编译以及 20 项自动化测试。
 
 ### 6.2 已实现但仍需工程化证据
 
@@ -322,10 +322,10 @@ Snapshot Telemetry schema `2` 以稳定名称枚举七阶段的调用数/毫秒�
 | --- | --- | --- | --- | --- | --- |
 | R-01 | 伪状态/绑定导致全树样式、Brush、文本和布局刷新 | Critical | 500/200 Hover 与单 FieldNotify 基准均精确记录 `500` 次 Style 节点访问、`100,000` 次 Selector 求值和 `500` 个 Yoga 节点重建 | Dirty Graph、Selector Index、属性影响分类 | 🚧 M2 |
 | R-02 | Yoga Tree 每次布局重建 | High | 500 节点暖缓存完整布局逐样本确认重建 `500` 个 Yoga 节点；完整回归 P95 `0.802100 ms`，虽满足当前预算但仍是 `O(N)` 全树工作 | Persistent Yoga Nodes、局部 Dirty | ⬜ M2 |
-| R-03 | 编译数据与 Runtime State 混合在节点结构 | High | `FWebToUENode` 字段已确认 | 拆分 IR/Instance/Cache 生命周期 | ⬜ M2 |
+| R-03 | 编译数据与 Runtime State 混合在节点结构 | High | 资产 payload 已私有化并只向 Runtime 暴露 const 读取，Hydration/Layout/Hover 不改写资产的专项已通过；`FWebToUENode` 仍混合 State/Style/Layout | 继续拆分 RuntimeInstance/NodeState/Cache 生命周期 | 🚧 M2 |
 | R-04 | 状态变化路径可能同步加载纹理 | High | Brush 重建使用 `LoadObject` | 编译依赖 + Resource Cache + 异步策略 | ⬜ M2 |
 | R-05 | Compiler/View 职责集中，修改回归面扩大 | High | 两个核心实现文件体量和职责已确认 | 按编译阶段和 Runtime 服务拆分 | ⬜ M2 |
-| R-06 | 没有完整可重复性能基准，无法证明“原生且高效” | Critical | 固定 Compile Corpus、七阶段计时/capture、可归因工作量计数、schema `2` 原生 Automation Telemetry/CSV、固定环境指纹和阶段 P50/P95 政策已建立；budget policy schema `6` 已强制暖缓存 Layout `< 2.0 ms` 和未变化 Paint 零 WebToUE 标记分配/零已知 payload 字节，本次完整回归分别为 P95 `0.796400 ms` 与 `0 / 0 B`；500/200 Hover 与单 FieldNotify P95 `56.160700 / 56.295600 ms` 仍未达 `< 0.5 ms`，其他热路径/常驻内存字节和剩余预算门禁仍缺失 | Benchmark、Stat、Trace、预算门禁 | 🚧 M2 |
+| R-06 | 没有完整可重复性能基准，无法证明“原生且高效” | Critical | 固定 Compile Corpus、七阶段计时/capture、可归因工作量计数、schema `2` 原生 Automation Telemetry/CSV、固定环境指纹和阶段 P50/P95 政策已建立；budget policy schema `6` 已强制暖缓存 Layout `< 2.0 ms` 和未变化 Paint 零 WebToUE 标记分配/零已知 payload 字节，本次完整回归分别为 P95 `0.689797 ms` 与 `0 / 0 B`；500/200 Hover 与单 FieldNotify 仍未达 `< 0.5 ms`，其他热路径/常驻内存字节和剩余预算门禁仍缺失 | Benchmark、Stat、Trace、预算门禁 | 🚧 M2 |
 | R-07 | CSS 声明使用 Map，重复声明顺序不完全等价 | Medium | 当前声明模型已确认 | Ordered Declaration IR | ⬜ M2 |
 | R-08 | 仅 Win64，平台假设尚未暴露 | Medium | `.uplugin` 平台限制 | 平台抽象审计与构建矩阵 | ⬜ M6 |
 | R-09 | MCP 为 Experimental、本地服务无认证，通用 Python 执行面权限较高 | Medium | UE 5.8 原生 MCP 与 VibeUE 5.0 已在开发环境验证 | 仅回环、本地受信任、Editor-only；项目专用工具仍默认关闭并遵守最小权限 | ⬜ M5 |
@@ -436,11 +436,11 @@ M2.0 只验收性能可观测性基础设施是否形成闭环：固定工作负
 - [x] 记录 Hydrate 节点/规则、Style 节点、Selector 求值/匹配、Yoga、Text Layout、Brush、WebToUE 标记分配事件，以及已知 payload 覆盖事件/字节。
 - [x] Unreal Insights/Stat 保留七阶段事件，schema `2` Automation Telemetry 生成标准 CSV。
 - [x] 固定测试机、构建配置、采样次数和 P50/P95 规则。
-- [x] budget policy schema `6` 以机器可读方式区分 Observe/Enforce，并让代表性的时间预算和分配预算真实阻止回归；暖缓存完整布局和未变化 Paint 零 WebToUE 标记分配/零已知 payload 字节均为强制门禁，本次完整回归分别以 P95 `0.796400 ms` 与 `0 / 0 B` 通过。
+- [x] budget policy schema `6` 以机器可读方式区分 Observe/Enforce，并让代表性的时间预算和分配预算真实阻止回归；暖缓存完整布局和未变化 Paint 零 WebToUE 标记分配/零已知 payload 字节均为强制门禁，本次完整回归分别以 P95 `0.689797 ms` 与 `0 / 0 B` 通过。
 
-### M2.1——拆分生命周期 ⬜ 0 / 6
+### M2.1——拆分生命周期 🚧 1 / 6
 
-- [ ] 定义只读 `CompiledDocument/CompiledNode` 边界。
+- [x] 定义只读 `CompiledDocument/CompiledNode` 边界。
 - [ ] 定义每视图 `RuntimeInstance/NodeState`。
 - [ ] Layout、Text、Paint 和 Resource Cache 不再写回 Compiled IR。
 - [ ] Binding、Pseudo State、Focus、Scroll 只存在于 Runtime State。
@@ -493,7 +493,7 @@ M2.0 只验收性能可观测性基础设施是否形成闭环：固定工作负
 
 ### M2.7——退出检查 ⬜ 0 / 6
 
-- [ ] 当前 19 项测试及后续新增 M2 测试全部通过。
+- [ ] 当前 20 项测试及后续新增 M2 测试全部通过。
 - [ ] Editor/Game Development/Shipping 编译通过。
 - [ ] Cook、IoStore 和 BuildPlugin 通过。
 - [ ] 第 7.2 节性能预算通过。
@@ -544,15 +544,15 @@ M2 期间先建立与传输协议无关的 Compiler、Diagnostics、Inspection�
 
 ## 12. 测试与发布门禁
 
-### 12.1 当前自动化测试（19 / 19）
+### 12.1 当前自动化测试（20 / 20）
 
 | 层 | 测试 |
 | --- | --- |
 | Core | `HtmlCss`、`FlexLayout`、`ConstrainedMeasure`、`RichTextCompile`、`ScrollLayout`、`CssDiagnostics` |
-| Runtime | `AssetVersion`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`PerformanceInstrumentation`、`PaintOrderCache` |
+| Runtime | `AssetVersion`、`CompiledDocumentBoundary`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`PerformanceInstrumentation`、`PaintOrderCache` |
 | Editor | `BenchmarkScenarios`、`BenchmarkStatistics`、`RuntimeHoverBenchmark`、`RuntimeFieldNotifyBenchmark`、`RuntimeWarmLayoutBenchmark`、`RuntimeUnchangedPaintBenchmark`、`LocalizationImport` |
 
-Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Preflight、探针失败不创建操作、持久存活 PID 识别与精确中断残留清理。它不计入 UE Automation 的 19 项。
+Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Preflight、探针失败不创建操作、持久存活 PID 识别与精确中断残留清理。它不计入 UE Automation 的 20 项。
 
 ### 12.2 仍需建立
 
@@ -575,6 +575,7 @@ Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Prefligh
 
 | 日期 | 基线 | 变化 | 路线影响 |
 | --- | --- | --- | --- |
+| 2026-08-12 | `d1cdda3` + working tree | 将 `UWebToUEDocument` 的节点、规则、根索引和资源依赖 payload 私有化，Runtime 仅通过 const getter Hydrate；Editor 在局部完成节点/规则/本地化身份/资源依赖后通过单一入口提交。新增 `CompiledDocumentBoundary`，并扩展 LocalizationImport 验证失败重导入保留 last-good IR、依赖和 FText history；Win64 Editor Development build、readiness/MCP/Python/World、聚焦 4/4 和完整 20/20 通过，暖 Layout P95 `0.689797 ms` 与未变化 Paint `0 / 0 B` 继续通过硬门禁。 | M2.1 达到 1/6；R-03 进入缓解但保持 High，因为 Runtime Node 的 State/Style/Layout 和 Cache 生命周期尚未拆分；资产版本与旧资产行为不变。 |
 | 2026-08-12 | `c89a728` + working tree | 校正 M2 宏观退出门口径：M2.0 已以固定 Corpus、七阶段观测、标准 Telemetry、固定采样政策，以及一个时间预算和一个分配预算的真实硬门禁达到 6/6，因此对应的宏观性能可观测性退出门应标记完成。 | M2 宏观进度由 1/7 修正为 2/7；这只修正验收事实映射，不代表 Hover/FieldNotify、局部 Layout、缓存命中或 M2.7 性能总门已经达标。 |
 | 2026-08-12 | `0687325` + working tree | 修正 M2 性能验收归属：M2.0 以固定 Corpus、分阶段观测、标准输出、采样政策，以及至少一个时间预算和一个分配预算的真实硬门禁为退出条件；第 7.2 节全量预算保留在 M2.7，Hover/FieldNotify 和局部 Layout/Cache 门禁分别归入 M2.3/M2.4。 | M2.0 按现有证据达到 6/6；该调整不代表未达预算的路径通过，R-01/R-02/R-06 等级不变，M2.7 性能总门仍未完成。 |
 | 2026-08-12 | `0687325` + working tree | 将递归 Paint 中每父节点的子数组复制/排序替换为 View-owned 扁平 Paint Order Cache，并将 budget policy 升为 schema `6`；相同环境修改前 P50/P95 `0.253649/0.289399 ms`、`250` 次/`7,984 B`，修改后两次聚焦为 `0.231652/0.248600` 与 `0.233900/0.289701 ms`，最终完整回归为 `0.238301/0.266302 ms`、`0 / 0 B`。新增顺序/失效专项，19/19 测试、Win64 Editor Development build、readiness/MCP/Python/World 通过。 | 未变化 Paint 零 WebToUE 标记分配/零已知 payload 字节成为第二项强制性能门禁；M2.5 达到 1/5，R-06 仍因 Hover/FieldNotify 与其他内存证据缺口保持 Critical；按当时定义，M2.0 保持 5/6。 |

@@ -246,3 +246,4 @@ When asked to rebuild / relaunch / test, use the project script — not manual `
 - UE 5.8 UBT and Turnkey write `%LOCALAPPDATA%\UnrealBuildTool`; run lifecycle build/launch outside a workspace-only sandbox, or they can finish work and then throw `UnauthorizedAccessException` while rotating `Trace*.uba`, leaving Editor startup without readiness.
 - Before closing a healthy Editor, require the lifecycle wrapper's engine/project/user-local write preflight to pass inside the same narrowly approved unsandboxed boundary that will launch UBT and Editor.
 - A yielded or quiet lifecycle command is still the same operation: wait on its existing execution cell or inspect `Saved/VibeUE/Lifecycle/operation.json`; never rerun it to obtain output.
+- Unreal Automation treats expected import `Error` logs as test failures unless the negative-path test registers the message with `AddExpectedError` before triggering the import.

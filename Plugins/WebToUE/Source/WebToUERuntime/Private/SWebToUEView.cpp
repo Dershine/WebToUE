@@ -47,19 +47,21 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	PaintOrderNodes.Reset();
 	PaintOrderRanges.Reset();
 	HoveredNode = PressedNode = FocusedNode = nullptr;
-	if (InDocument && InDocument->CompiledNodes.IsValidIndex(InDocument->RootNodeIndex))
+	if (InDocument && InDocument->GetCompiledNodes().IsValidIndex(InDocument->GetRootNodeIndex()))
 	{
-		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::HydratedNodes, InDocument->CompiledNodes.Num());
-		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::HydratedRules, InDocument->CompiledRules.Num());
+		const TArray<FWebToUECompiledNode>& CompiledNodes = InDocument->GetCompiledNodes();
+		const TArray<FWebToUECompiledRule>& CompiledRules = InDocument->GetCompiledRules();
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::HydratedNodes, CompiledNodes.Num());
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::HydratedRules, CompiledRules.Num());
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 		RuntimeDocument = MakeShared<FWebToUEDocument>();
 		TArray<TSharedPtr<FWebToUENode>> Nodes;
-		if (!InDocument->CompiledNodes.IsEmpty())
+		if (!CompiledNodes.IsEmpty())
 		{
 			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 		}
-		Nodes.Reserve(InDocument->CompiledNodes.Num());
-		for (const FWebToUECompiledNode& Source : InDocument->CompiledNodes)
+		Nodes.Reserve(CompiledNodes.Num());
+		for (const FWebToUECompiledNode& Source : CompiledNodes)
 		{
 			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 			TSharedPtr<FWebToUENode> Node = MakeShared<FWebToUENode>();
@@ -72,17 +74,17 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 			for (const FWebToUECompiledAttribute& Attribute : Source.Attributes) Node->Attributes.Add(Attribute.Name, Attribute.Value);
 			Nodes.Add(MoveTemp(Node));
 		}
-		for (int32 Index = 0; Index < InDocument->CompiledNodes.Num(); ++Index)
+		for (int32 Index = 0; Index < CompiledNodes.Num(); ++Index)
 		{
-			const int32 ParentIndex = InDocument->CompiledNodes[Index].ParentIndex;
+			const int32 ParentIndex = CompiledNodes[Index].ParentIndex;
 			if (Nodes.IsValidIndex(ParentIndex))
 			{
 				Nodes[Index]->Parent = Nodes[ParentIndex].Get();
 				Nodes[ParentIndex]->Children.Add(Nodes[Index]);
 			}
 		}
-		RuntimeDocument->Root = Nodes[InDocument->RootNodeIndex];
-		for (const FWebToUECompiledRule& SourceRule : InDocument->CompiledRules)
+		RuntimeDocument->Root = Nodes[InDocument->GetRootNodeIndex()];
+		for (const FWebToUECompiledRule& SourceRule : CompiledRules)
 		{
 			FWebToUEStyleRule Rule;
 			Rule.Specificity = SourceRule.Specificity;

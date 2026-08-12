@@ -41,6 +41,16 @@ UWebToUEDocument::FOnDocumentNeedsRecompile& UWebToUEDocument::OnDocumentNeedsRe
 	return Delegate;
 }
 
+void UWebToUEDocument::CommitCompiledDocument(FWebToUECompiledDocumentData&& CompiledDocument)
+{
+	LocalizationNamespace = MoveTemp(CompiledDocument.LocalizationNamespace);
+	CompiledNodes = MoveTemp(CompiledDocument.Nodes);
+	CompiledRules = MoveTemp(CompiledDocument.Rules);
+	RootNodeIndex = CompiledDocument.RootNodeIndex;
+	ReferencedTextures = MoveTemp(CompiledDocument.ReferencedTextures);
+	ReferencedStringTables = MoveTemp(CompiledDocument.ReferencedStringTables);
+}
+
 void UWebToUEDocument::PostInitProperties()
 {
 	Super::PostInitProperties();

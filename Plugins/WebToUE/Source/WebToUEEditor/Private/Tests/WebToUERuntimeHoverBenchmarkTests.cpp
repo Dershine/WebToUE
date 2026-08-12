@@ -128,10 +128,10 @@ bool FWebToUERuntimeHoverBenchmarkTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("The runtime document has exactly 500 compiled nodes"),
-		Document->CompiledNodes.Num(), Scenario.Definition.NodeCount);
+		Document->GetCompiledNodes().Num(), Scenario.Definition.NodeCount);
 	TestEqual(TEXT("The runtime document has exactly 200 compiled rules"),
-		Document->CompiledRules.Num(), Scenario.Definition.RuleCount);
-	const FWebToUECompiledNode* HoverTarget = Document->CompiledNodes.FindByPredicate(
+		Document->GetCompiledRules().Num(), Scenario.Definition.RuleCount);
+	const FWebToUECompiledNode* HoverTarget = Document->GetCompiledNodes().FindByPredicate(
 		[](const FWebToUECompiledNode& Node)
 		{
 			return Node.Attributes.ContainsByPredicate([](const FWebToUECompiledAttribute& Attribute)
@@ -341,10 +341,10 @@ bool FWebToUERuntimeFieldNotifyBenchmarkTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("The runtime document has exactly 500 compiled nodes"),
-		Document->CompiledNodes.Num(), Scenario.Definition.NodeCount);
+		Document->GetCompiledNodes().Num(), Scenario.Definition.NodeCount);
 	TestEqual(TEXT("The runtime document has exactly 200 compiled rules"),
-		Document->CompiledRules.Num(), Scenario.Definition.RuleCount);
-	const FWebToUECompiledNode* BindingTarget = Document->CompiledNodes.FindByPredicate(
+		Document->GetCompiledRules().Num(), Scenario.Definition.RuleCount);
+	const FWebToUECompiledNode* BindingTarget = Document->GetCompiledNodes().FindByPredicate(
 		[](const FWebToUECompiledNode& Node)
 		{
 			return Node.Attributes.ContainsByPredicate([](const FWebToUECompiledAttribute& Attribute)
@@ -568,11 +568,11 @@ bool FWebToUERuntimeWarmLayoutBenchmarkTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("The runtime document has exactly 500 compiled nodes"),
-		Document->CompiledNodes.Num(), Scenario.Definition.NodeCount);
+		Document->GetCompiledNodes().Num(), Scenario.Definition.NodeCount);
 	TestEqual(TEXT("The runtime document has exactly 200 compiled rules"),
-		Document->CompiledRules.Num(), Scenario.Definition.RuleCount);
+		Document->GetCompiledRules().Num(), Scenario.Definition.RuleCount);
 	int32 TextNodeCount = 0;
-	for (const FWebToUECompiledNode& Node : Document->CompiledNodes)
+	for (const FWebToUECompiledNode& Node : Document->GetCompiledNodes())
 	{
 		if (Node.Tag == TEXT("#text"))
 		{
@@ -790,12 +790,12 @@ bool FWebToUERuntimeUnchangedPaintBenchmarkTest::RunTest(const FString& Paramete
 	}
 
 	TestEqual(TEXT("The runtime document has exactly 500 compiled nodes"),
-		Document->CompiledNodes.Num(), Scenario.Definition.NodeCount);
+		Document->GetCompiledNodes().Num(), Scenario.Definition.NodeCount);
 	TestEqual(TEXT("The runtime document has exactly 200 compiled rules"),
-		Document->CompiledRules.Num(), Scenario.Definition.RuleCount);
+		Document->GetCompiledRules().Num(), Scenario.Definition.RuleCount);
 	int32 TextNodeCount = 0;
 	TSet<int32> ParentNodeIndices;
-	for (const FWebToUECompiledNode& Node : Document->CompiledNodes)
+	for (const FWebToUECompiledNode& Node : Document->GetCompiledNodes())
 	{
 		if (Node.Tag == TEXT("#text"))
 		{
