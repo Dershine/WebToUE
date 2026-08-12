@@ -91,13 +91,13 @@
 | --- | --- | --- | --- | --- |
 | M0 技术闭环 | 文档结构与样式可被独立渲染 | ✅ | 8 / 8 | 从 HTML/CSS 到 Cooked 原生 UI 的端到端闭环 |
 | M1 UI 基础语义 | 排版、交互、本地化与诊断 | ✅ | 10 / 10 | 常规菜单/HUD 原型所需的受控基础子集 |
-| M2 增量原生运行时 | 浏览器的 retained/incremental rendering | 🚧 | 1 / 7 退出门 | 可度量、局部失效、可扩展的 Runtime |
+| M2 增量原生运行时 | 浏览器的 retained/incremental rendering | 🚧 | 2 / 7 退出门 | 可度量、局部失效、可扩展的 Runtime |
 | M3 响应式与组件 | React/Vue/Svelte 的数据和组件抽象 | ⬜ | 0 / 8 | UE MVVM 驱动的组件、列表与结构复用 |
 | M4 动画与响应式视觉 | 合成层、时间线与多视口适配 | ⬜ | 0 / 6 | 游戏级动效而不引入浏览器合成器 |
 | M5 工具链与 MCP | DevTools、自动化与生态接口 | ⬜ | 0 / 7 | 可检查、可分析、可由工具安全驱动 |
 | M6 1.0 产品化 | 标准化、兼容策略与平台工程 | ⬜ | 0 / 7 | 可被外部项目稳定依赖的插件 |
 
-M2 的 `1 / 7` 表示“原生、事件驱动的单控件运行时”这一前置门已经具备；其余退出门尚未完成。它不表示 M2 已完成约 14% 的工时。
+M2 的 `2 / 7` 表示“可重复性能基准、Trace/Stat 与硬预算门禁”和“原生、事件驱动的单控件运行时”两个退出门已经具备；其余退出门尚未完成。它不表示 M2 已完成约 29% 的工时。
 
 ---
 
@@ -361,9 +361,9 @@ Snapshot Telemetry schema `2` 以稳定名称枚举七阶段的调用数/毫秒�
 - [x] Core/Runtime/Editor 自动化测试基础。
 - [x] 工程技术总览和明确非目标。
 
-### M2——增量原生运行时 🚧 1 / 7 退出门
+### M2——增量原生运行时 🚧 2 / 7 退出门
 
-- [ ] 有可重复基准、Trace/Stat 和预算门禁。
+- [x] 有可重复基准、Trace/Stat 和预算门禁。
 - [ ] Compiled UI IR、Runtime State、Layout/Paint Cache 完全分离。
 - [ ] Typed Property、Selector Index 和 Ordered Declaration 建立。
 - [ ] Style/Measure/Layout/Paint/HitTest Dirty Graph 生效。
@@ -575,6 +575,7 @@ Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Prefligh
 
 | 日期 | 基线 | 变化 | 路线影响 |
 | --- | --- | --- | --- |
+| 2026-08-12 | `c89a728` + working tree | 校正 M2 宏观退出门口径：M2.0 已以固定 Corpus、七阶段观测、标准 Telemetry、固定采样政策，以及一个时间预算和一个分配预算的真实硬门禁达到 6/6，因此对应的宏观性能可观测性退出门应标记完成。 | M2 宏观进度由 1/7 修正为 2/7；这只修正验收事实映射，不代表 Hover/FieldNotify、局部 Layout、缓存命中或 M2.7 性能总门已经达标。 |
 | 2026-08-12 | `0687325` + working tree | 修正 M2 性能验收归属：M2.0 以固定 Corpus、分阶段观测、标准输出、采样政策，以及至少一个时间预算和一个分配预算的真实硬门禁为退出条件；第 7.2 节全量预算保留在 M2.7，Hover/FieldNotify 和局部 Layout/Cache 门禁分别归入 M2.3/M2.4。 | M2.0 按现有证据达到 6/6；该调整不代表未达预算的路径通过，R-01/R-02/R-06 等级不变，M2.7 性能总门仍未完成。 |
 | 2026-08-12 | `0687325` + working tree | 将递归 Paint 中每父节点的子数组复制/排序替换为 View-owned 扁平 Paint Order Cache，并将 budget policy 升为 schema `6`；相同环境修改前 P50/P95 `0.253649/0.289399 ms`、`250` 次/`7,984 B`，修改后两次聚焦为 `0.231652/0.248600` 与 `0.233900/0.289701 ms`，最终完整回归为 `0.238301/0.266302 ms`、`0 / 0 B`。新增顺序/失效专项，19/19 测试、Win64 Editor Development build、readiness/MCP/Python/World 通过。 | 未变化 Paint 零 WebToUE 标记分配/零已知 payload 字节成为第二项强制性能门禁；M2.5 达到 1/5，R-06 仍因 Hover/FieldNotify 与其他内存证据缺口保持 Critical；按当时定义，M2.0 保持 5/6。 |
 | 2026-08-11 | `72533da` + working tree | 将 budget policy 升为 schema `5` 并显式记录 Observe/Enforce；500 节点暖缓存完整布局成为首个强制性能门禁。两次聚焦 P50/P95 为 `0.640400/0.803798` 与 `0.647400/0.677601 ms`，完整 18/18 回归为 `0.650749/0.776399 ms`，均满足 `< 2.0 ms`；完整 Telemetry 为 `4,950` 行、`147` 个上下文，Win64 Editor Development build、readiness/MCP/Python/World 通过。 | R-06 首次具备会阻止回归的硬预算门禁；Hover、FieldNotify 和未变化 Paint 仍为 Observe，M2.0 保持 5/6。 |
