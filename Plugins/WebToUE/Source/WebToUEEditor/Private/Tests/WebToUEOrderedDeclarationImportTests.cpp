@@ -15,7 +15,7 @@ bool FWebToUEOrderedDeclarationImportTest::RunTest(const FString& Parameters)
 	const FString TestDirectory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("WebToUEAutomation"));
 	const FString TestFilename = FPaths::Combine(TestDirectory, TEXT("OrderedDeclarations.html"));
 	IFileManager::Get().MakeDirectory(*TestDirectory, true);
-	const FString Html = TEXT("<body><style>#target { color: #ff0000; width: 100px; color: invalid; color: #00ff00; width: 120px; }</style><div id='target'></div></body>");
+	const FString Html = TEXT("<body><style>#target { color: #ff0000; width: 100px; color: invalid; color: #00ff00; width: 120px; }</style><div id='target'></div><div id='inline' style='opacity: 0.5; opacity: 0.75'></div></body>");
 	TestTrue(TEXT("The ordered declaration source is written"), FFileHelper::SaveStringToFile(Html, *TestFilename));
 	UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
 	TestTrue(TEXT("The ordered declaration document imports"),
@@ -27,10 +27,33 @@ bool FWebToUEOrderedDeclarationImportTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("The compiled IR retains every valid declaration"), Declarations.Num(), 4);
 		if (Declarations.Num() == 4)
 		{
-			TestEqual(TEXT("The compiled IR retains the first duplicate"), Declarations[0].Value, FString(TEXT("#ff0000")));
-			TestEqual(TEXT("The compiled IR retains the interleaved property"), Declarations[1].Name, FString(TEXT("width")));
-			TestEqual(TEXT("The compiled IR retains the later duplicate"), Declarations[2].Value, FString(TEXT("#00ff00")));
-			TestEqual(TEXT("The compiled IR retains the final declaration"), Declarations[3].Value, FString(TEXT("120px")));
+			TestEqual(TEXT("The compiled IR stores the first property ID"), Declarations[0].Property, EWebToUECssProperty::Color);
+			TestEqual(TEXT("The compiled IR stores the first typed color"), Declarations[0].TypedValue.Color, FLinearColor::Red);
+			TestEqual(TEXT("The compiled IR retains the interleaved property ID"), Declarations[1].Property, EWebToUECssProperty::Width);
+			TestEqual(TEXT("The compiled IR retains the later typed color"), Declarations[2].TypedValue.Color, FLinearColor::Green);
+			TestEqual(TEXT("The compiled IR retains the final typed length"), Declarations[3].TypedValue.Length.Value, 120.0f);
+			TestTrue(TEXT("Version 4 declarations omit legacy names"), Declarations[0].Name.IsEmpty());
+			TestTrue(TEXT("Version 4 declarations omit legacy values"), Declarations[0].Value.IsEmpty());
+		}
+	}
+	const FWebToUECompiledNode* InlineNode = Document->GetCompiledNodes().FindByPredicate(
+		[](const FWebToUECompiledNode& Node)
+		{
+			return Node.Attributes.ContainsByPredicate([](const FWebToUECompiledAttribute& Attribute)
+			{
+				return Attribute.Name == TEXT("id") && Attribute.Value == TEXT("inline");
+			});
+		});
+	TestNotNull(TEXT("The inline-style node is compiled"), InlineNode);
+	if (InlineNode)
+	{
+		TestEqual(TEXT("The compiled IR retains ordered inline declarations"), InlineNode->InlineStyleDeclarations.Num(), 2);
+		if (InlineNode->InlineStyleDeclarations.Num() == 2)
+		{
+			TestEqual(TEXT("Inline IR stores the opacity property ID"),
+				InlineNode->InlineStyleDeclarations[0].Property, EWebToUECssProperty::Opacity);
+			TestEqual(TEXT("Inline IR stores the final typed number"),
+				InlineNode->InlineStyleDeclarations[1].TypedValue.Number, 0.75f);
 		}
 	}
 

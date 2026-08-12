@@ -3,6 +3,41 @@
 #include "WebToUECompiler.h"
 #include "WebToUEDocument.h"
 #include "WebToUEPerformance.h"
+#include "WebToUEStyleProperties.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogWebToUERuntimeInstance, Log, All);
+
+namespace WebToUE::RuntimeInstance::Private
+{
+	static bool HydrateDeclaration(const FWebToUECompiledDeclaration& Source,
+		FWebToUEStyleDeclaration& OutDeclaration)
+	{
+		if (Source.Property != EWebToUECssProperty::Invalid &&
+			Source.TypedValue.Type != EWebToUEStyleValueType::Invalid)
+		{
+			OutDeclaration.Property = Source.Property;
+			OutDeclaration.TypedValue = Source.TypedValue;
+			return true;
+		}
+		return WebToUE::Private::TryParseCssDeclaration(Source.Name, Source.Value, OutDeclaration);
+	}
+
+	static bool HydrateLegacyInlineStyle(const FString& InlineStyle,
+		TArray<FWebToUEStyleDeclaration>& OutDeclarations)
+	{
+		TArray<FString> Parts;
+		InlineStyle.ParseIntoArray(Parts, TEXT(";"), true);
+		for (const FString& Part : Parts)
+		{
+			FString Name;
+			FString Value;
+			if (!Part.Split(TEXT(":"), &Name, &Value)) return false;
+			FWebToUEStyleDeclaration& Declaration = OutDeclarations.AddDefaulted_GetRef();
+			if (!WebToUE::Private::TryParseCssDeclaration(Name, Value, Declaration)) return false;
+		}
+		return true;
+	}
+}
 
 void FWebToUERuntimeInstance::Reset()
 {
@@ -47,6 +82,30 @@ bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 		{
 			Node->Attributes.Add(Attribute.Name, Attribute.Value);
 		}
+		for (const FWebToUECompiledDeclaration& SourceDeclaration : Source.InlineStyleDeclarations)
+		{
+			FWebToUEStyleDeclaration& RuntimeDeclaration = Node->InlineStyleDeclarations.AddDefaulted_GetRef();
+			if (!WebToUE::RuntimeInstance::Private::HydrateDeclaration(SourceDeclaration, RuntimeDeclaration))
+			{
+				UE_LOG(LogWebToUERuntimeInstance, Error,
+					TEXT("Failed to hydrate a typed inline style declaration for node '%s'."), *Source.Tag);
+				Reset();
+				return false;
+			}
+		}
+		if (Source.InlineStyleDeclarations.IsEmpty())
+		{
+			const FString* LegacyInlineStyle = Node->Attributes.Find(TEXT("style"));
+			if (LegacyInlineStyle && !LegacyInlineStyle->IsEmpty() &&
+				!WebToUE::RuntimeInstance::Private::HydrateLegacyInlineStyle(
+					*LegacyInlineStyle, Node->InlineStyleDeclarations))
+			{
+				UE_LOG(LogWebToUERuntimeInstance, Error,
+					TEXT("Failed to hydrate legacy inline style declarations for node '%s'."), *Source.Tag);
+				Reset();
+				return false;
+			}
+		}
 		Nodes.Add(MoveTemp(Node));
 	}
 	for (int32 Index = 0; Index < CompiledNodes.Num(); ++Index)
@@ -78,8 +137,13 @@ bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 		for (const FWebToUECompiledDeclaration& Declaration : SourceRule.Declarations)
 		{
 			FWebToUEStyleDeclaration& RuntimeDeclaration = Rule.Declarations.AddDefaulted_GetRef();
-			RuntimeDeclaration.Name = Declaration.Name;
-			RuntimeDeclaration.Value = Declaration.Value;
+			if (!WebToUE::RuntimeInstance::Private::HydrateDeclaration(Declaration, RuntimeDeclaration))
+			{
+				UE_LOG(LogWebToUERuntimeInstance, Error,
+					TEXT("Failed to hydrate legacy or typed style declaration '%s'."), *Declaration.Name);
+				Reset();
+				return false;
+			}
 		}
 		RuntimeDocument->Rules.Add(MoveTemp(Rule));
 	}

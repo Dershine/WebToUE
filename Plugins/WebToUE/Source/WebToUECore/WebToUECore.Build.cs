@@ -6,6 +6,6 @@ public class WebToUECore : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         CppStandard = CppStandardVersion.Cpp20;
-        PublicDependencyModuleNames.AddRange(new[] { "Core", "WebToUEYoga" });
+        PublicDependencyModuleNames.AddRange(new[] { "Core", "CoreUObject", "WebToUEYoga" });
     }
 }

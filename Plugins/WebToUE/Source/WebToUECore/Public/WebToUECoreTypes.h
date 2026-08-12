@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WebToUECoreTypes.generated.h"
 
 enum class EWebToUEDiagnosticSeverity : uint8
 {
@@ -62,6 +63,7 @@ enum class EWebToUEPseudoState : uint8
 };
 ENUM_CLASS_FLAGS(EWebToUEPseudoState)
 
+UENUM()
 enum class EWebToUEUnit : uint8
 {
 	Auto,
@@ -70,23 +72,188 @@ enum class EWebToUEUnit : uint8
 	Undefined
 };
 
+USTRUCT()
 struct WEBTOUECORE_API FWebToUELength
 {
-	EWebToUEUnit Unit = EWebToUEUnit::Undefined;
-	float Value = 0.0f;
+	GENERATED_BODY()
 
-	static FWebToUELength Auto() { return { EWebToUEUnit::Auto, 0.0f }; }
-	static FWebToUELength Pixels(float InValue) { return { EWebToUEUnit::Pixels, InValue }; }
-	static FWebToUELength Percent(float InValue) { return { EWebToUEUnit::Percent, InValue }; }
+	UPROPERTY() EWebToUEUnit Unit = EWebToUEUnit::Undefined;
+	UPROPERTY() float Value = 0.0f;
+
+	static FWebToUELength Auto() { FWebToUELength Result; Result.Unit = EWebToUEUnit::Auto; return Result; }
+	static FWebToUELength Pixels(float InValue) { FWebToUELength Result; Result.Unit = EWebToUEUnit::Pixels; Result.Value = InValue; return Result; }
+	static FWebToUELength Percent(float InValue) { FWebToUELength Result; Result.Unit = EWebToUEUnit::Percent; Result.Value = InValue; return Result; }
 	bool IsDefined() const { return Unit != EWebToUEUnit::Undefined; }
 };
 
+USTRUCT()
 struct WEBTOUECORE_API FWebToUEEdges
 {
-	FWebToUELength Left;
-	FWebToUELength Top;
-	FWebToUELength Right;
-	FWebToUELength Bottom;
+	GENERATED_BODY()
+
+	UPROPERTY() FWebToUELength Left;
+	UPROPERTY() FWebToUELength Top;
+	UPROPERTY() FWebToUELength Right;
+	UPROPERTY() FWebToUELength Bottom;
+};
+
+// Serialized values are append-only. Changing an existing numeric value requires an asset version migration.
+UENUM()
+enum class EWebToUECssProperty : uint8
+{
+	Invalid = 0,
+	Display,
+	Position,
+	Visibility,
+	Overflow,
+	Width,
+	Height,
+	MinWidth,
+	MinHeight,
+	MaxWidth,
+	MaxHeight,
+	Left,
+	Top,
+	Right,
+	Bottom,
+	Margin,
+	MarginLeft,
+	MarginTop,
+	MarginRight,
+	MarginBottom,
+	Padding,
+	PaddingLeft,
+	PaddingTop,
+	PaddingRight,
+	PaddingBottom,
+	Gap,
+	RowGap,
+	ColumnGap,
+	Flex,
+	FlexDirection,
+	FlexWrap,
+	FlexGrow,
+	FlexShrink,
+	FlexBasis,
+	JustifyContent,
+	AlignItems,
+	AlignSelf,
+	Color,
+	Background,
+	BackgroundColor,
+	Border,
+	BorderColor,
+	BorderWidth,
+	BorderStyle,
+	BorderRadius,
+	Opacity,
+	FontFamily,
+	FontSize,
+	FontWeight,
+	TextAlign,
+	WhiteSpace,
+	ObjectFit,
+	ZIndex
+};
+
+UENUM()
+enum class EWebToUEStyleValueType : uint8
+{
+	Invalid = 0,
+	Keyword,
+	Number,
+	Integer,
+	Length,
+	Edges,
+	Color,
+	String,
+	Flex,
+	Border
+};
+
+UENUM()
+enum class EWebToUEStyleKeyword : uint8
+{
+	None = 0,
+	Flex,
+	Relative,
+	Absolute,
+	Visible,
+	Hidden,
+	Auto,
+	Scroll,
+	Row,
+	RowReverse,
+	Column,
+	ColumnReverse,
+	NoWrap,
+	Wrap,
+	WrapReverse,
+	FlexStart,
+	Center,
+	FlexEnd,
+	SpaceBetween,
+	SpaceAround,
+	SpaceEvenly,
+	Stretch,
+	Baseline,
+	Solid,
+	Left,
+	Right,
+	Normal,
+	Fill,
+	Contain,
+	Cover
+};
+
+USTRUCT()
+struct WEBTOUECORE_API FWebToUEFlexValue
+{
+	GENERATED_BODY()
+
+	UPROPERTY() float Grow = 0.0f;
+	UPROPERTY() float Shrink = 1.0f;
+	UPROPERTY() FWebToUELength Basis = FWebToUELength::Auto();
+	UPROPERTY() bool bHasGrow = false;
+	UPROPERTY() bool bHasShrink = false;
+	UPROPERTY() bool bHasBasis = false;
+};
+
+USTRUCT()
+struct WEBTOUECORE_API FWebToUEBorderValue
+{
+	GENERATED_BODY()
+
+	UPROPERTY() float Width = 0.0f;
+	UPROPERTY() FLinearColor Color = FLinearColor::Transparent;
+	UPROPERTY() bool bHasWidth = false;
+	UPROPERTY() bool bHasColor = false;
+};
+
+USTRUCT()
+struct WEBTOUECORE_API FWebToUEStyleValue
+{
+	GENERATED_BODY()
+
+	UPROPERTY() EWebToUEStyleValueType Type = EWebToUEStyleValueType::Invalid;
+	UPROPERTY() EWebToUEStyleKeyword Keyword = EWebToUEStyleKeyword::None;
+	UPROPERTY() float Number = 0.0f;
+	UPROPERTY() int32 Integer = 0;
+	UPROPERTY() FWebToUELength Length;
+	UPROPERTY() FWebToUEEdges Edges;
+	UPROPERTY() FLinearColor Color = FLinearColor::Transparent;
+	UPROPERTY() FString String;
+	UPROPERTY() FWebToUEFlexValue Flex;
+	UPROPERTY() FWebToUEBorderValue Border;
+};
+
+struct WEBTOUECORE_API FWebToUEStyleDeclaration
+{
+	EWebToUECssProperty Property = EWebToUECssProperty::Invalid;
+	FWebToUEStyleValue TypedValue;
+	// Authoring-only source spelling. Compiled assets serialize Property and TypedValue instead.
+	FString Name;
+	FString Value;
 };
 
 struct WEBTOUECORE_API FWebToUEComputedStyle
@@ -167,6 +334,7 @@ struct WEBTOUECORE_API FWebToUENode : public TSharedFromThis<FWebToUENode>
 	bool bTextHadLeadingWhitespace = false;
 	bool bTextHadTrailingWhitespace = false;
 	TMap<FString, FString> Attributes;
+	TArray<FWebToUEStyleDeclaration> InlineStyleDeclarations;
 	TArray<TSharedPtr<FWebToUENode>> Children;
 	FWebToUENode* Parent = nullptr;
 	int32 RuntimeDataIndex = INDEX_NONE;
@@ -190,12 +358,6 @@ struct WEBTOUECORE_API FWebToUESelectorSegment
 	TArray<FString> Classes;
 	EWebToUEPseudoState RequiredState = EWebToUEPseudoState::None;
 	EWebToUECombinator RelationToPrevious = EWebToUECombinator::None;
-};
-
-struct WEBTOUECORE_API FWebToUEStyleDeclaration
-{
-	FString Name;
-	FString Value;
 };
 
 struct WEBTOUECORE_API FWebToUEStyleRule

@@ -264,6 +264,7 @@ namespace WebToUE::Private
 				{
 					TArray<FWebToUEStyleDeclaration> ValidatedDeclarations;
 					ParseDeclarationBlock(Value, SourceName, ValueLine, ValueColumn, Document, ValidatedDeclarations);
+					Node->InlineStyleDeclarations = ValidatedDeclarations;
 					Value.Reset();
 					for (const FWebToUEStyleDeclaration& Declaration : ValidatedDeclarations)
 					{
@@ -760,21 +761,28 @@ namespace WebToUE::Private
 					const int32 ValueStart = SkipWhitespace(Block, Colon + 1, DeclarationEnd);
 					const FString Name = Block.Mid(DeclarationStart, NameEnd - DeclarationStart).ToLower();
 					const FString Value = Block.Mid(ValueStart, DeclarationEnd - ValueStart);
-					if (!IsKnownCssProperty(Name))
+					EWebToUECssProperty Property = EWebToUECssProperty::Invalid;
+					if (!TryGetCssProperty(Name, Property))
 					{
 						Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Warning, SourceName, Line, Column,
 							FString::Printf(TEXT("Ignored unsupported CSS property '%s'."), *Name) });
 					}
-					else if (!IsValidCssValue(Name, Value))
-					{
-						Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Warning, SourceName, Line, Column,
-							FString::Printf(TEXT("Ignored invalid value '%s' for CSS property '%s'."), *Value, *Name) });
-					}
 					else
 					{
-						FWebToUEStyleDeclaration& Declaration = OutDeclarations.AddDefaulted_GetRef();
-						Declaration.Name = Name;
-						Declaration.Value = Value;
+						FWebToUEStyleValue TypedValue;
+						if (!TryParseCssValue(Property, Value, TypedValue))
+						{
+							Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Warning, SourceName, Line, Column,
+								FString::Printf(TEXT("Ignored invalid value '%s' for CSS property '%s'."), *Value, *Name) });
+						}
+						else
+						{
+							FWebToUEStyleDeclaration& Declaration = OutDeclarations.AddDefaulted_GetRef();
+							Declaration.Property = Property;
+							Declaration.TypedValue = MoveTemp(TypedValue);
+							Declaration.Name = Name;
+							Declaration.Value = Value;
+						}
 					}
 				}
 			}

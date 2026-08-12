@@ -10,8 +10,9 @@ struct WEBTOUERUNTIME_API FWebToUEAssetVersion
 		InitialCompiledDocument = 1,
 		LocalizedRichText = 2,
 		OrderedDeclarations = 3,
+		TypedStyleDeclarations = 4,
 
-		LatestVersion = OrderedDeclarations
+		LatestVersion = TypedStyleDeclarations
 	};
 
 	static const FGuid GUID;

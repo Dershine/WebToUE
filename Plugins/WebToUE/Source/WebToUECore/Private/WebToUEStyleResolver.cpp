@@ -72,28 +72,17 @@ namespace WebToUE::Private
 				? A.SourceOrder < B.SourceOrder
 				: A.Specificity < B.Specificity;
 		});
-		TMap<FString, FString> Properties;
+		TMap<EWebToUECssProperty, FWebToUEStyleValue> Properties;
 		for (const FWebToUEStyleRule* Rule : Matches)
 		{
 			for (const FWebToUEStyleDeclaration& Declaration : Rule->Declarations)
 			{
-				Properties.Add(Declaration.Name, Declaration.Value);
+				Properties.Add(Declaration.Property, Declaration.TypedValue);
 			}
 		}
-		const FString InlineStyle = Node.GetAttribute(TEXT("style"));
-		if (!InlineStyle.IsEmpty())
+		for (const FWebToUEStyleDeclaration& Declaration : Node.InlineStyleDeclarations)
 		{
-			TArray<FString> Parts;
-			InlineStyle.ParseIntoArray(Parts, TEXT(";"), true);
-			for (FString Part : Parts)
-			{
-				FString Name;
-				FString Value;
-				if (Part.Split(TEXT(":"), &Name, &Value))
-				{
-					Properties.Add(Name.TrimStartAndEnd().ToLower(), Value.TrimStartAndEnd());
-				}
-			}
+			Properties.Add(Declaration.Property, Declaration.TypedValue);
 		}
 		ApplyProperties(Properties, Style);
 		Style.bVisible = Style.bVisible && RuntimeState.bRuntimeVisible;

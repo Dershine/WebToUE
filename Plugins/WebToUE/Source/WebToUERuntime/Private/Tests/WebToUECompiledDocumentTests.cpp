@@ -4,6 +4,7 @@
 #include "SWebToUEView.h"
 #include "WebToUEDocument.h"
 #include "WebToUERuntimeInstance.h"
+#include "WebToUEStyleProperties.h"
 
 #include "Engine/Texture2D.h"
 #include "Internationalization/StringTable.h"
@@ -36,6 +37,15 @@ namespace WebToUE::CompiledDocument::Tests
 
 	static void AddDeclaration(FWebToUECompiledRule& Rule, const TCHAR* Name, const TCHAR* Value)
 	{
+		FWebToUEStyleDeclaration Parsed;
+		check(WebToUE::Private::TryParseCssDeclaration(Name, Value, Parsed));
+		FWebToUECompiledDeclaration& Declaration = Rule.Declarations.AddDefaulted_GetRef();
+		Declaration.Property = Parsed.Property;
+		Declaration.TypedValue = Parsed.TypedValue;
+	}
+
+	static void AddLegacyDeclaration(FWebToUECompiledRule& Rule, const TCHAR* Name, const TCHAR* Value)
+	{
 		FWebToUECompiledDeclaration& Declaration = Rule.Declarations.AddDefaulted_GetRef();
 		Declaration.Name = Name;
 		Declaration.Value = Value;
@@ -67,21 +77,15 @@ bool FWebToUECompiledDocumentBoundaryTest::RunTest(const FString& Parameters)
 	FWebToUECompiledRule& BaseRule = CompiledDocument.Rules.AddDefaulted_GetRef();
 	BaseRule.Specificity = 1;
 	BaseRule.Selector.AddDefaulted_GetRef().Type = TEXT("button");
-	FWebToUECompiledDeclaration& Width = BaseRule.Declarations.AddDefaulted_GetRef();
-	Width.Name = TEXT("width");
-	Width.Value = TEXT("120px");
-	FWebToUECompiledDeclaration& Height = BaseRule.Declarations.AddDefaulted_GetRef();
-	Height.Name = TEXT("height");
-	Height.Value = TEXT("40px");
+	AddDeclaration(BaseRule, TEXT("width"), TEXT("120px"));
+	AddDeclaration(BaseRule, TEXT("height"), TEXT("40px"));
 
 	FWebToUECompiledRule& HoverRule = CompiledDocument.Rules.AddDefaulted_GetRef();
 	HoverRule.Specificity = 11;
 	FWebToUECompiledSelectorSegment& HoverSelector = HoverRule.Selector.AddDefaulted_GetRef();
 	HoverSelector.Type = TEXT("button");
 	HoverSelector.RequiredState = static_cast<uint8>(EWebToUEPseudoState::Hover);
-	FWebToUECompiledDeclaration& HoverColor = HoverRule.Declarations.AddDefaulted_GetRef();
-	HoverColor.Name = TEXT("background-color");
-	HoverColor.Value = TEXT("#ff0000");
+	AddDeclaration(HoverRule, TEXT("background-color"), TEXT("#ff0000"));
 
 	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
 	const FWebToUECompiledNode* InitialNodeStorage = Document->GetCompiledNodes().GetData();
@@ -117,8 +121,10 @@ bool FWebToUECompiledDocumentBoundaryTest::RunTest(const FString& Parameters)
 		Document->GetCompiledRules().GetData(), InitialRuleStorage);
 	TestEqual(TEXT("Runtime state does not change the compiled button id"),
 		Document->GetCompiledNodes()[1].Attributes[0].Value, FString(TEXT("boundary-target")));
-	TestEqual(TEXT("Runtime style resolution does not change the compiled hover declaration"),
-		Document->GetCompiledRules()[1].Declarations[0].Value, FString(TEXT("#ff0000")));
+	TestEqual(TEXT("Runtime style resolution does not change the compiled hover property ID"),
+		Document->GetCompiledRules()[1].Declarations[0].Property, EWebToUECssProperty::BackgroundColor);
+	TestEqual(TEXT("Runtime style resolution does not change the compiled hover typed color"),
+		Document->GetCompiledRules()[1].Declarations[0].TypedValue.Color, FLinearColor::Red);
 	return true;
 }
 
@@ -141,7 +147,7 @@ bool FWebToUEOrderedDeclarationHydrationTest::RunTest(const FString& Parameters)
 	Rule.Specificity = 100;
 	Rule.Selector.AddDefaulted_GetRef().Id = TEXT("ordered-target");
 	AddDeclaration(Rule, TEXT("color"), TEXT("#ff0000"));
-	AddDeclaration(Rule, TEXT("width"), TEXT("80px"));
+	AddLegacyDeclaration(Rule, TEXT("width"), TEXT("80px"));
 	AddDeclaration(Rule, TEXT("color"), TEXT("#00ff00"));
 	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
 
@@ -153,12 +159,14 @@ bool FWebToUEOrderedDeclarationHydrationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Hydration preserves the declaration count"), RuntimeDocument->Rules[0].Declarations.Num(), 3);
 	if (RuntimeDocument->Rules[0].Declarations.Num() == 3)
 	{
-		TestEqual(TEXT("Hydration preserves the first duplicate"),
-			RuntimeDocument->Rules[0].Declarations[0].Value, FString(TEXT("#ff0000")));
-		TestEqual(TEXT("Hydration preserves the interleaved declaration"),
-			RuntimeDocument->Rules[0].Declarations[1].Name, FString(TEXT("width")));
-		TestEqual(TEXT("Hydration preserves the last duplicate"),
-			RuntimeDocument->Rules[0].Declarations[2].Value, FString(TEXT("#00ff00")));
+		TestEqual(TEXT("Hydration preserves the first typed duplicate"),
+			RuntimeDocument->Rules[0].Declarations[0].TypedValue.Color, FLinearColor::Red);
+		TestEqual(TEXT("Hydration upgrades the interleaved version 3 declaration once"),
+			RuntimeDocument->Rules[0].Declarations[1].Property, EWebToUECssProperty::Width);
+		TestEqual(TEXT("Hydration parses the version 3 declaration into a length"),
+			RuntimeDocument->Rules[0].Declarations[1].TypedValue.Length.Value, 80.0f);
+		TestEqual(TEXT("Hydration preserves the last typed duplicate"),
+			RuntimeDocument->Rules[0].Declarations[2].TypedValue.Color, FLinearColor::Green);
 	}
 
 	FWebToUENode* RuntimeTarget = nullptr;
@@ -178,6 +186,8 @@ bool FWebToUEOrderedDeclarationHydrationTest::RunTest(const FString& Parameters)
 	}
 	TestEqual(TEXT("Hydration leaves the compiled declaration sequence intact"),
 		Document->GetCompiledRules()[0].Declarations.Num(), 3);
+	TestEqual(TEXT("Hydration does not rewrite the version 3 compatibility payload"),
+		Document->GetCompiledRules()[0].Declarations[1].Name, FString(TEXT("width")));
 	return true;
 }
 

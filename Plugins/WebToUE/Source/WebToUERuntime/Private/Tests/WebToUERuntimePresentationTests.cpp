@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "SWebToUEView.h"
 #include "WebToUEDocument.h"
+#include "WebToUEStyleProperties.h"
 
 #include "Input/HittestGrid.h"
 #include "Rendering/DrawElements.h"
@@ -24,9 +25,11 @@ namespace WebToUE::RuntimePresentation::Tests
 
 	static void AddDeclaration(FWebToUECompiledRule& Rule, const TCHAR* Name, const TCHAR* Value)
 	{
+		FWebToUEStyleDeclaration Parsed;
+		check(WebToUE::Private::TryParseCssDeclaration(Name, Value, Parsed));
 		FWebToUECompiledDeclaration& Declaration = Rule.Declarations.AddDefaulted_GetRef();
-		Declaration.Name = Name;
-		Declaration.Value = Value;
+		Declaration.Property = Parsed.Property;
+		Declaration.TypedValue = Parsed.TypedValue;
 	}
 
 	static void PaintView(const TSharedRef<SWebToUEView>& View)

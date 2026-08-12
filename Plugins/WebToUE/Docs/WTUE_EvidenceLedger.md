@@ -72,6 +72,7 @@
 | 2026-08-12 `82365d3` + working tree | Presentation 拆分前后 P95：Compile Style small `2.974400→2.903600`、medium `52.610500→53.516100`、stress `512.629500→524.002800`；FieldNotify `56.634001→58.069199`、Hover `56.666899→58.171101`、暖布局 `0.701401→0.735801 ms`；未变化 Paint仍为 0 次/0 B。 | M2.1 只建立职责与所有权边界；硬门继续通过，不宣称性能改善。 |
 | 2026-08-12 `b7191ff` + working tree | Ordered Declaration 完整回归 P95：FieldNotify `57.878997`、Hover `62.189799`、暖布局 `0.703800 ms`；未变化 Paint `0.270400 ms`、0 次/0 B。 | 正确性/IR 迁移未破坏两个既有硬门；Hover/FieldNotify 仍未达标，不宣称性能改善。 |
 | 2026-08-12 `b7191ff` + working tree | 发布收口后完整回归 P95：FieldNotify `57.034999`、Hover `59.194099`、暖布局 `0.790901 ms`；未变化 Paint `0.277702 ms`、0 次分配。 | 26/26 通过，两个既有硬门继续满足；这是正确性与发布复核，不宣称性能改善。 |
+| 2026-08-12 `a4e4e98` + working tree | Property ID/Typed Value 实施前→后同环境/政策 P95：Compile Style small `2.956700→2.647200`、medium `51.433500→50.948400`、stress `552.030900→517.156700`；FieldNotify `58.123998→55.596102`、Hover `58.854800→55.614501`、暖布局 `0.717800→0.731699 ms`；未变化 Paint `0.247799→0.266701 ms`，仍为 0 次/0 B。 | 编译期类型化未破坏两个既有硬门；单次同会话样本不作为性能改善声明，Hover/FieldNotify 仍远未达 `<0.5 ms`。 |
 
 ## 4. 发布与工具链证据
 
@@ -80,6 +81,7 @@
 - Editor 生命周期包装器的非沙箱边界、关 Editor 前 Preflight、项目互斥锁、`Saved/VibeUE/Lifecycle/operation.json` 持久状态和 Pester 3/3 是 R-10 的缓解证据；长期决策见 [ADR-0001](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md)。
 - 2026-08-12 `b7191ff` + working tree 的 Win64 Development Cook 保存了 576 个包（569 cooked），但 commandlet 因既有 `GameFeatureData` Asset Manager 配置错误及健康 Editor 占用 MCP `127.0.0.1:8000` 而以 ExitCode 25 失败；Stage/Pak/IoStore 未执行，此记录不得视为发布通过。
 - 2026-08-12 同一 `b7191ff` + working tree 后续在 `DefaultGame.ini` 添加 UE 5.8 `GameFeatureData` AlwaysCook 规则，并以 `-AdditionalCookerOptions=-ModelContextProtocolPort=8001` 隔离 Commandlet 端口；Win64 Game + Editor Development 构建、Cook（0 errors）、Stage、Pak、IoStore 全部通过。IoStore 写入 569 packages、2,226 chunks，总容器约 `250.11 MiB`；UAT ExitCode 0。对 2,225 条项目 IoStore 文件清单的路径审计未发现 WebUI、Chromium、CEF、WebBrowser、HTML/CSS/JS；Loose Stage 同样无 WebUI/浏览器运行文件，仅有 UE 自带诊断工具 `Engine/Extras/GPUDumpViewer/GPUDumpViewer.html`，不属于 WTUE UI Source 或 Runtime 依赖。
+- 2026-08-12 `a4e4e98` + working tree 在安全关闭 Editor 后完成 Win64 Game + Editor Development build、Cook、Stage、Pak、IoStore；569 packages、2,226 chunks、总容器约 `250.11 MiB`，UAT ExitCode 0。IoStore/UFS/NonUFS 清单的精确路径审计未发现 WebUI、Chromium、CEF、WebBrowser 或 `.html/.css/.js`；发布后 Editor PID 10604 通过 readiness、MCP、Python/World 和聚焦 7/7。
 
 ## 5. 工程变更记录
 
@@ -87,6 +89,7 @@
 
 | 日期 | 基线 | 变化 | 路线影响 |
 | --- | --- | --- | --- |
+| 2026-08-12 | `a4e4e98` + working tree | Core 为 52 个受支持 CSS 属性建立 append-only ID 与类型化值；规则及 inline style 写入资产版本 4，正常 Runtime 路径不再解析属性名/值字符串，v3 payload 保留一次性 Hydration 回退。两个示例资产由源重编译；工作树文件大小 `HUD 17,010→58,751 B`、`MainMenu 21,827→84,902 B`，仅作 payload 紧凑度后续证据。聚焦 7/7、完整 27/27、Game + Editor Development 与 Cook/Stage/Pak/IoStore 通过。 | M2.2 进入 🚧 2/5；下一项为 Property Metadata；宏观 M2 保持 3/7。 |
 | 2026-08-12 | `b7191ff` + working tree | Asset Manager 的 `GameFeatureData` 规则进入正确的 Game 配置层；Cook commandlet 使用独立 MCP 端口；两个 EditorContext Runtime 测试同时受 `WITH_EDITOR` 保护。Win64 Game + Editor build、Cook/Stage/Pak/IoStore 和完整 26/26 通过。 | Ordered Declaration 完成验收，M2.2 进入 🚧 1/5，R-07 降为 Mitigated；宏观 M2 保持 3/7。 |
 | 2026-08-12 | `b7191ff` + working tree | Core/Factory/Compiled IR/Hydration 改用有序有效声明；资产版本升至 `OrderedDeclarations`，两个示例资产由源文件重编译；缺源诊断保留 last-good；Editor watcher 排除 transient Automation Document。Win64 Editor build、聚焦 4/4 和 3/3、完整 26/26 通过。 | M2.2 进入 🚧 0/5，R-07 已实现缓解但因当前 Cook/IoStore 门失败仍未验收；宏观 M2 保持 3/7。 |
 | 2026-08-12 | `982db64` + working tree | 调整 M2.2 的依赖顺序：Ordered Declaration → Property ID/Typed Value → 属性影响元数据 → Selector Index 工作量门 → 类型化 Cascade；增加资产版本中途门和 Paint-only 资源安全门。 | M2.2 仍为 0/5，宏观路线、预算和 M2.4 Resource Cache 归属不变。 |

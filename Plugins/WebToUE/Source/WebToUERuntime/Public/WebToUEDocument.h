@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include "WebToUECoreTypes.h"
 #include "WebToUEDocument.generated.h"
 
 class UAssetImportData;
@@ -12,6 +13,17 @@ USTRUCT()
 struct FWebToUECompiledAttribute
 {
 	GENERATED_BODY()
+	UPROPERTY() FString Name;
+	UPROPERTY() FString Value;
+};
+
+USTRUCT()
+struct FWebToUECompiledDeclaration
+{
+	GENERATED_BODY()
+	UPROPERTY() EWebToUECssProperty Property = EWebToUECssProperty::Invalid;
+	UPROPERTY() FWebToUEStyleValue TypedValue;
+	// Version 3 compatibility payload. Version 4 writers leave these empty.
 	UPROPERTY() FString Name;
 	UPROPERTY() FString Value;
 };
@@ -32,6 +44,7 @@ struct FWebToUECompiledNode
 	UPROPERTY() FName StringTableId;
 	UPROPERTY() FString StringTableKey;
 	UPROPERTY() TArray<FWebToUECompiledAttribute> Attributes;
+	UPROPERTY() TArray<FWebToUECompiledDeclaration> InlineStyleDeclarations;
 	UPROPERTY() int32 ParentIndex = INDEX_NONE;
 };
 
@@ -44,14 +57,6 @@ struct FWebToUECompiledSelectorSegment
 	UPROPERTY() TArray<FString> Classes;
 	UPROPERTY() uint8 RequiredState = 0;
 	UPROPERTY() uint8 RelationToPrevious = 0;
-};
-
-USTRUCT()
-struct FWebToUECompiledDeclaration
-{
-	GENERATED_BODY()
-	UPROPERTY() FString Name;
-	UPROPERTY() FString Value;
 };
 
 USTRUCT()

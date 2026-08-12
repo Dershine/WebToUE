@@ -76,6 +76,12 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 			OutAttribute.Name = Attribute.Key;
 			OutAttribute.Value = Attribute.Value;
 		}
+		for (const FWebToUEStyleDeclaration& Declaration : Node->InlineStyleDeclarations)
+		{
+			FWebToUECompiledDeclaration& OutDeclaration = Serialized.InlineStyleDeclarations.AddDefaulted_GetRef();
+			OutDeclaration.Property = Declaration.Property;
+			OutDeclaration.TypedValue = Declaration.TypedValue;
+		}
 		if (Node->Type == EWebToUENodeType::Text)
 		{
 			const FWebToUENode* Owner = Node->Parent;
@@ -137,8 +143,8 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 		for (const FWebToUEStyleDeclaration& Declaration : Rule.Declarations)
 		{
 			FWebToUECompiledDeclaration& SerializedDeclaration = SerializedRule.Declarations.AddDefaulted_GetRef();
-			SerializedDeclaration.Name = Declaration.Name;
-			SerializedDeclaration.Value = Declaration.Value;
+			SerializedDeclaration.Property = Declaration.Property;
+			SerializedDeclaration.TypedValue = Declaration.TypedValue;
 		}
 	}
 

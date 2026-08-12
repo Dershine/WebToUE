@@ -2,11 +2,15 @@
 
 #include "Misc/AutomationTest.h"
 #include "WebToUECompiler.h"
+#include "WebToUEStyleProperties.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEHtmlCssTest, "WebToUE.Core.HtmlCss",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEOrderedDeclarationsTest, "WebToUE.Core.OrderedDeclarations",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETypedPropertiesTest, "WebToUE.Core.TypedProperties",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebToUEHtmlCssTest::RunTest(const FString& Parameters)
@@ -50,6 +54,10 @@ bool FWebToUEOrderedDeclarationsTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Only valid declarations are retained"), Declarations.Num(), 4);
 		if (Declarations.Num() == 4)
 		{
+			TestEqual(TEXT("The first declaration stores a stable property ID"),
+				Declarations[0].Property, EWebToUECssProperty::Color);
+			TestEqual(TEXT("The first declaration stores a typed color"),
+				Declarations[0].TypedValue.Type, EWebToUEStyleValueType::Color);
 			TestEqual(TEXT("The first declaration keeps its source position"), Declarations[0].Name, FString(TEXT("color")));
 			TestEqual(TEXT("The first declaration keeps its value"), Declarations[0].Value, FString(TEXT("#ff0000")));
 			TestEqual(TEXT("An interleaved property keeps its source position"), Declarations[1].Name, FString(TEXT("width")));
@@ -79,11 +87,110 @@ bool FWebToUEOrderedDeclarationsTest::RunTest(const FString& Parameters)
 	}
 	if (Inline)
 	{
+		TestEqual(TEXT("Inline style compiles both valid declarations once"),
+			Inline->InlineStyleDeclarations.Num(), 2);
+		if (Inline->InlineStyleDeclarations.Num() == 2)
+		{
+			TestEqual(TEXT("Inline style stores a property ID"),
+				Inline->InlineStyleDeclarations[0].Property, EWebToUECssProperty::Color);
+			TestEqual(TEXT("Inline style stores a typed color"),
+				Inline->InlineStyleDeclarations[1].TypedValue.Type, EWebToUEStyleValueType::Color);
+		}
 		TestEqual(TEXT("Inline style retains both valid duplicate declarations"),
 			Inline->GetAttribute(TEXT("style")), FString(TEXT("color: #ff0000; color: #0000ff")));
 		TestEqual(TEXT("The last valid inline declaration wins"),
 			Document->GetComputedStyle(*Inline).Color, FLinearColor::Blue);
 	}
+	return true;
+}
+
+bool FWebToUETypedPropertiesTest::RunTest(const FString& Parameters)
+{
+	struct FCase
+	{
+		const TCHAR* Name;
+		const TCHAR* Value;
+		EWebToUECssProperty Property;
+		EWebToUEStyleValueType Type;
+	};
+	const FCase Cases[] = {
+		{TEXT("display"), TEXT("flex"), EWebToUECssProperty::Display, EWebToUEStyleValueType::Keyword},
+		{TEXT("position"), TEXT("absolute"), EWebToUECssProperty::Position, EWebToUEStyleValueType::Keyword},
+		{TEXT("visibility"), TEXT("hidden"), EWebToUECssProperty::Visibility, EWebToUEStyleValueType::Keyword},
+		{TEXT("overflow"), TEXT("scroll"), EWebToUECssProperty::Overflow, EWebToUEStyleValueType::Keyword},
+		{TEXT("width"), TEXT("25%"), EWebToUECssProperty::Width, EWebToUEStyleValueType::Length},
+		{TEXT("height"), TEXT("10px"), EWebToUECssProperty::Height, EWebToUEStyleValueType::Length},
+		{TEXT("min-width"), TEXT("1px"), EWebToUECssProperty::MinWidth, EWebToUEStyleValueType::Length},
+		{TEXT("min-height"), TEXT("1px"), EWebToUECssProperty::MinHeight, EWebToUEStyleValueType::Length},
+		{TEXT("max-width"), TEXT("auto"), EWebToUECssProperty::MaxWidth, EWebToUEStyleValueType::Length},
+		{TEXT("max-height"), TEXT("100%"), EWebToUECssProperty::MaxHeight, EWebToUEStyleValueType::Length},
+		{TEXT("left"), TEXT("0"), EWebToUECssProperty::Left, EWebToUEStyleValueType::Length},
+		{TEXT("top"), TEXT("1px"), EWebToUECssProperty::Top, EWebToUEStyleValueType::Length},
+		{TEXT("right"), TEXT("2px"), EWebToUECssProperty::Right, EWebToUEStyleValueType::Length},
+		{TEXT("bottom"), TEXT("3px"), EWebToUECssProperty::Bottom, EWebToUEStyleValueType::Length},
+		{TEXT("margin"), TEXT("1px auto"), EWebToUECssProperty::Margin, EWebToUEStyleValueType::Edges},
+		{TEXT("margin-left"), TEXT("auto"), EWebToUECssProperty::MarginLeft, EWebToUEStyleValueType::Length},
+		{TEXT("margin-top"), TEXT("1px"), EWebToUECssProperty::MarginTop, EWebToUEStyleValueType::Length},
+		{TEXT("margin-right"), TEXT("2px"), EWebToUECssProperty::MarginRight, EWebToUEStyleValueType::Length},
+		{TEXT("margin-bottom"), TEXT("3px"), EWebToUECssProperty::MarginBottom, EWebToUEStyleValueType::Length},
+		{TEXT("padding"), TEXT("1px 2px"), EWebToUECssProperty::Padding, EWebToUEStyleValueType::Edges},
+		{TEXT("padding-left"), TEXT("1px"), EWebToUECssProperty::PaddingLeft, EWebToUEStyleValueType::Length},
+		{TEXT("padding-top"), TEXT("1px"), EWebToUECssProperty::PaddingTop, EWebToUEStyleValueType::Length},
+		{TEXT("padding-right"), TEXT("1px"), EWebToUECssProperty::PaddingRight, EWebToUEStyleValueType::Length},
+		{TEXT("padding-bottom"), TEXT("1px"), EWebToUECssProperty::PaddingBottom, EWebToUEStyleValueType::Length},
+		{TEXT("gap"), TEXT("4px"), EWebToUECssProperty::Gap, EWebToUEStyleValueType::Length},
+		{TEXT("row-gap"), TEXT("4px"), EWebToUECssProperty::RowGap, EWebToUEStyleValueType::Length},
+		{TEXT("column-gap"), TEXT("4px"), EWebToUECssProperty::ColumnGap, EWebToUEStyleValueType::Length},
+		{TEXT("flex"), TEXT("1 0 10px"), EWebToUECssProperty::Flex, EWebToUEStyleValueType::Flex},
+		{TEXT("flex-direction"), TEXT("row-reverse"), EWebToUECssProperty::FlexDirection, EWebToUEStyleValueType::Keyword},
+		{TEXT("flex-wrap"), TEXT("wrap"), EWebToUECssProperty::FlexWrap, EWebToUEStyleValueType::Keyword},
+		{TEXT("flex-grow"), TEXT("2"), EWebToUECssProperty::FlexGrow, EWebToUEStyleValueType::Number},
+		{TEXT("flex-shrink"), TEXT("0"), EWebToUECssProperty::FlexShrink, EWebToUEStyleValueType::Number},
+		{TEXT("flex-basis"), TEXT("20%"), EWebToUECssProperty::FlexBasis, EWebToUEStyleValueType::Length},
+		{TEXT("justify-content"), TEXT("space-between"), EWebToUECssProperty::JustifyContent, EWebToUEStyleValueType::Keyword},
+		{TEXT("align-items"), TEXT("baseline"), EWebToUECssProperty::AlignItems, EWebToUEStyleValueType::Keyword},
+		{TEXT("align-self"), TEXT("auto"), EWebToUECssProperty::AlignSelf, EWebToUEStyleValueType::Keyword},
+		{TEXT("color"), TEXT("#12345678"), EWebToUECssProperty::Color, EWebToUEStyleValueType::Color},
+		{TEXT("background"), TEXT("transparent"), EWebToUECssProperty::Background, EWebToUEStyleValueType::Color},
+		{TEXT("background-color"), TEXT("blue"), EWebToUECssProperty::BackgroundColor, EWebToUEStyleValueType::Color},
+		{TEXT("border"), TEXT("1px solid red"), EWebToUECssProperty::Border, EWebToUEStyleValueType::Border},
+		{TEXT("border-color"), TEXT("white"), EWebToUECssProperty::BorderColor, EWebToUEStyleValueType::Color},
+		{TEXT("border-width"), TEXT("1px"), EWebToUECssProperty::BorderWidth, EWebToUEStyleValueType::Length},
+		{TEXT("border-style"), TEXT("none"), EWebToUECssProperty::BorderStyle, EWebToUEStyleValueType::Keyword},
+		{TEXT("border-radius"), TEXT("2px"), EWebToUECssProperty::BorderRadius, EWebToUEStyleValueType::Length},
+		{TEXT("opacity"), TEXT("0.5"), EWebToUECssProperty::Opacity, EWebToUEStyleValueType::Number},
+		{TEXT("font-family"), TEXT("'Inter'"), EWebToUECssProperty::FontFamily, EWebToUEStyleValueType::String},
+		{TEXT("font-size"), TEXT("16px"), EWebToUECssProperty::FontSize, EWebToUEStyleValueType::Length},
+		{TEXT("font-weight"), TEXT("700"), EWebToUECssProperty::FontWeight, EWebToUEStyleValueType::String},
+		{TEXT("text-align"), TEXT("right"), EWebToUECssProperty::TextAlign, EWebToUEStyleValueType::Keyword},
+		{TEXT("white-space"), TEXT("nowrap"), EWebToUECssProperty::WhiteSpace, EWebToUEStyleValueType::Keyword},
+		{TEXT("object-fit"), TEXT("cover"), EWebToUECssProperty::ObjectFit, EWebToUEStyleValueType::Keyword},
+		{TEXT("z-index"), TEXT("7"), EWebToUECssProperty::ZIndex, EWebToUEStyleValueType::Integer}
+	};
+
+	TSet<uint8> SeenPropertyIds;
+	for (const FCase& Case : Cases)
+	{
+		FWebToUEStyleDeclaration Declaration;
+		TestTrue(*FString::Printf(TEXT("%s parses into a typed declaration"), Case.Name),
+			WebToUE::Private::TryParseCssDeclaration(Case.Name, Case.Value, Declaration));
+		TestEqual(*FString::Printf(TEXT("%s has the stable property ID"), Case.Name),
+			Declaration.Property, Case.Property);
+		TestEqual(*FString::Printf(TEXT("%s has the expected value type"), Case.Name),
+			Declaration.TypedValue.Type, Case.Type);
+		TestEqual(*FString::Printf(TEXT("%s round-trips its canonical name"), Case.Name),
+			FString(WebToUE::Private::LexToString(Declaration.Property)), FString(Case.Name));
+		TestFalse(*FString::Printf(TEXT("%s has a unique property ID"), Case.Name),
+			SeenPropertyIds.Contains(static_cast<uint8>(Declaration.Property)));
+		SeenPropertyIds.Add(static_cast<uint8>(Declaration.Property));
+	}
+	TestEqual(TEXT("Every supported property has one typed parser case"),
+		SeenPropertyIds.Num(), static_cast<int32>(UE_ARRAY_COUNT(Cases)));
+	FWebToUEStyleDeclaration InvalidDeclaration;
+	TestFalse(TEXT("Unsupported properties do not receive an ID"),
+		WebToUE::Private::TryParseCssDeclaration(TEXT("made-up-property"), TEXT("1px"), InvalidDeclaration));
+	TestFalse(TEXT("Invalid values do not produce typed declarations"),
+		WebToUE::Private::TryParseCssDeclaration(TEXT("width"), TEXT("invalid"), InvalidDeclaration));
 	return true;
 }
 

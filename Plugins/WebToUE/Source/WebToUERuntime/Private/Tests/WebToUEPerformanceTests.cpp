@@ -3,6 +3,7 @@
 #include "SWebToUEView.h"
 #include "WebToUEDocument.h"
 #include "WebToUEPerformance.h"
+#include "WebToUEStyleProperties.h"
 
 #include "Input/HittestGrid.h"
 #include "Misc/AutomationTest.h"
@@ -52,12 +53,16 @@ namespace WebToUE::Performance::Tests
 		Rule.Specificity = 1;
 		FWebToUECompiledSelectorSegment& Selector = Rule.Selector.AddDefaulted_GetRef();
 		Selector.Type = TEXT("button");
-		FWebToUECompiledDeclaration& Width = Rule.Declarations.AddDefaulted_GetRef();
-		Width.Name = TEXT("width");
-		Width.Value = TEXT("120px");
-		FWebToUECompiledDeclaration& Height = Rule.Declarations.AddDefaulted_GetRef();
-		Height.Name = TEXT("height");
-		Height.Value = TEXT("40px");
+		for (const TPair<const TCHAR*, const TCHAR*>& Pair : {
+			TPair<const TCHAR*, const TCHAR*>(TEXT("width"), TEXT("120px")),
+			TPair<const TCHAR*, const TCHAR*>(TEXT("height"), TEXT("40px")) })
+		{
+			FWebToUEStyleDeclaration Parsed;
+			check(WebToUE::Private::TryParseCssDeclaration(Pair.Key, Pair.Value, Parsed));
+			FWebToUECompiledDeclaration& Declaration = Rule.Declarations.AddDefaulted_GetRef();
+			Declaration.Property = Parsed.Property;
+			Declaration.TypedValue = Parsed.TypedValue;
+		}
 
 		CompiledDocument.RootNodeIndex = 0;
 		Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
