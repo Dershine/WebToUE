@@ -879,22 +879,14 @@ bool FWebToUERuntimeUnchangedPaintBenchmarkTest::RunTest(const FString& Paramete
 			static_cast<uint64>(TextNodeCount));
 		TestEqual(*(Prefix + TEXT("does not rebuild brushes")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(0));
-		TestEqual(*(Prefix + TEXT("marks one child-array allocation per non-leaf node")),
-			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations),
-			static_cast<uint64>(NonLeafNodeCount));
-		TestEqual(*(Prefix + TEXT("reports payload bytes for every marked child-array allocation")),
-			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadEvents),
-			static_cast<uint64>(NonLeafNodeCount));
+		TestEqual(*(Prefix + TEXT("does not mark any WebToUE allocation")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations), uint64(0));
+		TestEqual(*(Prefix + TEXT("does not report an allocation payload event")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadEvents), uint64(0));
 		const uint64 TrackedAllocationPayloadBytes =
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadBytes);
-		TestTrue(*(Prefix + TEXT("reports positive child-array payload bytes")),
-			TrackedAllocationPayloadBytes > 0);
-		if (!Samples.IsEmpty())
-		{
-			TestEqual(*(Prefix + TEXT("repeats the fixed child-array payload byte count")),
-				TrackedAllocationPayloadBytes,
-				Samples[0].Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadBytes));
-		}
+		TestEqual(*(Prefix + TEXT("does not report allocation payload bytes")),
+			TrackedAllocationPayloadBytes, uint64(0));
 		TestTrue(*(Prefix + TEXT("records a positive end-to-end duration")),
 			Sample.InclusiveMilliseconds > 0.0);
 
@@ -964,6 +956,11 @@ bool FWebToUERuntimeUnchangedPaintBenchmarkTest::RunTest(const FString& Paramete
 		FWebToUEBenchmarkBudgetPolicy::MediumUnchangedPaintMaximumTrackedAllocations &&
 		MaximumTrackedAllocationPayloadBytes <=
 		FWebToUEBenchmarkBudgetPolicy::MediumUnchangedPaintMaximumTrackedAllocationPayloadBytes;
+	if (FWebToUEBenchmarkBudgetPolicy::bEnforceMediumUnchangedPaintBudget)
+	{
+		TestTrue(TEXT("The runtime unchanged-paint path stays within the enforced zero-allocation budget"),
+			bMeetsTarget);
+	}
 	const FString SummaryContext = MakeRuntimeTelemetryContext(Environment,
 		Scenario.Definition, TEXT("runtime_unchanged_paint_summary"));
 	AddTelemetryData(TEXT("benchmark.schema_version"), FWebToUEBenchmarkSamplingPolicy::SchemaVersion,

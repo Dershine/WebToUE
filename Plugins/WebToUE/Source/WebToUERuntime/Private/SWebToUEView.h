@@ -17,6 +17,12 @@ struct FWebToUETextLayoutCache
 	bool bRichText = false;
 };
 
+struct FWebToUEPaintOrderRange
+{
+	int32 StartIndex = 0;
+	int32 Num = 0;
+};
+
 class SWebToUEView final : public SLeafWidget
 {
 public:
@@ -53,6 +59,8 @@ public:
 	FWebToUENode* HitTestForTesting(const FVector2f& LocalPosition) const { return HitTest(LocalPosition); }
 	bool ScrollAtForTesting(const FVector2f& LocalPosition, float WheelDelta) { return ScrollAt(LocalPosition, WheelDelta); }
 	FVector2f GetVisualPositionForTesting(const FWebToUENode& Node) const;
+	TConstArrayView<FWebToUENode*> GetPaintOrderForTesting(const FWebToUENode& Parent) const;
+	void SetHoveredNodeForTesting(FWebToUENode* Node) { SetHoveredNode(Node); }
 #endif
 
 private:
@@ -64,6 +72,8 @@ private:
 	mutable TMap<const FWebToUENode*, TSharedPtr<FSlateBrush>> Brushes;
 	mutable TMap<const FWebToUENode*, TUniquePtr<FWebToUETextLayoutCache>> TextLayouts;
 	mutable TArray<TStrongObjectPtr<UObject>> LoadedResources;
+	TArray<FWebToUENode*> PaintOrderNodes;
+	TMap<const FWebToUENode*, FWebToUEPaintOrderRange> PaintOrderRanges;
 	TSet<FString> LoggedBindingErrors;
 	FWebToUENode* HoveredNode = nullptr;
 	FWebToUENode* PressedNode = nullptr;
@@ -71,6 +81,8 @@ private:
 
 	void RebuildStylesAndBrushes();
 	void RebuildBrushes() const;
+	void RebuildPaintOrderCache();
+	TConstArrayView<FWebToUENode*> GetPaintOrder(const FWebToUENode& Parent) const;
 	FVector2f MeasureNode(const FWebToUENode& Node, const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
 	FText GetDisplayText(const FWebToUENode& Node) const;
 	FSlateTextBlockLayout& PrepareTextLayout(const FWebToUENode& Node, float WrapWidth) const;

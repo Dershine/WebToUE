@@ -1,5 +1,6 @@
 #include "SWebToUEView.h"
 
+#include "Algo/StableSort.h"
 #include "WebToUECompiler.h"
 #include "WebToUEDocument.h"
 #include "WebToUEPerformance.h"
@@ -43,6 +44,8 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	DocumentAsset = InDocument;
 	RuntimeDocument.Reset();
 	TextLayouts.Reset();
+	PaintOrderNodes.Reset();
+	PaintOrderRanges.Reset();
 	HoveredNode = PressedNode = FocusedNode = nullptr;
 	if (InDocument && InDocument->CompiledNodes.IsValidIndex(InDocument->RootNodeIndex))
 	{
@@ -276,6 +279,11 @@ FVector2f SWebToUEView::GetVisualPositionForTesting(const FWebToUENode& Node) co
 	}
 	return Node.Position - ScrollOffset;
 }
+
+TConstArrayView<FWebToUENode*> SWebToUEView::GetPaintOrderForTesting(const FWebToUENode& Parent) const
+{
+	return GetPaintOrder(Parent);
+}
 #endif
 
 int32 SWebToUEView::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
@@ -368,16 +376,7 @@ int32 SWebToUEView::PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, 
 		bPushedClip = true;
 	}
 
-	TArray<TSharedPtr<FWebToUENode>> SortedChildren = Node.Children;
-	if (!SortedChildren.IsEmpty())
-	{
-		FWebToUEPerformanceCapture::RecordAllocationPayload(SortedChildren.GetAllocatedSize());
-	}
-	SortedChildren.Sort([](const TSharedPtr<FWebToUENode>& A, const TSharedPtr<FWebToUENode>& B)
-	{
-		return A->Style.ZIndex == B->Style.ZIndex ? A->PaintOrder < B->PaintOrder : A->Style.ZIndex < B->Style.ZIndex;
-	});
-	for (const TSharedPtr<FWebToUENode>& Child : SortedChildren)
+	for (const FWebToUENode* Child : GetPaintOrder(Node))
 	{
 		const FVector2f ChildScrollOffset = InheritedScrollOffset + (Node.IsScrollable() ? Node.ScrollOffset : FVector2f::ZeroVector);
 		LayerId = PaintNode(*Child, Args, Geometry, CullingRect, Out, LayerId, WidgetStyle,
@@ -425,10 +424,66 @@ void SWebToUEView::RebuildStylesAndBrushes()
 	if (RuntimeDocument)
 	{
 		FWebToUEStyleResolver::Resolve(*RuntimeDocument);
+		RebuildPaintOrderCache();
 		RebuildBrushes();
+	}
+	else
+	{
+		PaintOrderNodes.Reset();
+		PaintOrderRanges.Reset();
 	}
 	bLayoutDirty = true;
 	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+}
+
+void SWebToUEView::RebuildPaintOrderCache()
+{
+	PaintOrderNodes.Reset();
+	PaintOrderRanges.Reset();
+	if (!RuntimeDocument)
+	{
+		return;
+	}
+
+	int32 ChildCount = 0;
+	int32 ParentCount = 0;
+	RuntimeDocument->ForEachNode([&ChildCount, &ParentCount](FWebToUENode& Node)
+	{
+		ChildCount += Node.Children.Num();
+		ParentCount += Node.Children.IsEmpty() ? 0 : 1;
+	});
+	PaintOrderNodes.Reserve(ChildCount);
+	PaintOrderRanges.Reserve(ParentCount);
+
+	RuntimeDocument->ForEachNode([this](FWebToUENode& Node)
+	{
+		if (Node.Children.IsEmpty())
+		{
+			return;
+		}
+
+		const int32 StartIndex = PaintOrderNodes.Num();
+		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
+		{
+			PaintOrderNodes.Add(Child.Get());
+		}
+		const int32 Num = PaintOrderNodes.Num() - StartIndex;
+		TArrayView<FWebToUENode*> Children(PaintOrderNodes.GetData() + StartIndex, Num);
+		Algo::StableSort(Children, [](const FWebToUENode* A, const FWebToUENode* B)
+		{
+			return A->Style.ZIndex < B->Style.ZIndex;
+		});
+		PaintOrderRanges.Add(&Node, { StartIndex, Num });
+	});
+}
+
+TConstArrayView<FWebToUENode*> SWebToUEView::GetPaintOrder(const FWebToUENode& Parent) const
+{
+	if (const FWebToUEPaintOrderRange* Range = PaintOrderRanges.Find(&Parent))
+	{
+		return TConstArrayView<FWebToUENode*>(PaintOrderNodes.GetData() + Range->StartIndex, Range->Num);
+	}
+	return {};
 }
 
 static bool ReadPropertyAsText(UObject* Context, const FString& Field, FText& Out)

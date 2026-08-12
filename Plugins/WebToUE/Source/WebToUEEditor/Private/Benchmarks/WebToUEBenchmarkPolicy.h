@@ -15,7 +15,7 @@ struct FWebToUEBenchmarkSamplingPolicy
 
 struct FWebToUEBenchmarkBudgetPolicy
 {
-	static constexpr int32 SchemaVersion = 5;
+	static constexpr int32 SchemaVersion = 6;
 	static constexpr double MediumSingleNodeHoverP95Milliseconds = 0.5;
 	static constexpr double MediumSingleFieldNotifyP95Milliseconds = 0.5;
 	static constexpr double MediumWarmFullLayoutP95Milliseconds = 2.0;
@@ -25,7 +25,7 @@ struct FWebToUEBenchmarkBudgetPolicy
 	static constexpr bool bEnforceMediumSingleNodeHoverBudget = false;
 	static constexpr bool bEnforceMediumSingleFieldNotifyBudget = false;
 	static constexpr bool bEnforceMediumWarmFullLayoutBudget = true;
-	static constexpr bool bEnforceMediumUnchangedPaintBudget = false;
+	static constexpr bool bEnforceMediumUnchangedPaintBudget = true;
 };
 
 struct FWebToUEBenchmarkEnvironment

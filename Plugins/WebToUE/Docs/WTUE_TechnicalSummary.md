@@ -10,7 +10,7 @@
 >
 > 当前里程碑：M2——增量原生运行时
 >
-> 最近核验：2026-08-11，基于 Git `72533da10002` + working tree
+> 最近核验：2026-08-12，基于 Git `068732527868` + working tree
 >
 > 统一术语：[CONTEXT.md](../../../CONTEXT.md)
 
@@ -79,10 +79,10 @@
 | 插件版本 | `0.1.0-preview` |
 | Engine | UE 5.8 |
 | SupportedTargetPlatforms | Win64 |
-| 自动化测试 | 18 / 18 通过（2026-08-11，working tree） |
-| 当前编译验证 | UE 5.8 Win64 Editor Development 通过（2026-08-11，working tree） |
+| 自动化测试 | 19 / 19 通过（2026-08-12，working tree） |
+| 当前编译验证 | UE 5.8 Win64 Editor Development 通过（2026-08-12，working tree） |
 | 历史发布验证 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 均曾通过；发布前必须在当前提交重新执行 |
-| Git 基线 | `72533da10002` + working tree；未提交，不生成伪哈希 |
+| Git 基线 | `068732527868` + working tree；未提交，不生成伪哈希 |
 | 当前发布级别 | Developer Preview / 技术可行性与基础能力阶段 |
 
 ### 2.3 宏观里程碑
@@ -216,11 +216,11 @@ Cooked 游戏保留 Compiled Nodes、Rules、Root、纹理/String Table 引用�
 - 语义化 `data-ue-on-click` → `OnUIEvent`。
 - 自定义资产版本、旧资产重编译请求。
 - Editor-only 的确定性 100/500/2,000 节点 Benchmark Corpus 与 50/200/500 规则集。
-- Win64 Editor 编译以及 18 项自动化测试。
+- Win64 Editor 编译以及 19 项自动化测试。
 
 ### 6.2 已实现但仍需工程化证据
 
-- 中小型菜单与 HUD 的实际帧耗；固定 Compile/Style Corpus、单节点 Hover、单 FieldNotify、暖缓存完整布局和未变化重绘 Runtime 基线已建立，未变化 Paint 已有可归因 payload 字节基线，但其他热路径和常驻内存字节仍缺专项证据。
+- 中小型菜单与 HUD 的实际帧耗；固定 Compile/Style Corpus、单节点 Hover、单 FieldNotify、暖缓存完整布局和未变化重绘 Runtime 基线已建立，未变化 Paint 已满足零 WebToUE 标记分配/零已知 payload 字节硬门禁，但其他热路径和常驻内存字节仍缺专项证据。
 - 高频伪状态与 FieldNotify 更新下的 Game Thread 峰值。
 - 大型兄弟节点集合的 Paint 排序与全树 Hit Test 成本。
 - 异常资源路径、超大文档和恶意输入的上限与恢复行为。
@@ -279,6 +279,8 @@ Snapshot Telemetry schema `2` 以稳定名称枚举七阶段的调用数/毫秒�
 
 同日基于 `72533da10002` + working tree 将 budget policy 升为 schema `5`，四个 Runtime 汇总均输出机器可读的 `target_enforced`；暖缓存完整布局成为首个强制性能回归门禁，P95 达到或超过 `2.0 ms` 会直接使 Automation Test 失败。相同环境、相同 500/200 Corpus、1 次 warmup 和 20 样本的两次连续聚焦运行 P50/P95 为 `0.640400 / 0.803798 ms` 与 `0.647400 / 0.677601 ms`，均通过门禁；完整 18 项回归中为 `0.650749 / 0.776399 ms`。相对修改前完整回归 `0.662850 / 0.757299 ms`，P50/P95 变化约 `-1.83% / +2.52%`，没有改变 Runtime 热路径、缓存所有权、Dirty 传播或全树 Yoga 工作量。完整回归输出 `4,950` 行、`147` 个上下文，其中 Compile/Style、FieldNotify、Hover、未变化 Paint 和暖布局分别为 `2,040 / 705 / 705 / 774 / 726` 行；Hover、FieldNotify 和未变化 Paint 仍为 Observe，因为它们分别约 `54.53 ms`、`54.70 ms` 和 `250` 次/`7,984 B` 标记分配，尚未满足目标。
 
+2026-08-12 基于 `068732527868` + working tree 将每个父节点 Paint 时的子数组复制/排序替换为 `SWebToUEView` 持有的扁平 Paint Order Cache，并将 budget policy 升为 schema `6`。缓存以 Runtime UI Instance 为所有者，结构或样式刷新时按 `z-index` 稳定排序并重建；未变化 Paint 只进行 `O(N)` 缓存遍历，不再产生原有 `O(N)` 临时子数组 payload。相同环境修改前聚焦基线 P50/P95 为 `0.253649 / 0.289399 ms`、`250` 个标记分配和 `7,984 B`；修改后两次聚焦为 `0.231652 / 0.248600 ms` 与 `0.233900 / 0.289701 ms`，最终 19 项完整回归为 `0.238301 / 0.266302 ms`，20 个样本全部为 `0` 个标记分配、`0` 个 payload 事件和 `0 B`，因此未变化 Paint 零分配目标进入强制门禁。最终完整回归输出 `4,950` 行、`147` 个上下文，暖缓存完整布局 P95 `0.796400 ms` 继续通过 `< 2.0 ms`；Hover/FieldNotify P95 `56.160700 / 56.295600 ms` 仍未达 `< 0.5 ms`，不能启用对应硬门禁。Paint Order 专项测试验证负/正 `z-index`、同层源顺序和 Hover 样式变化后的缓存重建。
+
 有利特征：
 
 - 没有浏览器内核和通用脚本 VM。
@@ -293,7 +295,7 @@ Snapshot Telemetry schema `2` 以稳定名称枚举七阶段的调用数/毫秒�
 - 全局样式刷新会清空全部 Text Layout Cache。
 - Layout Dirty 时重新创建并递归释放完整 Yoga Tree。
 - Brush 重建可能同步 `LoadObject<UTexture2D>`。
-- Paint 复制并排序每组子节点；Hit Test 递归遍历节点树。
+- Paint 已缓存稳定兄弟顺序，但仍递归遍历节点树；Hit Test 同样全树递归遍历。
 
 因此当前性能结论是：**固定成本轻、静态和低频界面有良好基础；动态扩展性尚未被证明。**
 
@@ -310,7 +312,7 @@ Snapshot Telemetry schema `2` 以稳定名称枚举七阶段的调用数/毫秒�
 | 2,000 节点压力场景 | 状态局部变化不得触发全树资源加载或不可控的 16.6 ms 尖峰 |
 | 性能回归 | CI/本地标准脚本输出样式、布局、文本、绘制、命中和内存分项 |
 
-这些是逐项验收的路线目标；当前暖缓存完整布局已达到目标并进入强制回归门禁，未变化帧只满足无 Tick、未满足零临时分配，Hover、FieldNotify 和未变化 Paint 仍处于 Observe。其他目标必须以对应专项证据判断，不能由单项通过外推。
+这些是逐项验收的路线目标；当前暖缓存完整布局和未变化 Paint 零 WebToUE 标记分配/零已知 payload 字节已达到目标并进入强制回归门禁，Hover 与 FieldNotify 仍处于 Observe 且未达预算。其他目标必须以对应专项证据判断，不能由单项通过外推；现有计数也不等同于进程级 allocator 或 Slate 内部分配总量。
 
 ---
 
@@ -323,7 +325,7 @@ Snapshot Telemetry schema `2` 以稳定名称枚举七阶段的调用数/毫秒�
 | R-03 | 编译数据与 Runtime State 混合在节点结构 | High | `FWebToUENode` 字段已确认 | 拆分 IR/Instance/Cache 生命周期 | ⬜ M2 |
 | R-04 | 状态变化路径可能同步加载纹理 | High | Brush 重建使用 `LoadObject` | 编译依赖 + Resource Cache + 异步策略 | ⬜ M2 |
 | R-05 | Compiler/View 职责集中，修改回归面扩大 | High | 两个核心实现文件体量和职责已确认 | 按编译阶段和 Runtime 服务拆分 | ⬜ M2 |
-| R-06 | 没有完整可重复性能基准，无法证明“原生且高效” | Critical | 固定 Compile Corpus、七阶段计时/capture、可归因工作量计数、schema `2` 原生 Automation Telemetry/CSV、固定环境指纹和阶段 P50/P95 政策已建立；budget policy schema `5` 已把暖缓存 Layout `< 2.0 ms` 转成首个强制门禁，本次完整回归 P95 `0.776399 ms`；500/200 Hover 与单 FieldNotify 仍约 `54.53 / 54.70 ms` P95 且未达 `< 0.5 ms`，未变化重绘无 Tick、但每样本仍有 `250` 个标记分配和 `7,984 B` 已知 payload；其他热路径/常驻内存字节和剩余预算门禁仍缺失 | Benchmark、Stat、Trace、预算门禁 | 🚧 M2 |
+| R-06 | 没有完整可重复性能基准，无法证明“原生且高效” | Critical | 固定 Compile Corpus、七阶段计时/capture、可归因工作量计数、schema `2` 原生 Automation Telemetry/CSV、固定环境指纹和阶段 P50/P95 政策已建立；budget policy schema `6` 已强制暖缓存 Layout `< 2.0 ms` 和未变化 Paint 零 WebToUE 标记分配/零已知 payload 字节，本次完整回归分别为 P95 `0.796400 ms` 与 `0 / 0 B`；500/200 Hover 与单 FieldNotify P95 `56.160700 / 56.295600 ms` 仍未达 `< 0.5 ms`，其他热路径/常驻内存字节和剩余预算门禁仍缺失 | Benchmark、Stat、Trace、预算门禁 | 🚧 M2 |
 | R-07 | CSS 声明使用 Map，重复声明顺序不完全等价 | Medium | 当前声明模型已确认 | Ordered Declaration IR | ⬜ M2 |
 | R-08 | 仅 Win64，平台假设尚未暴露 | Medium | `.uplugin` 平台限制 | 平台抽象审计与构建矩阵 | ⬜ M6 |
 | R-09 | MCP 为 Experimental、本地服务无认证，通用 Python 执行面权限较高 | Medium | UE 5.8 原生 MCP 与 VibeUE 5.0 已在开发环境验证 | 仅回环、本地受信任、Editor-only；项目专用工具仍默认关闭并遵守最小权限 | ⬜ M5 |
@@ -425,14 +427,16 @@ Snapshot Telemetry schema `2` 以稳定名称枚举七阶段的调用数/毫秒�
 
 M2 是当前唯一活跃里程碑。工作包按依赖顺序推进；原则上不在 M2.0～M2.4 完成前扩张大型 CSS、组件或动画能力。
 
-### M2.0——性能可观测性 🚧 5 / 6
+M2.0 只验收性能可观测性基础设施是否形成闭环：固定工作负载、分阶段计时、可归因计数、标准输出、采样政策，以及至少一个时间预算和一个分配预算能够真实阻止回归。第 7.2 节全部场景达标属于 M2.7 总退出门；依赖增量架构才能达到的 Hover、FieldNotify、局部 Layout 和缓存命中预算分别在 M2.3、M2.4 实现和启用，不能反向阻塞可观测性基础设施结束。
+
+### M2.0——性能可观测性 ✅ 6 / 6
 
 - [x] 固定 100/500/2,000 节点文档生成器与 50/200/500 规则集。
 - [x] 分别统计 Hydrate、Style、Measure、Layout、Paint Build、Hit Test、Binding。
 - [x] 记录 Hydrate 节点/规则、Style 节点、Selector 求值/匹配、Yoga、Text Layout、Brush、WebToUE 标记分配事件，以及已知 payload 覆盖事件/字节。
 - [x] Unreal Insights/Stat 保留七阶段事件，schema `2` Automation Telemetry 生成标准 CSV。
 - [x] 固定测试机、构建配置、采样次数和 P50/P95 规则。
-- [ ] 把第 7.2 节预算转成回归门禁；budget policy schema `5` 已显式区分 Observe/Enforce，暖缓存完整布局成为首个强制门禁并在本次完整回归以 P95 `0.776399 ms` 通过 `< 2.0 ms` 目标；Hover/FieldNotify 未达标、未变化帧只满足无 Tick 而未满足零分配/零 payload 字节，其他热路径/常驻内存字节与剩余硬门禁待完成。
+- [x] budget policy schema `6` 以机器可读方式区分 Observe/Enforce，并让代表性的时间预算和分配预算真实阻止回归；暖缓存完整布局和未变化 Paint 零 WebToUE 标记分配/零已知 payload 字节均为强制门禁，本次完整回归分别以 P95 `0.796400 ms` 与 `0 / 0 B` 通过。
 
 ### M2.1——拆分生命周期 ⬜ 0 / 6
 
@@ -454,24 +458,24 @@ M2 是当前唯一活跃里程碑。工作包按依赖顺序推进；原则上�
 ### M2.3——Dirty Graph ⬜ 0 / 6
 
 - [ ] 明确 Structure/Style/Measure/Layout/Paint/HitTest Dirty Flags。
-- [ ] Hover/Active/Focus 只处理受影响选择器候选。
+- [ ] Hover/Active/Focus 只处理受影响选择器候选，并在 500/200 Corpus 达到 P95 `< 0.5 ms` 后启用硬门禁。
 - [ ] Paint-only 属性不触发 Measure/Layout。
 - [ ] 继承属性只向必要后代传播。
-- [ ] FieldNotify 只刷新依赖节点。
+- [ ] FieldNotify 只刷新依赖节点，并在 500/200 Corpus 达到 P95 `< 0.5 ms` 后启用硬门禁。
 - [ ] 每次更新可报告“为什么这些节点失效”。
 
 ### M2.4——持久缓存 ⬜ 0 / 6
 
 - [ ] Yoga Node 与 Runtime Node 同生命周期。
-- [ ] 仅脏子树进入 Measure/Layout。
-- [ ] Text Layout 以文本、字体、样式和约束作为 Cache Key。
+- [ ] 仅脏子树进入 Measure/Layout；局部更新不再重建全树 Yoga，并建立对应工作量和时间硬门禁。
+- [ ] Text Layout 以文本、字体、样式和约束作为 Cache Key，并对命中/重建次数建立可归因预算门禁。
 - [ ] 伪状态变化不再无条件清空全部 Text Layout。
 - [ ] 编译资产生成明确资源依赖，Runtime 使用 Resource Cache。
 - [ ] 状态变化路径不执行同步纹理加载。
 
-### M2.5——Paint 与命中扩展性 ⬜ 0 / 5
+### M2.5——Paint 与命中扩展性 🚧 1 / 5
 
-- [ ] 稳定 Paint Order，避免每帧复制排序不变子节点。
+- [x] 稳定 Paint Order，避免每帧复制排序不变子节点。
 - [ ] 引入可复用 Display List/Paint Commands。
 - [ ] 局部 Paint Invalidations 和重绘区域可视化。
 - [ ] Hit Test 使用裁剪感知的层次包围或空间索引。
@@ -489,7 +493,7 @@ M2 是当前唯一活跃里程碑。工作包按依赖顺序推进；原则上�
 
 ### M2.7——退出检查 ⬜ 0 / 6
 
-- [ ] 当前 18 项测试及后续新增 M2 测试全部通过。
+- [ ] 当前 19 项测试及后续新增 M2 测试全部通过。
 - [ ] Editor/Game Development/Shipping 编译通过。
 - [ ] Cook、IoStore 和 BuildPlugin 通过。
 - [ ] 第 7.2 节性能预算通过。
@@ -540,15 +544,15 @@ M2 期间先建立与传输协议无关的 Compiler、Diagnostics、Inspection�
 
 ## 12. 测试与发布门禁
 
-### 12.1 当前自动化测试（18 / 18）
+### 12.1 当前自动化测试（19 / 19）
 
 | 层 | 测试 |
 | --- | --- |
 | Core | `HtmlCss`、`FlexLayout`、`ConstrainedMeasure`、`RichTextCompile`、`ScrollLayout`、`CssDiagnostics` |
-| Runtime | `AssetVersion`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`PerformanceInstrumentation` |
+| Runtime | `AssetVersion`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`PerformanceInstrumentation`、`PaintOrderCache` |
 | Editor | `BenchmarkScenarios`、`BenchmarkStatistics`、`RuntimeHoverBenchmark`、`RuntimeFieldNotifyBenchmark`、`RuntimeWarmLayoutBenchmark`、`RuntimeUnchangedPaintBenchmark`、`LocalizationImport` |
 
-Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Preflight、探针失败不创建操作、持久存活 PID 识别与精确中断残留清理。它不计入 UE Automation 的 18 项。
+Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Preflight、探针失败不创建操作、持久存活 PID 识别与精确中断残留清理。它不计入 UE Automation 的 19 项。
 
 ### 12.2 仍需建立
 
@@ -571,6 +575,8 @@ Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Prefligh
 
 | 日期 | 基线 | 变化 | 路线影响 |
 | --- | --- | --- | --- |
+| 2026-08-12 | `0687325` + working tree | 修正 M2 性能验收归属：M2.0 以固定 Corpus、分阶段观测、标准输出、采样政策，以及至少一个时间预算和一个分配预算的真实硬门禁为退出条件；第 7.2 节全量预算保留在 M2.7，Hover/FieldNotify 和局部 Layout/Cache 门禁分别归入 M2.3/M2.4。 | M2.0 按现有证据达到 6/6；该调整不代表未达预算的路径通过，R-01/R-02/R-06 等级不变，M2.7 性能总门仍未完成。 |
+| 2026-08-12 | `0687325` + working tree | 将递归 Paint 中每父节点的子数组复制/排序替换为 View-owned 扁平 Paint Order Cache，并将 budget policy 升为 schema `6`；相同环境修改前 P50/P95 `0.253649/0.289399 ms`、`250` 次/`7,984 B`，修改后两次聚焦为 `0.231652/0.248600` 与 `0.233900/0.289701 ms`，最终完整回归为 `0.238301/0.266302 ms`、`0 / 0 B`。新增顺序/失效专项，19/19 测试、Win64 Editor Development build、readiness/MCP/Python/World 通过。 | 未变化 Paint 零 WebToUE 标记分配/零已知 payload 字节成为第二项强制性能门禁；M2.5 达到 1/5，R-06 仍因 Hover/FieldNotify 与其他内存证据缺口保持 Critical；按当时定义，M2.0 保持 5/6。 |
 | 2026-08-11 | `72533da` + working tree | 将 budget policy 升为 schema `5` 并显式记录 Observe/Enforce；500 节点暖缓存完整布局成为首个强制性能门禁。两次聚焦 P50/P95 为 `0.640400/0.803798` 与 `0.647400/0.677601 ms`，完整 18/18 回归为 `0.650749/0.776399 ms`，均满足 `< 2.0 ms`；完整 Telemetry 为 `4,950` 行、`147` 个上下文，Win64 Editor Development build、readiness/MCP/Python/World 通过。 | R-06 首次具备会阻止回归的硬预算门禁；Hover、FieldNotify 和未变化 Paint 仍为 Observe，M2.0 保持 5/6。 |
 | 2026-08-11 | `5179ec4` + working tree | 将 Snapshot Telemetry / budget policy 升为 schema `2 / 4`，分离全部显式分配事件与 payload 字节已知子集；500 节点未变化 Paint 的 `250 / 250` 个子数组复制事件在全部样本中稳定为 `7,984 B`。两次聚焦 P50/P95 为 `0.251951/0.337999` 与 `0.249101/0.289902 ms`，完整 18/18 回归为 `0.259100/0.297900 ms`；schema `2` 完整输出 `4,946` 行、`147` 个上下文，Win64 Editor Development build、readiness/MCP/Python/World 通过。 | R-06 获得首个精确、100% 覆盖的瞬时 payload 字节基线，但未变化帧仍未达到零分配/零字节目标；其他热路径/常驻内存和永久门禁仍待完成，M2.0 保持 5/6。 |
 | 2026-08-11 | `5179ec4` + working tree | 建立 500 节点暖缓存未变化重绘 Runtime 专项并将 budget policy 升为 schema `3`：非计时 Paint 预热后只计时无状态变化的 Slate Paint，逐样本断言无 Tick、`1 / 249 / 0 / 250` 的 Paint Build/Text Compute/Text Build/标记分配工作量，并输出 `728` 行、`21` 个上下文。两次聚焦 P50/P95 为 `0.252949/0.287399` 与 `0.255549/0.273000 ms`，完整 18/18 回归为 `0.259651/0.335000 ms`；Win64 Editor Development build、readiness/MCP/Python/World 通过。 | 未变化帧的 Tick 目标满足，但每次 Paint 仍复制根节点与 `249` 个按钮的子数组，零分配目标未满足；R-06 继续缺内存字节和永久门禁，M2.0 保持 5/6。 |
