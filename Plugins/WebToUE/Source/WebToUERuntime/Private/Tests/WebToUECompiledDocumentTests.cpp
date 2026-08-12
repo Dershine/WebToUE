@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "SWebToUEView.h"
 #include "WebToUEDocument.h"
+#include "WebToUERuntimeInstance.h"
 
 #include "Engine/Texture2D.h"
 #include "Internationalization/StringTable.h"
@@ -18,6 +19,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUERuntimeInstanceIsolationTest,
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUERuntimeCacheSeparationTest,
 	"WebToUE.Runtime.RuntimeCacheSeparation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEOrderedDeclarationHydrationTest,
+	"WebToUE.Runtime.OrderedDeclarationHydration",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 namespace WebToUE::CompiledDocument::Tests
@@ -114,6 +119,65 @@ bool FWebToUECompiledDocumentBoundaryTest::RunTest(const FString& Parameters)
 		Document->GetCompiledNodes()[1].Attributes[0].Value, FString(TEXT("boundary-target")));
 	TestEqual(TEXT("Runtime style resolution does not change the compiled hover declaration"),
 		Document->GetCompiledRules()[1].Declarations[0].Value, FString(TEXT("#ff0000")));
+	return true;
+}
+
+bool FWebToUEOrderedDeclarationHydrationTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::CompiledDocument::Tests;
+
+	UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
+	FWebToUECompiledDocumentData CompiledDocument;
+	CompiledDocument.RootNodeIndex = 0;
+	FWebToUECompiledNode& Body = CompiledDocument.Nodes.AddDefaulted_GetRef();
+	Body.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	Body.Tag = TEXT("body");
+	FWebToUECompiledNode& Target = CompiledDocument.Nodes.AddDefaulted_GetRef();
+	Target.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	Target.Tag = TEXT("div");
+	Target.ParentIndex = 0;
+	AddAttribute(Target, TEXT("id"), TEXT("ordered-target"));
+	FWebToUECompiledRule& Rule = CompiledDocument.Rules.AddDefaulted_GetRef();
+	Rule.Specificity = 100;
+	Rule.Selector.AddDefaulted_GetRef().Id = TEXT("ordered-target");
+	AddDeclaration(Rule, TEXT("color"), TEXT("#ff0000"));
+	AddDeclaration(Rule, TEXT("width"), TEXT("80px"));
+	AddDeclaration(Rule, TEXT("color"), TEXT("#00ff00"));
+	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
+
+	FWebToUERuntimeInstance RuntimeInstance;
+	TestTrue(TEXT("The compiled document hydrates"), RuntimeInstance.Hydrate(*Document));
+	const FWebToUEDocument* RuntimeDocument = RuntimeInstance.GetDocument();
+	TestNotNull(TEXT("Hydration creates a runtime document"), RuntimeDocument);
+	if (!RuntimeDocument) return false;
+	TestEqual(TEXT("Hydration preserves the declaration count"), RuntimeDocument->Rules[0].Declarations.Num(), 3);
+	if (RuntimeDocument->Rules[0].Declarations.Num() == 3)
+	{
+		TestEqual(TEXT("Hydration preserves the first duplicate"),
+			RuntimeDocument->Rules[0].Declarations[0].Value, FString(TEXT("#ff0000")));
+		TestEqual(TEXT("Hydration preserves the interleaved declaration"),
+			RuntimeDocument->Rules[0].Declarations[1].Name, FString(TEXT("width")));
+		TestEqual(TEXT("Hydration preserves the last duplicate"),
+			RuntimeDocument->Rules[0].Declarations[2].Value, FString(TEXT("#00ff00")));
+	}
+
+	FWebToUENode* RuntimeTarget = nullptr;
+	RuntimeDocument->ForEachNode([&RuntimeTarget](FWebToUENode& Node)
+	{
+		if (Node.GetAttribute(TEXT("id")) == TEXT("ordered-target")) RuntimeTarget = &Node;
+	});
+	TestNotNull(TEXT("The hydrated target exists"), RuntimeTarget);
+	if (RuntimeTarget)
+	{
+		TestEqual(TEXT("The hydrated cascade uses the last duplicate"),
+			RuntimeDocument->GetComputedStyle(*RuntimeTarget).Color, FLinearColor::Green);
+		TestEqual(TEXT("The interleaved declaration keeps its unit"),
+			RuntimeDocument->GetComputedStyle(*RuntimeTarget).Width.Unit, EWebToUEUnit::Pixels);
+		TestEqual(TEXT("The interleaved declaration is applied"),
+			RuntimeDocument->GetComputedStyle(*RuntimeTarget).Width.Value, 80.0f);
+	}
+	TestEqual(TEXT("Hydration leaves the compiled declaration sequence intact"),
+		Document->GetCompiledRules()[0].Declarations.Num(), 3);
 	return true;
 }
 

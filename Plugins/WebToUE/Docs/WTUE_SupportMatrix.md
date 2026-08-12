@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-12，Git `2ed0d6b` + working tree。
+> 当前基线：2026-08-12，Git `b7191ff` + working tree。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -62,6 +62,8 @@ Flex：
 
 值：`px`、百分比、零、部分 `auto`；Hex 颜色和少量命名色。尚无 `rgb()`、变量、`calc()`、渐变和完整颜色集合。
 
+声明顺序：外链 CSS、`<style>` 和元素 `style` 中的有效声明按源顺序进入 Compiled UI IR，重复属性不会在编译边界丢失；无效声明产生警告且不参与级联，同一来源内最后一个有效的同名声明获胜。完整 shorthand/longhand 顺序语义仍等待 Typed Cascade。
+
 显式继承：`color`、`font-family`、`font-size`、`font-weight`、`text-align`、`white-space`。
 
 ## 3. 绑定、事件、输入与资源
@@ -91,9 +93,9 @@ Flex：
 - 不支持的 at-rule、选择器、属性和值。
 - 外链、内联样式的实际文件、行和列。
 
-第一次导入错误不会产生有效运行数据；已有资产重导入失败保留上次成功运行数据并更新诊断。
+第一次导入错误不会产生有效运行数据；已有资产重导入失败（包括 UI Source 缺失）保留上次成功运行数据并更新诊断。
 
-WTUE Document 使用自定义版本 GUID，当前包含初始 Compiled Document 和本地化富文本演进。旧资产可请求重编译；全局未加载资产扫描和完整字段级迁移仍属于 M6。
+WTUE Document 使用自定义版本 GUID，当前版本 `OrderedDeclarations` 包含初始 Compiled Document、本地化富文本和有序声明演进。已加载旧资产会请求源文件重编译；全局未加载资产扫描和完整字段级迁移仍属于 M6。
 
 ## 5. 明确尚未支持
 

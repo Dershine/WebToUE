@@ -70,12 +70,16 @@
 | 2026-08-12 `3a9b800` + working tree | Runtime Instance 拆分后完整回归 P95：Hover `56.711402`、FieldNotify `56.511901`、暖布局 `0.762999`、未变化 Paint `0.262398 ms`。 | 生命周期隔离成立，硬门继续通过；不宣称性能改善。 |
 | 2026-08-12 `18226f9` + working tree | Render Data 拆分后完整回归 P95：Hover `59.009600`、FieldNotify `59.390798`、暖布局 `0.760999`、未变化 Paint `0.277702 ms`。 | Style/Layout 双实例隔离成立；同会话有漂移，不宣称性能改善。 |
 | 2026-08-12 `82365d3` + working tree | Presentation 拆分前后 P95：Compile Style small `2.974400→2.903600`、medium `52.610500→53.516100`、stress `512.629500→524.002800`；FieldNotify `56.634001→58.069199`、Hover `56.666899→58.171101`、暖布局 `0.701401→0.735801 ms`；未变化 Paint仍为 0 次/0 B。 | M2.1 只建立职责与所有权边界；硬门继续通过，不宣称性能改善。 |
+| 2026-08-12 `b7191ff` + working tree | Ordered Declaration 完整回归 P95：FieldNotify `57.878997`、Hover `62.189799`、暖布局 `0.703800 ms`；未变化 Paint `0.270400 ms`、0 次/0 B。 | 正确性/IR 迁移未破坏两个既有硬门；Hover/FieldNotify 仍未达标，不宣称性能改善。 |
+| 2026-08-12 `b7191ff` + working tree | 发布收口后完整回归 P95：FieldNotify `57.034999`、Hover `59.194099`、暖布局 `0.790901 ms`；未变化 Paint `0.277702 ms`、0 次分配。 | 26/26 通过，两个既有硬门继续满足；这是正确性与发布复核，不宣称性能改善。 |
 
 ## 4. 发布与工具链证据
 
 - 2026-08-11 的 Development 和 Shipping IoStore 历史验证未发现 WebUI 源文件、Chromium、CEF 或 WebBrowser 运行文件。这是历史阴性证据，发布候选版仍必须重跑 Cook/IoStore/BuildPlugin。
-- Editor-only VibeUE 5.0 vendored 提交为 `24ac69d750c1c558a1b78ed5b60644ce000198d3`，版本与归档校验保存于项目根 `Plugins/VibeUE.version.json`。2026-08-11 历史验证覆盖 Win64 BuildPlugin、WebToUEEditor Development 构建、85 个 Agent Skills、83 个 Toolsets、Python API 发现/执行、PerformanceService、13/13 WebToUE 和 17/17 VibeUE 测试；这些数字是当时快照，不代替当前 23/23 WebToUE 回归。
+- Editor-only VibeUE 5.0 vendored 提交为 `24ac69d750c1c558a1b78ed5b60644ce000198d3`，版本与归档校验保存于项目根 `Plugins/VibeUE.version.json`。2026-08-11 历史验证覆盖 Win64 BuildPlugin、WebToUEEditor Development 构建、85 个 Agent Skills、83 个 Toolsets、Python API 发现/执行、PerformanceService、13/13 WebToUE 和 17/17 VibeUE 测试；这些数字是当时快照，不代替当前 26/26 WebToUE 回归。
 - Editor 生命周期包装器的非沙箱边界、关 Editor 前 Preflight、项目互斥锁、`Saved/VibeUE/Lifecycle/operation.json` 持久状态和 Pester 3/3 是 R-10 的缓解证据；长期决策见 [ADR-0001](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md)。
+- 2026-08-12 `b7191ff` + working tree 的 Win64 Development Cook 保存了 576 个包（569 cooked），但 commandlet 因既有 `GameFeatureData` Asset Manager 配置错误及健康 Editor 占用 MCP `127.0.0.1:8000` 而以 ExitCode 25 失败；Stage/Pak/IoStore 未执行，此记录不得视为发布通过。
+- 2026-08-12 同一 `b7191ff` + working tree 后续在 `DefaultGame.ini` 添加 UE 5.8 `GameFeatureData` AlwaysCook 规则，并以 `-AdditionalCookerOptions=-ModelContextProtocolPort=8001` 隔离 Commandlet 端口；Win64 Game + Editor Development 构建、Cook（0 errors）、Stage、Pak、IoStore 全部通过。IoStore 写入 569 packages、2,226 chunks，总容器约 `250.11 MiB`；UAT ExitCode 0。对 2,225 条项目 IoStore 文件清单的路径审计未发现 WebUI、Chromium、CEF、WebBrowser、HTML/CSS/JS；Loose Stage 同样无 WebUI/浏览器运行文件，仅有 UE 自带诊断工具 `Engine/Extras/GPUDumpViewer/GPUDumpViewer.html`，不属于 WTUE UI Source 或 Runtime 依赖。
 
 ## 5. 工程变更记录
 
@@ -83,6 +87,8 @@
 
 | 日期 | 基线 | 变化 | 路线影响 |
 | --- | --- | --- | --- |
+| 2026-08-12 | `b7191ff` + working tree | Asset Manager 的 `GameFeatureData` 规则进入正确的 Game 配置层；Cook commandlet 使用独立 MCP 端口；两个 EditorContext Runtime 测试同时受 `WITH_EDITOR` 保护。Win64 Game + Editor build、Cook/Stage/Pak/IoStore 和完整 26/26 通过。 | Ordered Declaration 完成验收，M2.2 进入 🚧 1/5，R-07 降为 Mitigated；宏观 M2 保持 3/7。 |
+| 2026-08-12 | `b7191ff` + working tree | Core/Factory/Compiled IR/Hydration 改用有序有效声明；资产版本升至 `OrderedDeclarations`，两个示例资产由源文件重编译；缺源诊断保留 last-good；Editor watcher 排除 transient Automation Document。Win64 Editor build、聚焦 4/4 和 3/3、完整 26/26 通过。 | M2.2 进入 🚧 0/5，R-07 已实现缓解但因当前 Cook/IoStore 门失败仍未验收；宏观 M2 保持 3/7。 |
 | 2026-08-12 | `982db64` + working tree | 调整 M2.2 的依赖顺序：Ordered Declaration → Property ID/Typed Value → 属性影响元数据 → Selector Index 工作量门 → 类型化 Cascade；增加资产版本中途门和 Paint-only 资源安全门。 | M2.2 仍为 0/5，宏观路线、预算和 M2.4 Resource Cache 归属不变。 |
 | 2026-08-12 | `82365d3` + working tree | 拆分 Core CSS Property、Style Resolver、Yoga Layout Adapter；新增每视图 Presentation Cache 与 `RuntimePresentationIsolation`。Win64 Editor build、聚焦 4/4、性能 5/5、完整 23/23 通过。 | M2.1 6/6，M2 3/7；R-03/R-05 降为 Mitigated；资产 schema 不变。 |
 | 2026-08-12 | `18226f9` + working tree | Computed Style/Layout Result 移入每视图连续 Render Data；新增 `RuntimeCacheSeparation`，完整 22/22 通过。 | M2.1 5/6；资产 schema 不变。 |

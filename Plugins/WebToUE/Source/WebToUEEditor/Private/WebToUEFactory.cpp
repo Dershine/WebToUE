@@ -134,10 +134,10 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 			SerializedSegment.RequiredState = static_cast<uint8>(Segment.RequiredState);
 			SerializedSegment.RelationToPrevious = static_cast<uint8>(Segment.RelationToPrevious);
 		}
-		for (const TPair<FString, FString>& Declaration : Rule.Declarations)
+		for (const FWebToUEStyleDeclaration& Declaration : Rule.Declarations)
 		{
 			FWebToUECompiledDeclaration& SerializedDeclaration = SerializedRule.Declarations.AddDefaulted_GetRef();
-			SerializedDeclaration.Name = Declaration.Key;
+			SerializedDeclaration.Name = Declaration.Name;
 			SerializedDeclaration.Value = Declaration.Value;
 		}
 	}
@@ -164,7 +164,25 @@ bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FStri
 	FString Html;
 	if (!FFileHelper::LoadFileToString(Html, *Filename))
 	{
-		UE_LOG(LogWebToUEImport, Error, TEXT("Could not read WebToUE document '%s'."), *Filename);
+		const FString Message = FString::Printf(TEXT("Could not read WebToUE document '%s'."), *Filename);
+		UE_LOG(LogWebToUEImport, Error, TEXT("%s"), *Message);
+		Document.Diagnostics.Reset();
+		FWebToUEAssetDiagnostic& Diagnostic = Document.Diagnostics.AddDefaulted_GetRef();
+		Diagnostic.Severity = EWebToUEAssetDiagnosticSeverity::Error;
+		Diagnostic.File = Filename;
+		Diagnostic.Line = 1;
+		Diagnostic.Column = 1;
+		Diagnostic.Message = Message;
+		if (!bPreserveLastGood || Document.GetCompiledNodes().IsEmpty())
+		{
+			Document.CompiledHtml.Reset();
+			Document.CompiledCss.Reset();
+			FWebToUECompiledDocumentData EmptyDocument;
+			EmptyDocument.LocalizationNamespace = Document.GetLocalizationNamespace();
+			Document.CommitCompiledDocument(MoveTemp(EmptyDocument));
+		}
+		Document.MarkPackageDirty();
+		Document.NotifyDocumentChanged();
 		return false;
 	}
 
@@ -279,7 +297,6 @@ EReimportResult::Type UWebToUEFactory::Reimport(UObject* Obj)
 #if WITH_EDITORONLY_DATA
 	if (!Document->AssetImportData) return EReimportResult::Failed;
 	const FString Filename = Document->AssetImportData->GetFirstFilename();
-	if (!IFileManager::Get().FileExists(*Filename)) return EReimportResult::Failed;
 	Document->PreEditChange(nullptr);
 	const bool bSucceeded = ImportIntoDocument(*Document, Filename, true);
 	Document->PostEditChange();

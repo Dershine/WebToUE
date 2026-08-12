@@ -192,10 +192,16 @@ struct WEBTOUECORE_API FWebToUESelectorSegment
 	EWebToUECombinator RelationToPrevious = EWebToUECombinator::None;
 };
 
+struct WEBTOUECORE_API FWebToUEStyleDeclaration
+{
+	FString Name;
+	FString Value;
+};
+
 struct WEBTOUECORE_API FWebToUEStyleRule
 {
 	TArray<FWebToUESelectorSegment> Selector;
-	TMap<FString, FString> Declarations;
+	TArray<FWebToUEStyleDeclaration> Declarations;
 	int32 Specificity = 0;
 	int32 SourceOrder = 0;
 };

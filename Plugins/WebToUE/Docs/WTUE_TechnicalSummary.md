@@ -8,7 +8,7 @@
 >
 > 当前里程碑：M2——增量原生运行时
 >
-> 最近核验：2026-08-12，基于 Git `2ed0d6b` + working tree
+> 最近核验：2026-08-12，基于 Git `b7191ff` + working tree
 >
 > 统一术语：[CONTEXT.md](../../../CONTEXT.md) · 历史证据：[WTUE_EvidenceLedger.md](WTUE_EvidenceLedger.md) · 精确支持边界：[WTUE_SupportMatrix.md](WTUE_SupportMatrix.md)
 
@@ -63,10 +63,11 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 自动化测试 | 23 / 23 通过（2026-08-12） |
-| 当前编译 | UE 5.8 Win64 Editor Development 通过（2026-08-12） |
+| 自动化测试 | 26 / 26 通过（2026-08-12） |
+| 当前编译 | UE 5.8 Win64 Game + Editor Development 通过（2026-08-12） |
+| 当前发布 | Win64 Development BuildCookRun 通过：Cook 0 errors、Stage/Pak/IoStore 成功，569 包写入 2,226 个 IoStore chunks |
 | 历史发布 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 曾通过；发布前须在当前提交重跑 |
-| Git 基线 | `2ed0d6b` + working tree；未提交，不生成伪哈希 |
+| Git 基线 | `b7191ff` + working tree；未提交，不生成伪哈希 |
 | 发布级别 | Developer Preview |
 
 ### 2.3 宏观里程碑
@@ -224,9 +225,9 @@ Cooked 游戏保留 Compiled Nodes/Rules、Root、纹理/String Table 引用、�
 | R-02 | Yoga Tree 每次布局重建 | High | 暖布局重建 500 Yoga；P95 0.735801 ms | Persistent Yoga、局部 Dirty | ⬜ M2 |
 | R-03 | Compiled 数据与 Runtime 生命周期混合 | Medium | 四项边界/双实例专项通过 | 后续 IR/Dirty/Cache 保持边界 | ✅ Mitigated |
 | R-04 | 状态变化可能同步加载纹理 | High | Brush 重建使用 `LoadObject` | 资源影响分类、编译依赖、Resource Cache、异步策略 | ⬜ M2 |
-| R-05 | Compiler/View 职责集中 | Low | Core 服务和 Presentation 已拆分，23/23 通过 | 后续能力进入对应服务 | ✅ Mitigated |
+| R-05 | Compiler/View 职责集中 | Low | Core 服务和 Presentation 已拆分，26/26 通过 | 后续能力进入对应服务 | ✅ Mitigated |
 | R-06 | 性能证据和硬门仍不完整 | Critical | 两项硬门已建立；Hover/FieldNotify 未达标，常驻内存缺失 | Benchmark、Telemetry、预算门禁 | 🚧 M2 |
-| R-07 | Map 声明丢失重复属性顺序 | Medium | 当前 Core Rule/Cascade 使用 Map | Ordered Declaration IR | ⬜ M2.2 |
+| R-07 | Map 声明丢失重复属性顺序 | Medium | Core、Compiled IR 与 Hydration 已使用有序声明；26/26 和 Win64 Development BuildCookRun 通过 | 保持 Ordered Declaration 专项与资产版本门 | ✅ Mitigated |
 | R-08 | 仅 Win64 | Medium | `.uplugin` 平台限制 | 平台审计与构建矩阵 | ⬜ M6 |
 | R-09 | MCP Experimental 且通用 Python 权限高 | Medium | 本地 Editor 环境已验证 | 回环/受信任/Editor-only/最小权限 | ⬜ M5 |
 | R-10 | Sandbox 可使 UBT 关 Editor 后失败 | High | 曾复现；Preflight、互斥和持久状态已验证 | 生命周期 Skill 与 [ADR-0001](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md) | ✅ Mitigated |
@@ -315,11 +316,11 @@ M2.0 只验收可观测性闭环；全部预算属于 M2.7，Hover/FieldNotify�
 - [x] 同一 Document 双实例互不污染。
 - [x] Compiler/View 按职责拆分并通过回归。
 
-### M2.2——类型化样式与选择器索引 ⬜ 0 / 5
+### M2.2——类型化样式与选择器索引 🚧 1 / 5
 
 依赖顺序也是交付顺序；每项必须独立验收：
 
-- [ ] Ordered Declaration：保持源顺序，专项覆盖重复声明、有效/无效交错和最后有效声明获胜。
+- [x] Ordered Declaration：保持源顺序，专项覆盖重复声明、有效/无效交错和最后有效声明获胜；资产版本 3、旧示例重编译、26/26 Automation 及 Win64 Development BuildCookRun 均通过。
 - [ ] CSS Property ID + Typed Value：编译期解析，热路径不解析属性名和值；若写入 IR，完成版本、旧资产重编译和诊断闭环。
 - [ ] Property Metadata：统一声明 Inherited 及 Style/Measure/Layout/Paint/HitTest/Resource 影响范围。
 - [ ] Selector Index：按 ID/Class/Tag/Pseudo 建候选索引；立即在 500/200 记录候选数和 Selector 求值，必须低于当前 100,000 次。
@@ -384,13 +385,13 @@ M2 先建设与传输协议无关的 Compiler、Diagnostics、Inspection 和 Ben
 
 ## 11. 测试与发布门禁
 
-### 11.1 当前 Automation（23 / 23）
+### 11.1 当前 Automation（26 / 26）
 
 | 层 | 测试 |
 | --- | --- |
-| Core | `HtmlCss`、`FlexLayout`、`ConstrainedMeasure`、`RichTextCompile`、`ScrollLayout`、`CssDiagnostics` |
-| Runtime | `AssetVersion`、`CompiledDocumentBoundary`、`RuntimeInstanceIsolation`、`RuntimeCacheSeparation`、`RuntimePresentationIsolation`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`PerformanceInstrumentation`、`PaintOrderCache` |
-| Editor | `BenchmarkScenarios`、`BenchmarkStatistics`、`RuntimeHoverBenchmark`、`RuntimeFieldNotifyBenchmark`、`RuntimeWarmLayoutBenchmark`、`RuntimeUnchangedPaintBenchmark`、`LocalizationImport` |
+| Core | `HtmlCss`、`OrderedDeclarations`、`FlexLayout`、`ConstrainedMeasure`、`RichTextCompile`、`ScrollLayout`、`CssDiagnostics` |
+| Runtime | `AssetVersion`、`CompiledDocumentBoundary`、`OrderedDeclarationHydration`、`RuntimeInstanceIsolation`、`RuntimeCacheSeparation`、`RuntimePresentationIsolation`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`PerformanceInstrumentation`、`PaintOrderCache` |
+| Editor | `BenchmarkScenarios`、`BenchmarkStatistics`、`RuntimeHoverBenchmark`、`RuntimeFieldNotifyBenchmark`、`RuntimeWarmLayoutBenchmark`、`RuntimeUnchangedPaintBenchmark`、`LocalizationImport`、`OrderedDeclarationImport` |
 
 Editor 生命周期另有 Pester 3 / 3，不计入 UE Automation。
 

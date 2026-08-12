@@ -75,9 +75,9 @@ namespace WebToUE::Private
 		TMap<FString, FString> Properties;
 		for (const FWebToUEStyleRule* Rule : Matches)
 		{
-			for (const TPair<FString, FString>& Pair : Rule->Declarations)
+			for (const FWebToUEStyleDeclaration& Declaration : Rule->Declarations)
 			{
-				Properties.Add(Pair.Key, Pair.Value);
+				Properties.Add(Declaration.Name, Declaration.Value);
 			}
 		}
 		const FString InlineStyle = Node.GetAttribute(TEXT("style"));

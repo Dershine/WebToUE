@@ -6,6 +6,7 @@
 #include "EditorReimportHandler.h"
 #include "IDirectoryWatcher.h"
 #include "Misc/Paths.h"
+#include "UObject/Package.h"
 #include "UObject/UObjectIterator.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWebToUEEditor, Log, All);
@@ -61,9 +62,15 @@ private:
 	TMap<FString, double> PendingFiles;
 	TSet<TWeakObjectPtr<UWebToUEDocument>> PendingVersionReimports;
 
+	static bool IsPersistentDocument(const UWebToUEDocument* Document)
+	{
+		return Document && !Document->HasAnyFlags(RF_ClassDefaultObject | RF_Transient) &&
+			Document->GetOutermost() != GetTransientPackage();
+	}
+
 	void QueueVersionRecompile(UWebToUEDocument* Document)
 	{
-		if (Document && !Document->HasAnyFlags(RF_ClassDefaultObject) && Document->NeedsRecompile())
+		if (IsPersistentDocument(Document) && Document->NeedsRecompile())
 		{
 			PendingVersionReimports.Add(Document);
 		}
@@ -113,7 +120,7 @@ private:
 		for (TObjectIterator<UWebToUEDocument> It; It; ++It)
 		{
 			UWebToUEDocument* Document = *It;
-			if (Document->HasAnyFlags(RF_ClassDefaultObject)) continue;
+			if (!IsPersistentDocument(Document)) continue;
 #if WITH_EDITORONLY_DATA
 			const bool bAffected = Document->DependencyFiles.ContainsByPredicate([&Ready](FString Dependency)
 			{

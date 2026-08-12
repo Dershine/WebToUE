@@ -77,7 +77,9 @@ bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 		}
 		for (const FWebToUECompiledDeclaration& Declaration : SourceRule.Declarations)
 		{
-			Rule.Declarations.Add(Declaration.Name, Declaration.Value);
+			FWebToUEStyleDeclaration& RuntimeDeclaration = Rule.Declarations.AddDefaulted_GetRef();
+			RuntimeDeclaration.Name = Declaration.Name;
+			RuntimeDeclaration.Value = Declaration.Value;
 		}
 		RuntimeDocument->Rules.Add(MoveTemp(Rule));
 	}

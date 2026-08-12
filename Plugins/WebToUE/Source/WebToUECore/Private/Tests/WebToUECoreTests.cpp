@@ -6,6 +6,9 @@
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEHtmlCssTest, "WebToUE.Core.HtmlCss",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEOrderedDeclarationsTest, "WebToUE.Core.OrderedDeclarations",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 bool FWebToUEHtmlCssTest::RunTest(const FString& Parameters)
 {
 	const FString Html = TEXT(R"(
@@ -29,6 +32,57 @@ bool FWebToUEHtmlCssTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Higher-specificity hover selector wins"),
 			Document->GetComputedStyle(*Button).Color, FLinearColor(0, 1, 0, 1));
 		TestTrue(TEXT("Entity decoded"), Button->Children.Num() > 0 && Button->Children[0]->Text == TEXT("Start & Play"));
+	}
+	return true;
+}
+
+bool FWebToUEOrderedDeclarationsTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body><div id='target'></div><div id='inline' style='color: #ff0000; color: invalid; color: #0000ff'></div></body>"),
+		TEXT("#target { color: #ff0000; width: 100px; color: invalid; color: #00ff00; width: invalid; width: 120px; }"),
+		TEXT("OrderedDeclarations.html"));
+	TestFalse(TEXT("Invalid declarations remain warnings"), Document->HasErrors());
+	TestEqual(TEXT("The stylesheet produces one rule"), Document->Rules.Num(), 1);
+	if (Document->Rules.Num() == 1)
+	{
+		const TArray<FWebToUEStyleDeclaration>& Declarations = Document->Rules[0].Declarations;
+		TestEqual(TEXT("Only valid declarations are retained"), Declarations.Num(), 4);
+		if (Declarations.Num() == 4)
+		{
+			TestEqual(TEXT("The first declaration keeps its source position"), Declarations[0].Name, FString(TEXT("color")));
+			TestEqual(TEXT("The first declaration keeps its value"), Declarations[0].Value, FString(TEXT("#ff0000")));
+			TestEqual(TEXT("An interleaved property keeps its source position"), Declarations[1].Name, FString(TEXT("width")));
+			TestEqual(TEXT("A later valid duplicate remains in the sequence"), Declarations[2].Value, FString(TEXT("#00ff00")));
+			TestEqual(TEXT("The last valid width remains in the sequence"), Declarations[3].Value, FString(TEXT("120px")));
+		}
+	}
+
+	FWebToUENode* Target = nullptr;
+	FWebToUENode* Inline = nullptr;
+	Document->ForEachNode([&](FWebToUENode& Node)
+	{
+		const FString Id = Node.GetAttribute(TEXT("id"));
+		if (Id == TEXT("target")) Target = &Node;
+		else if (Id == TEXT("inline")) Inline = &Node;
+	});
+	TestNotNull(TEXT("The stylesheet target exists"), Target);
+	TestNotNull(TEXT("The inline-style target exists"), Inline);
+	if (Target)
+	{
+		TestEqual(TEXT("The last valid repeated color wins"),
+			Document->GetComputedStyle(*Target).Color, FLinearColor::Green);
+		TestEqual(TEXT("The last valid repeated width keeps its unit"),
+			Document->GetComputedStyle(*Target).Width.Unit, EWebToUEUnit::Pixels);
+		TestEqual(TEXT("The last valid repeated width wins"),
+			Document->GetComputedStyle(*Target).Width.Value, 120.0f);
+	}
+	if (Inline)
+	{
+		TestEqual(TEXT("Inline style retains both valid duplicate declarations"),
+			Inline->GetAttribute(TEXT("style")), FString(TEXT("color: #ff0000; color: #0000ff")));
+		TestEqual(TEXT("The last valid inline declaration wins"),
+			Document->GetComputedStyle(*Inline).Color, FLinearColor::Blue);
 	}
 	return true;
 }

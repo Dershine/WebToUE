@@ -12,7 +12,8 @@ namespace WebToUE::Private
 	};
 
 	static void ParseDeclarationBlock(const FString& Block, const FString& SourceName,
-		int32 StartLine, int32 StartColumn, FWebToUEDocument& Document, TMap<FString, FString>& OutDeclarations);
+		int32 StartLine, int32 StartColumn, FWebToUEDocument& Document,
+		TArray<FWebToUEStyleDeclaration>& OutDeclarations);
 
 	static FString DecodeEntities(FString Value)
 	{
@@ -261,13 +262,13 @@ namespace WebToUE::Private
 				}
 				if (Name == TEXT("style"))
 				{
-					TMap<FString, FString> ValidatedDeclarations;
+					TArray<FWebToUEStyleDeclaration> ValidatedDeclarations;
 					ParseDeclarationBlock(Value, SourceName, ValueLine, ValueColumn, Document, ValidatedDeclarations);
 					Value.Reset();
-					for (const TPair<FString, FString>& Declaration : ValidatedDeclarations)
+					for (const FWebToUEStyleDeclaration& Declaration : ValidatedDeclarations)
 					{
 						if (!Value.IsEmpty()) Value += TEXT("; ");
-						Value += Declaration.Key + TEXT(": ") + Declaration.Value;
+						Value += Declaration.Name + TEXT(": ") + Declaration.Value;
 					}
 				}
 				Node->Attributes.Add(Name, MoveTemp(Value));
@@ -688,7 +689,7 @@ namespace WebToUE::Private
 				continue;
 			}
 
-			TMap<FString, FString> Declarations;
+			TArray<FWebToUEStyleDeclaration> Declarations;
 			int32 DeclarationLine;
 			int32 DeclarationColumn;
 			GetSourceLocation(Css, Open + 1, StyleSheet.StartLine, StyleSheet.StartColumn, DeclarationLine, DeclarationColumn);
@@ -731,7 +732,8 @@ namespace WebToUE::Private
 	}
 
 	static void ParseDeclarationBlock(const FString& Block, const FString& SourceName,
-		int32 StartLine, int32 StartColumn, FWebToUEDocument& Document, TMap<FString, FString>& OutDeclarations)
+		int32 StartLine, int32 StartColumn, FWebToUEDocument& Document,
+		TArray<FWebToUEStyleDeclaration>& OutDeclarations)
 	{
 		int32 Offset = 0;
 		while (Offset <= Block.Len())
@@ -770,7 +772,9 @@ namespace WebToUE::Private
 					}
 					else
 					{
-						OutDeclarations.Add(Name, Value);
+						FWebToUEStyleDeclaration& Declaration = OutDeclarations.AddDefaulted_GetRef();
+						Declaration.Name = Name;
+						Declaration.Value = Value;
 					}
 				}
 			}
