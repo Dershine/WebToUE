@@ -1192,10 +1192,10 @@ namespace WebToUE::Private
 		Style.bEnabled = !Node.Attributes.Contains(TEXT("disabled")) && RuntimeState.bRuntimeEnabled;
 		if (!Style.bEnabled) RuntimeState.PseudoStates |= EWebToUEPseudoState::Disabled;
 		else RuntimeState.PseudoStates &= ~EWebToUEPseudoState::Disabled;
-		Node.Style = MoveTemp(Style);
+		Document.GetComputedStyle(Node) = MoveTemp(Style);
 		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
 		{
-			ResolveNode(*Child, Document, &Node.Style);
+			ResolveNode(*Child, Document, &Document.GetComputedStyle(Node));
 		}
 	}
 
@@ -1278,13 +1278,14 @@ namespace WebToUE::Private
 		return { FMath::Max(0.0f, Measured.X), FMath::Max(0.0f, Measured.Y) };
 	}
 
-	static YGNodeRef BuildYogaTree(FWebToUENode& WebNode, const FWebToUELayoutEngine::FMeasureNode& MeasureNode,
+	static YGNodeRef BuildYogaTree(FWebToUEDocument& Document, FWebToUENode& WebNode,
+		const FWebToUELayoutEngine::FMeasureNode& MeasureNode,
 		TArray<TUniquePtr<FYogaMeasureContext>>& MeasureContexts)
 	{
 		YGNodeRef Node = YGNodeNew();
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::YogaNodesBuilt);
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
-		const FWebToUEComputedStyle& S = WebNode.Style;
+		const FWebToUEComputedStyle& S = Document.GetComputedStyle(WebNode);
 		YGNodeStyleSetDisplay(Node, S.Display == EWebToUEDisplay::None ? YGDisplayNone : YGDisplayFlex);
 		YGNodeStyleSetPositionType(Node, S.Position == EWebToUEPosition::Absolute ? YGPositionTypeAbsolute : YGPositionTypeRelative);
 		YGNodeStyleSetOverflow(Node,
@@ -1334,38 +1335,46 @@ namespace WebToUE::Private
 		}
 		for (int32 Index = 0; Index < WebNode.Children.Num(); ++Index)
 		{
-			YGNodeInsertChild(Node, BuildYogaTree(*WebNode.Children[Index], MeasureNode, MeasureContexts), Index);
+			YGNodeInsertChild(Node,
+				BuildYogaTree(Document, *WebNode.Children[Index], MeasureNode, MeasureContexts), Index);
 		}
 		return Node;
 	}
 
-	static void CopyYogaLayout(FWebToUENode& WebNode, YGNodeConstRef Node, const FVector2f ParentPosition, int32& PaintOrder)
+	static void CopyYogaLayout(FWebToUEDocument& Document, FWebToUENode& WebNode, YGNodeConstRef Node,
+		const FVector2f ParentPosition, int32& PaintOrder)
 	{
-		WebNode.Position = ParentPosition + FVector2f(YGNodeLayoutGetLeft(Node), YGNodeLayoutGetTop(Node));
-		WebNode.Size = FVector2f(YGNodeLayoutGetWidth(Node), YGNodeLayoutGetHeight(Node));
-		WebNode.PaintOrder = PaintOrder++;
+		FWebToUERuntimeLayoutResult& LayoutResult = Document.GetLayoutResult(WebNode);
+		LayoutResult.Position = ParentPosition + FVector2f(YGNodeLayoutGetLeft(Node), YGNodeLayoutGetTop(Node));
+		LayoutResult.Size = FVector2f(YGNodeLayoutGetWidth(Node), YGNodeLayoutGetHeight(Node));
+		LayoutResult.PaintOrder = PaintOrder++;
 		for (int32 Index = 0; Index < WebNode.Children.Num(); ++Index)
 		{
-			CopyYogaLayout(*WebNode.Children[Index], YGNodeGetChild(const_cast<YGNodeRef>(Node), Index), WebNode.Position, PaintOrder);
+			CopyYogaLayout(Document, *WebNode.Children[Index],
+				YGNodeGetChild(const_cast<YGNodeRef>(Node), Index), LayoutResult.Position, PaintOrder);
 		}
 	}
 
 	static FVector2f UpdateScrollExtents(FWebToUEDocument& Document, FWebToUENode& Node)
 	{
 		FWebToUERuntimeNodeState& RuntimeState = Document.GetRuntimeNodeState(Node);
-		FVector2f ContentMax = Node.Position + Node.Size;
+		const FWebToUERuntimeLayoutResult& LayoutResult = Document.GetLayoutResult(Node);
+		FVector2f ContentMax = LayoutResult.Position + LayoutResult.Size;
 		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
 		{
 			const FVector2f ChildContentMax = UpdateScrollExtents(Document, *Child);
-			ContentMax.X = FMath::Max(ContentMax.X, Child->ClipsOverflow() ? Child->Position.X + Child->Size.X : ChildContentMax.X);
-			ContentMax.Y = FMath::Max(ContentMax.Y, Child->ClipsOverflow() ? Child->Position.Y + Child->Size.Y : ChildContentMax.Y);
+			const FWebToUERuntimeLayoutResult& ChildLayout = Document.GetLayoutResult(*Child);
+			ContentMax.X = FMath::Max(ContentMax.X,
+				Document.ClipsOverflow(*Child) ? ChildLayout.Position.X + ChildLayout.Size.X : ChildContentMax.X);
+			ContentMax.Y = FMath::Max(ContentMax.Y,
+				Document.ClipsOverflow(*Child) ? ChildLayout.Position.Y + ChildLayout.Size.Y : ChildContentMax.Y);
 		}
 
-		if (Node.IsScrollable())
+		if (Document.IsScrollable(Node))
 		{
 			RuntimeState.MaxScrollOffset = FVector2f(
-				FMath::Max(0.0f, ContentMax.X - (Node.Position.X + Node.Size.X)),
-				FMath::Max(0.0f, ContentMax.Y - (Node.Position.Y + Node.Size.Y)));
+				FMath::Max(0.0f, ContentMax.X - (LayoutResult.Position.X + LayoutResult.Size.X)),
+				FMath::Max(0.0f, ContentMax.Y - (LayoutResult.Position.Y + LayoutResult.Size.Y)));
 			RuntimeState.ScrollOffset.X = FMath::Clamp(RuntimeState.ScrollOffset.X, 0.0f, RuntimeState.MaxScrollOffset.X);
 			RuntimeState.ScrollOffset.Y = FMath::Clamp(RuntimeState.ScrollOffset.Y, 0.0f, RuntimeState.MaxScrollOffset.Y);
 		}
@@ -1375,7 +1384,7 @@ namespace WebToUE::Private
 			RuntimeState.MaxScrollOffset = FVector2f::ZeroVector;
 		}
 
-		return Node.ClipsOverflow() ? Node.Position + Node.Size : ContentMax;
+		return Document.ClipsOverflow(Node) ? LayoutResult.Position + LayoutResult.Size : ContentMax;
 	}
 }
 
@@ -1405,7 +1414,7 @@ TSharedRef<FWebToUEDocument> FWebToUECompiler::Compile(const FString& Html,
 	{
 		ParseCss(StyleSheet, *Document);
 	}
-	Document->InitializeRuntimeNodeStates();
+	Document->InitializeRuntimeData();
 	FWebToUEStyleResolver::Resolve(*Document);
 	return Document;
 }
@@ -1451,12 +1460,12 @@ void FWebToUELayoutEngine::Layout(FWebToUEDocument& Document, const FVector2f& V
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Layout);
 	if (!Document.Root) return;
 	TArray<TUniquePtr<WebToUE::Private::FYogaMeasureContext>> MeasureContexts;
-	YGNodeRef Root = WebToUE::Private::BuildYogaTree(*Document.Root, MeasureNode, MeasureContexts);
+	YGNodeRef Root = WebToUE::Private::BuildYogaTree(Document, *Document.Root, MeasureNode, MeasureContexts);
 	YGNodeStyleSetWidth(Root, ViewportSize.X);
 	YGNodeStyleSetHeight(Root, ViewportSize.Y);
 	YGNodeCalculateLayout(Root, ViewportSize.X, ViewportSize.Y, YGDirectionLTR);
 	int32 PaintOrder = 0;
-	WebToUE::Private::CopyYogaLayout(*Document.Root, Root, FVector2f::ZeroVector, PaintOrder);
+	WebToUE::Private::CopyYogaLayout(Document, *Document.Root, Root, FVector2f::ZeroVector, PaintOrder);
 	WebToUE::Private::UpdateScrollExtents(Document, *Document.Root);
 	YGNodeFreeRecursive(Root);
 }

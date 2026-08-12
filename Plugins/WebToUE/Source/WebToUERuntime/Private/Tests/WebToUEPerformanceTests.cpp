@@ -118,12 +118,12 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Two style refreshes each build body and button brushes"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(4));
 	TestEqual(TEXT("The representative workflow records all marked allocation events"),
-		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations), uint64(19));
-	TestEqual(TEXT("The runtime state array is the only known owned payload allocation"),
-		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadEvents), uint64(1));
-	TestEqual(TEXT("The runtime state payload is sized for every hydrated node"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations), uint64(20));
+	TestEqual(TEXT("Runtime state and render data each have a known owned payload"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadEvents), uint64(2));
+	TestEqual(TEXT("The separated runtime payloads are sized for every hydrated node"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadBytes),
-		uint64(3 * sizeof(FWebToUERuntimeNodeState)));
+		uint64(3 * (sizeof(FWebToUERuntimeNodeState) + sizeof(FWebToUERuntimeRenderData))));
 	TestTrue(TEXT("The log snapshot exposes stable workload fields"),
 		Snapshot.ToLogString().Contains(TEXT("workload={hydrated_nodes=3")));
 
@@ -181,9 +181,9 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Telemetry exposes selector evaluations"),
 		TelemetryMeasurements.FindRef(TEXT("workload.selector_evaluations")), 9.0);
 	TestEqual(TEXT("Telemetry exposes tracked allocation events"),
-		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocations")), 19.0);
+		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocations")), 20.0);
 	TestEqual(TEXT("Telemetry exposes tracked allocation payload events"),
-		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocation_payload_events")), 1.0);
+		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocation_payload_events")), 2.0);
 	TestEqual(TEXT("Telemetry exposes tracked allocation payload bytes"),
 		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocation_payload_bytes")),
 		static_cast<double>(Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadBytes)));

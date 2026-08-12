@@ -23,10 +23,11 @@ bool FWebToUEHtmlCssTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Button parsed"), Button);
 	if (Button)
 	{
-		TestEqual(TEXT("ID selector wins"), Button->Style.Color, FLinearColor::Red);
+		TestEqual(TEXT("ID selector wins"), Document->GetComputedStyle(*Button).Color, FLinearColor::Red);
 		Document->GetRuntimeNodeState(*Button).PseudoStates |= EWebToUEPseudoState::Hover;
 		FWebToUEStyleResolver::Resolve(*Document);
-		TestEqual(TEXT("Higher-specificity hover selector wins"), Button->Style.Color, FLinearColor(0, 1, 0, 1));
+		TestEqual(TEXT("Higher-specificity hover selector wins"),
+			Document->GetComputedStyle(*Button).Color, FLinearColor(0, 1, 0, 1));
 		TestTrue(TEXT("Entity decoded"), Button->Children.Num() > 0 && Button->Children[0]->Text == TEXT("Start & Play"));
 	}
 	return true;
@@ -47,8 +48,11 @@ bool FWebToUELayoutTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Row exists"), Row);
 	if (Row && Row->Children.Num() == 2)
 	{
-		TestEqual(TEXT("Percentage width resolved"), Row->Size.X, 200.0f);
-		TestEqual(TEXT("Gap applied"), Row->Children[1]->Position.X - Row->Children[0]->Position.X, 30.0f);
+		TestEqual(TEXT("Percentage width resolved"), Document->GetLayoutResult(*Row).Size.X, 200.0f);
+		TestEqual(TEXT("Gap applied"),
+			Document->GetLayoutResult(*Row->Children[1]).Position.X -
+				Document->GetLayoutResult(*Row->Children[0]).Position.X,
+			30.0f);
 	}
 	return true;
 }
@@ -85,7 +89,11 @@ bool FWebToUEConstrainedMeasureTest::RunTest(const FString& Parameters)
 		if (Node.Type == EWebToUENodeType::Text) TextNode = &Node;
 	});
 	TestNotNull(TEXT("Text node exists"), TextNode);
-	if (TextNode) TestEqual(TEXT("Measured wrapped height reaches Yoga layout"), TextNode->Size.Y, 40.0f);
+	if (TextNode)
+	{
+		TestEqual(TEXT("Measured wrapped height reaches Yoga layout"),
+			Document->GetLayoutResult(*TextNode).Size.Y, 40.0f);
+	}
 	return true;
 }
 
@@ -158,7 +166,8 @@ bool FWebToUEScrollLayoutTest::RunTest(const FString& Parameters)
 	if (Scroll)
 	{
 		FWebToUERuntimeNodeState& ScrollState = Document->GetRuntimeNodeState(*Scroll);
-		TestEqual(TEXT("Overflow auto resolves to a scroll container"), Scroll->Style.Overflow, EWebToUEOverflow::Auto);
+		TestEqual(TEXT("Overflow auto resolves to a scroll container"),
+			Document->GetComputedStyle(*Scroll).Overflow, EWebToUEOverflow::Auto);
 		TestTrue(TEXT("Overflowing children produce a vertical scroll range"),
 			FMath::IsNearlyEqual(ScrollState.MaxScrollOffset.Y, 140.0f, 0.1f));
 		ScrollState.ScrollOffset.Y = 1000.0f;
@@ -244,8 +253,10 @@ bool FWebToUECssDiagnosticsTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Panel exists"), Panel);
 	if (Panel)
 	{
-		TestEqual(TEXT("Later stylesheet still wins after source separation"), Panel->Style.Color, FLinearColor::Blue);
-		TestFalse(TEXT("Invalid inline height is ignored"), Panel->Style.Height.IsDefined());
+		TestEqual(TEXT("Later stylesheet still wins after source separation"),
+			Document->GetComputedStyle(*Panel).Color, FLinearColor::Blue);
+		TestFalse(TEXT("Invalid inline height is ignored"),
+			Document->GetComputedStyle(*Panel).Height.IsDefined());
 	}
 	return true;
 }

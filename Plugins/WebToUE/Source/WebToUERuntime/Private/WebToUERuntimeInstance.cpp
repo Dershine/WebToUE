@@ -82,7 +82,7 @@ bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 		RuntimeDocument->Rules.Add(MoveTemp(Rule));
 	}
 
-	RuntimeDocument->InitializeRuntimeNodeStates();
+	RuntimeDocument->InitializeRuntimeData();
 	FWebToUEStyleResolver::Resolve(*RuntimeDocument);
 	return true;
 }

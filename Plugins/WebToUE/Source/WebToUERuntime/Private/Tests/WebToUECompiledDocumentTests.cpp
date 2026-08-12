@@ -16,6 +16,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUERuntimeInstanceIsolationTest,
 	"WebToUE.Runtime.RuntimeInstanceIsolation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUERuntimeCacheSeparationTest,
+	"WebToUE.Runtime.RuntimeCacheSeparation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace WebToUE::CompiledDocument::Tests
 {
 	static void AddAttribute(FWebToUECompiledNode& Node, const TCHAR* Name, const TCHAR* Value)
@@ -212,6 +216,93 @@ bool FWebToUERuntimeInstanceIsolationTest::RunTest(const FString& Parameters)
 		SecondView->GetDisplayTextForTesting(SecondText).ToString(), FString(TEXT("Original")));
 	TestEqual(TEXT("Runtime state does not modify the compiled text"),
 		Document->GetCompiledNodes()[5].Text, FString(TEXT("Original")));
+	return true;
+}
+
+bool FWebToUERuntimeCacheSeparationTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::CompiledDocument::Tests;
+
+	UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
+	FWebToUECompiledDocumentData CompiledDocument;
+	CompiledDocument.RootNodeIndex = 0;
+
+	FWebToUECompiledNode& Body = CompiledDocument.Nodes.AddDefaulted_GetRef();
+	Body.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	Body.Tag = TEXT("body");
+	AddAttribute(Body, TEXT("id"), TEXT("root"));
+	FWebToUECompiledNode& Button = CompiledDocument.Nodes.AddDefaulted_GetRef();
+	Button.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	Button.Tag = TEXT("button");
+	Button.ParentIndex = 0;
+	AddAttribute(Button, TEXT("id"), TEXT("target"));
+
+	FWebToUECompiledRule& BaseRule = CompiledDocument.Rules.AddDefaulted_GetRef();
+	BaseRule.Specificity = 1;
+	BaseRule.Selector.AddDefaulted_GetRef().Type = TEXT("button");
+	AddDeclaration(BaseRule, TEXT("width"), TEXT("120px"));
+	AddDeclaration(BaseRule, TEXT("height"), TEXT("40px"));
+	AddDeclaration(BaseRule, TEXT("background-color"), TEXT("#0000ff"));
+	FWebToUECompiledRule& HoverRule = CompiledDocument.Rules.AddDefaulted_GetRef();
+	HoverRule.Specificity = 11;
+	FWebToUECompiledSelectorSegment& HoverSelector = HoverRule.Selector.AddDefaulted_GetRef();
+	HoverSelector.Type = TEXT("button");
+	HoverSelector.RequiredState = static_cast<uint8>(EWebToUEPseudoState::Hover);
+	AddDeclaration(HoverRule, TEXT("background-color"), TEXT("#ff0000"));
+
+	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
+	const FWebToUECompiledNode* InitialNodeStorage = Document->GetCompiledNodes().GetData();
+	const FWebToUECompiledRule* InitialRuleStorage = Document->GetCompiledRules().GetData();
+	const TSharedRef<SWebToUEView> FirstView = SNew(SWebToUEView);
+	const TSharedRef<SWebToUEView> SecondView = SNew(SWebToUEView);
+	FirstView->SetDocument(Document);
+	SecondView->SetDocument(Document);
+	FirstView->LayoutForTesting(FVector2f(320.0f, 180.0f));
+	SecondView->LayoutForTesting(FVector2f(640.0f, 360.0f));
+
+	FWebToUENode* FirstRoot = FirstView->FindRuntimeNodeByIdForTesting(TEXT("root"));
+	FWebToUENode* SecondRoot = SecondView->FindRuntimeNodeByIdForTesting(TEXT("root"));
+	FWebToUENode* FirstButton = FirstView->FindRuntimeNodeByIdForTesting(TEXT("target"));
+	FWebToUENode* SecondButton = SecondView->FindRuntimeNodeByIdForTesting(TEXT("target"));
+	TestNotNull(TEXT("The first instance hydrates the cache test root"), FirstRoot);
+	TestNotNull(TEXT("The second instance hydrates the cache test root"), SecondRoot);
+	TestNotNull(TEXT("The first instance hydrates the cache test button"), FirstButton);
+	TestNotNull(TEXT("The second instance hydrates the cache test button"), SecondButton);
+	if (!FirstRoot || !SecondRoot || !FirstButton || !SecondButton)
+	{
+		return false;
+	}
+
+	TestNotEqual(TEXT("Computed styles use per-view storage"),
+		&FirstView->GetComputedStyleForTesting(*FirstButton),
+		&SecondView->GetComputedStyleForTesting(*SecondButton));
+	TestNotEqual(TEXT("Layout results use per-view storage"),
+		&FirstView->GetLayoutResultForTesting(*FirstButton),
+		&SecondView->GetLayoutResultForTesting(*SecondButton));
+	TestEqual(TEXT("The first instance retains its viewport-sized root"),
+		FirstView->GetLayoutResultForTesting(*FirstRoot).Size, FVector2f(320.0f, 180.0f));
+	TestEqual(TEXT("The second instance retains its distinct viewport-sized root"),
+		SecondView->GetLayoutResultForTesting(*SecondRoot).Size, FVector2f(640.0f, 360.0f));
+	TestEqual(TEXT("Both instances start from the base computed style"),
+		FirstView->GetComputedStyleForTesting(*FirstButton).BackgroundColor, FLinearColor::Blue);
+	TestEqual(TEXT("The second instance starts from the base computed style"),
+		SecondView->GetComputedStyleForTesting(*SecondButton).BackgroundColor, FLinearColor::Blue);
+
+	FirstView->SetHoveredNodeForTesting(FirstButton);
+	TestEqual(TEXT("Hover recomputes the first instance style"),
+		FirstView->GetComputedStyleForTesting(*FirstButton).BackgroundColor, FLinearColor::Red);
+	TestEqual(TEXT("Computed style does not leak to the second instance"),
+		SecondView->GetComputedStyleForTesting(*SecondButton).BackgroundColor, FLinearColor::Blue);
+	TestEqual(TEXT("Style refresh does not overwrite the first layout result"),
+		FirstView->GetLayoutResultForTesting(*FirstRoot).Size, FVector2f(320.0f, 180.0f));
+	TestEqual(TEXT("Style refresh does not overwrite the second layout result"),
+		SecondView->GetLayoutResultForTesting(*SecondRoot).Size, FVector2f(640.0f, 360.0f));
+	TestEqual(TEXT("Runtime caches do not replace compiled node storage"),
+		Document->GetCompiledNodes().GetData(), InitialNodeStorage);
+	TestEqual(TEXT("Runtime caches do not replace compiled rule storage"),
+		Document->GetCompiledRules().GetData(), InitialRuleStorage);
+	TestEqual(TEXT("Runtime caches do not modify the compiled button id"),
+		Document->GetCompiledNodes()[1].Attributes[0].Value, FString(TEXT("target")));
 	return true;
 }
 

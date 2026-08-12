@@ -25,11 +25,6 @@ bool FWebToUENode::IsInteractive() const
 	return Tag == TEXT("button") || !GetAttribute(TEXT("data-ue-on-click")).IsEmpty();
 }
 
-bool FWebToUENode::IsDisplayed(const FWebToUERuntimeNodeState& State) const
-{
-	return Style.Display != EWebToUEDisplay::None && Style.bVisible && State.bRuntimeVisible;
-}
-
 bool FWebToUEDocument::HasErrors() const
 {
 	return Diagnostics.ContainsByPredicate([](const FWebToUEDiagnostic& Diagnostic)
@@ -38,27 +33,49 @@ bool FWebToUEDocument::HasErrors() const
 	});
 }
 
-void FWebToUEDocument::InitializeRuntimeNodeStates()
+void FWebToUEDocument::InitializeRuntimeData()
 {
 	RuntimeNodeStates.Reset();
+	RuntimeRenderData.Reset();
 	int32 NodeCount = 0;
 	ForEachNode([&NodeCount](FWebToUENode&) { ++NodeCount; });
 	if (NodeCount > 0)
 	{
 		RuntimeNodeStates.Reserve(NodeCount);
+		RuntimeRenderData.Reserve(NodeCount);
 		FWebToUEPerformanceCapture::RecordAllocationPayload(
 			static_cast<uint64>(NodeCount) * sizeof(FWebToUERuntimeNodeState));
+		FWebToUEPerformanceCapture::RecordAllocationPayload(
+			static_cast<uint64>(NodeCount) * sizeof(FWebToUERuntimeRenderData));
 	}
 	ForEachNode([this](FWebToUENode& Node)
 	{
-		AddRuntimeNodeState(Node);
+		AddRuntimeNodeData(Node);
 	});
 }
 
-FWebToUERuntimeNodeState& FWebToUEDocument::AddRuntimeNodeState(FWebToUENode& Node)
+void FWebToUEDocument::AddRuntimeNodeData(FWebToUENode& Node)
 {
-	Node.RuntimeStateIndex = RuntimeNodeStates.AddDefaulted();
-	return RuntimeNodeStates[Node.RuntimeStateIndex];
+	Node.RuntimeDataIndex = RuntimeNodeStates.AddDefaulted();
+	const int32 RenderDataIndex = RuntimeRenderData.AddDefaulted();
+	check(Node.RuntimeDataIndex == RenderDataIndex);
+}
+
+bool FWebToUEDocument::IsDisplayed(const FWebToUENode& Node) const
+{
+	const FWebToUEComputedStyle& Style = GetComputedStyle(Node);
+	return Style.Display != EWebToUEDisplay::None && Style.bVisible && GetRuntimeNodeState(Node).bRuntimeVisible;
+}
+
+bool FWebToUEDocument::ClipsOverflow(const FWebToUENode& Node) const
+{
+	return GetComputedStyle(Node).Overflow != EWebToUEOverflow::Visible;
+}
+
+bool FWebToUEDocument::IsScrollable(const FWebToUENode& Node) const
+{
+	const EWebToUEOverflow Overflow = GetComputedStyle(Node).Overflow;
+	return Overflow == EWebToUEOverflow::Auto || Overflow == EWebToUEOverflow::Scroll;
 }
 
 void FWebToUEDocument::ForEachNode(TFunctionRef<void(FWebToUENode&)> Visitor) const

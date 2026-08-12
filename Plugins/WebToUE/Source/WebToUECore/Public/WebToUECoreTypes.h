@@ -143,6 +143,19 @@ struct WEBTOUECORE_API FWebToUERuntimeNodeState
 	FVector2f MaxScrollOffset = FVector2f::ZeroVector;
 };
 
+struct WEBTOUECORE_API FWebToUERuntimeLayoutResult
+{
+	FVector2f Position = FVector2f::ZeroVector;
+	FVector2f Size = FVector2f::ZeroVector;
+	int32 PaintOrder = 0;
+};
+
+struct WEBTOUECORE_API FWebToUERuntimeRenderData
+{
+	FWebToUEComputedStyle ComputedStyle;
+	FWebToUERuntimeLayoutResult LayoutResult;
+};
+
 struct WEBTOUECORE_API FWebToUENode : public TSharedFromThis<FWebToUENode>
 {
 	EWebToUENodeType Type = EWebToUENodeType::Element;
@@ -156,18 +169,11 @@ struct WEBTOUECORE_API FWebToUENode : public TSharedFromThis<FWebToUENode>
 	TMap<FString, FString> Attributes;
 	TArray<TSharedPtr<FWebToUENode>> Children;
 	FWebToUENode* Parent = nullptr;
-	int32 RuntimeStateIndex = INDEX_NONE;
-	FWebToUEComputedStyle Style;
-	FVector2f Position = FVector2f::ZeroVector;
-	FVector2f Size = FVector2f::ZeroVector;
-	int32 PaintOrder = 0;
+	int32 RuntimeDataIndex = INDEX_NONE;
 
 	FString GetAttribute(const FString& Name) const;
 	bool HasClass(const FString& ClassName) const;
 	bool IsInteractive() const;
-	bool IsDisplayed(const FWebToUERuntimeNodeState& State) const;
-	bool ClipsOverflow() const { return Style.Overflow != EWebToUEOverflow::Visible; }
-	bool IsScrollable() const { return Style.Overflow == EWebToUEOverflow::Auto || Style.Overflow == EWebToUEOverflow::Scroll; }
 };
 
 enum class EWebToUECombinator : uint8
@@ -201,17 +207,41 @@ struct WEBTOUECORE_API FWebToUEDocument
 	TArray<FString> LinkedStylesheets;
 	TArray<FWebToUEDiagnostic> Diagnostics;
 	TArray<FWebToUERuntimeNodeState> RuntimeNodeStates;
+	TArray<FWebToUERuntimeRenderData> RuntimeRenderData;
 
 	bool HasErrors() const;
-	void InitializeRuntimeNodeStates();
-	FWebToUERuntimeNodeState& AddRuntimeNodeState(FWebToUENode& Node);
+	void InitializeRuntimeData();
+	void AddRuntimeNodeData(FWebToUENode& Node);
+	FORCEINLINE bool IsValidRuntimeNodeStateIndex(const FWebToUENode& Node) const
+	{
+		return RuntimeNodeStates.IsValidIndex(Node.RuntimeDataIndex);
+	}
 	FORCEINLINE FWebToUERuntimeNodeState& GetRuntimeNodeState(FWebToUENode& Node)
 	{
-		return RuntimeNodeStates[Node.RuntimeStateIndex];
+		return RuntimeNodeStates[Node.RuntimeDataIndex];
 	}
 	FORCEINLINE const FWebToUERuntimeNodeState& GetRuntimeNodeState(const FWebToUENode& Node) const
 	{
-		return RuntimeNodeStates[Node.RuntimeStateIndex];
+		return RuntimeNodeStates[Node.RuntimeDataIndex];
 	}
+	FORCEINLINE FWebToUEComputedStyle& GetComputedStyle(FWebToUENode& Node)
+	{
+		return RuntimeRenderData[Node.RuntimeDataIndex].ComputedStyle;
+	}
+	FORCEINLINE const FWebToUEComputedStyle& GetComputedStyle(const FWebToUENode& Node) const
+	{
+		return RuntimeRenderData[Node.RuntimeDataIndex].ComputedStyle;
+	}
+	FORCEINLINE FWebToUERuntimeLayoutResult& GetLayoutResult(FWebToUENode& Node)
+	{
+		return RuntimeRenderData[Node.RuntimeDataIndex].LayoutResult;
+	}
+	FORCEINLINE const FWebToUERuntimeLayoutResult& GetLayoutResult(const FWebToUENode& Node) const
+	{
+		return RuntimeRenderData[Node.RuntimeDataIndex].LayoutResult;
+	}
+	bool IsDisplayed(const FWebToUENode& Node) const;
+	bool ClipsOverflow(const FWebToUENode& Node) const;
+	bool IsScrollable(const FWebToUENode& Node) const;
 	void ForEachNode(TFunctionRef<void(FWebToUENode&)> Visitor) const;
 };

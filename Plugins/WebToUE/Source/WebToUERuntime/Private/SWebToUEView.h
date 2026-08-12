@@ -65,6 +65,8 @@ public:
 	void SetFocusedNodeForTesting(FWebToUENode* Node) { SetFocusedNode(Node); }
 	void SetBoundTextForTesting(FWebToUENode& Node, const FText& Text);
 	const FWebToUERuntimeNodeState& GetRuntimeStateForTesting(const FWebToUENode& Node) const;
+	const FWebToUEComputedStyle& GetComputedStyleForTesting(const FWebToUENode& Node) const;
+	const FWebToUERuntimeLayoutResult& GetLayoutResultForTesting(const FWebToUENode& Node) const;
 	FWebToUENode* FindRuntimeNodeByIdForTesting(const FString& Id) const;
 #endif
 
@@ -85,6 +87,10 @@ private:
 	const FWebToUEDocument* GetRuntimeDocument() const;
 	FWebToUERuntimeNodeState& GetRuntimeState(FWebToUENode& Node);
 	const FWebToUERuntimeNodeState& GetRuntimeState(const FWebToUENode& Node) const;
+	FWebToUEComputedStyle& GetComputedStyle(FWebToUENode& Node);
+	const FWebToUEComputedStyle& GetComputedStyle(const FWebToUENode& Node) const;
+	FWebToUERuntimeLayoutResult& GetLayoutResult(FWebToUENode& Node);
+	const FWebToUERuntimeLayoutResult& GetLayoutResult(const FWebToUENode& Node) const;
 	const FWebToUERuntimeNodeState* FindRuntimeState(const FWebToUENode& Node) const;
 	bool IsRichText(const FWebToUENode& Node) const;
 
@@ -93,9 +99,13 @@ private:
 	void RebuildPaintOrderCache();
 	TConstArrayView<FWebToUENode*> GetPaintOrder(const FWebToUENode& Parent) const;
 	FVector2f MeasureNode(const FWebToUENode& Node, const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
+	FVector2f MeasureNodeWithStyle(const FWebToUENode& Node, const FWebToUEComputedStyle& Style,
+		const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
 	FText GetDisplayText(const FWebToUENode& Node) const;
-	FSlateTextBlockLayout& PrepareTextLayout(const FWebToUENode& Node, float WrapWidth) const;
-	int32 PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, const FGeometry& Geometry,
+	FSlateTextBlockLayout& PrepareTextLayout(const FWebToUENode& Node,
+		const FWebToUEComputedStyle& Style, float WrapWidth) const;
+	int32 PaintNode(const FWebToUEDocument& RuntimeDocument, const FWebToUENode& Node,
+		const FPaintArgs& Args, const FGeometry& Geometry,
 		const FSlateRect& CullingRect, FSlateWindowElementList& Out, int32 LayerId,
 		const FWidgetStyle& WidgetStyle, float ParentOpacity, bool bParentEnabled,
 		const FVector2f& InheritedScrollOffset) const;
