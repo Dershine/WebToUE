@@ -3,26 +3,10 @@
 #include "CoreMinimal.h"
 #include "WebToUERuntimeInstance.h"
 #include "Widgets/SLeafWidget.h"
-#include "Widgets/Text/SlateTextBlockLayout.h"
-#include "WebToUECompiler.h"
 
-struct FSlateBrush;
-class FSlateStyleSet;
 class UWebToUEDocument;
 class UWebToUEView;
-
-struct FWebToUETextLayoutCache
-{
-	TSharedPtr<FSlateStyleSet> RichTextStyleSet;
-	TUniquePtr<FSlateTextBlockLayout> Layout;
-	bool bRichText = false;
-};
-
-struct FWebToUEPaintOrderRange
-{
-	int32 StartIndex = 0;
-	int32 Num = 0;
-};
+class FWebToUERuntimePresentation;
 
 class SWebToUEView final : public SLeafWidget
 {
@@ -31,6 +15,7 @@ public:
 		SLATE_ARGUMENT(TWeakObjectPtr<UWebToUEView>, Owner)
 	SLATE_END_ARGS()
 
+	SWebToUEView();
 	virtual ~SWebToUEView() override;
 	void Construct(const FArguments& InArgs);
 	void SetDocument(UWebToUEDocument* InDocument);
@@ -68,19 +53,18 @@ public:
 	const FWebToUEComputedStyle& GetComputedStyleForTesting(const FWebToUENode& Node) const;
 	const FWebToUERuntimeLayoutResult& GetLayoutResultForTesting(const FWebToUENode& Node) const;
 	FWebToUENode* FindRuntimeNodeByIdForTesting(const FString& Id) const;
+	const void* GetPresentationIdentityForTesting() const { return Presentation.Get(); }
+	int32 GetPresentationTextCacheCountForTesting() const;
+	int32 GetPresentationBrushCacheCountForTesting() const;
+	const void* GetPresentationTextCacheIdentityForTesting(const FWebToUENode& Node) const;
+	bool IsPresentationLayoutDirtyForTesting() const;
 #endif
 
 private:
 	TWeakObjectPtr<UWebToUEView> Owner;
 	TWeakObjectPtr<UWebToUEDocument> DocumentAsset;
 	TUniquePtr<FWebToUERuntimeInstance> RuntimeInstance;
-	mutable FVector2f LastViewportSize = FVector2f(-1.0f, -1.0f);
-	mutable bool bLayoutDirty = true;
-	mutable TMap<const FWebToUENode*, TSharedPtr<FSlateBrush>> Brushes;
-	mutable TMap<const FWebToUENode*, TUniquePtr<FWebToUETextLayoutCache>> TextLayouts;
-	mutable TArray<TStrongObjectPtr<UObject>> LoadedResources;
-	TArray<FWebToUENode*> PaintOrderNodes;
-	TMap<const FWebToUENode*, FWebToUEPaintOrderRange> PaintOrderRanges;
+	TUniquePtr<FWebToUERuntimePresentation> Presentation;
 	TSet<FString> LoggedBindingErrors;
 
 	FWebToUEDocument* GetRuntimeDocument();
@@ -91,24 +75,10 @@ private:
 	const FWebToUEComputedStyle& GetComputedStyle(const FWebToUENode& Node) const;
 	FWebToUERuntimeLayoutResult& GetLayoutResult(FWebToUENode& Node);
 	const FWebToUERuntimeLayoutResult& GetLayoutResult(const FWebToUENode& Node) const;
-	const FWebToUERuntimeNodeState* FindRuntimeState(const FWebToUENode& Node) const;
-	bool IsRichText(const FWebToUENode& Node) const;
 
 	void RebuildStylesAndBrushes();
-	void RebuildBrushes() const;
-	void RebuildPaintOrderCache();
 	TConstArrayView<FWebToUENode*> GetPaintOrder(const FWebToUENode& Parent) const;
-	FVector2f MeasureNode(const FWebToUENode& Node, const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
-	FVector2f MeasureNodeWithStyle(const FWebToUENode& Node, const FWebToUEComputedStyle& Style,
-		const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
 	FText GetDisplayText(const FWebToUENode& Node) const;
-	FSlateTextBlockLayout& PrepareTextLayout(const FWebToUENode& Node,
-		const FWebToUEComputedStyle& Style, float WrapWidth) const;
-	int32 PaintNode(const FWebToUEDocument& RuntimeDocument, const FWebToUENode& Node,
-		const FPaintArgs& Args, const FGeometry& Geometry,
-		const FSlateRect& CullingRect, FSlateWindowElementList& Out, int32 LayerId,
-		const FWidgetStyle& WidgetStyle, float ParentOpacity, bool bParentEnabled,
-		const FVector2f& InheritedScrollOffset) const;
 	FWebToUENode* HitTest(const FVector2f& LocalPosition) const;
 	bool ScrollAt(const FVector2f& LocalPosition, float WheelDelta);
 	void SetHoveredNode(FWebToUENode* Node);

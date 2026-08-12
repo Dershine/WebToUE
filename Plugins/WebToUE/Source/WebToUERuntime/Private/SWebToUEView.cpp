@@ -1,33 +1,20 @@
 #include "SWebToUEView.h"
 
-#include "Algo/StableSort.h"
 #include "WebToUECompiler.h"
 #include "WebToUEDocument.h"
 #include "WebToUEPerformance.h"
-#include "WebToUESettings.h"
 #include "WebToUEView.h"
 #include "WebToUERuntimeInstance.h"
+#include "WebToUERuntimePresentation.h"
 
-#include "Brushes/SlateRoundedBoxBrush.h"
-#include "Engine/Texture2D.h"
-#include "Fonts/FontMeasure.h"
-#include "Framework/Application/SlateApplication.h"
-#include "Framework/Text/PlainTextLayoutMarshaller.h"
-#include "Framework/Text/RichTextLayoutMarshaller.h"
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
-#include "Layout/Clipping.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
-#include "Rendering/DrawElements.h"
-#include "Rendering/SlateRenderer.h"
-#include "Styling/SlateTypes.h"
-#include "Styling/CoreStyle.h"
-#include "Styling/SlateStyle.h"
-#include "UObject/StrongObjectPtr.h"
 #include "UObject/UnrealType.h"
-#include "Widgets/Text/SlateTextBlockLayout.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWebToUE, Log, All);
+
+SWebToUEView::SWebToUEView() = default;
 
 SWebToUEView::~SWebToUEView() = default;
 
@@ -35,6 +22,7 @@ void SWebToUEView::Construct(const FArguments& InArgs)
 {
 	Owner = InArgs._Owner;
 	RuntimeInstance = MakeUnique<FWebToUERuntimeInstance>();
+	Presentation = MakeUnique<FWebToUERuntimePresentation>(*this, *RuntimeInstance);
 	SetCanTick(false);
 }
 
@@ -78,23 +66,6 @@ const FWebToUERuntimeLayoutResult& SWebToUEView::GetLayoutResult(const FWebToUEN
 	return RuntimeInstance->GetLayout(Node);
 }
 
-const FWebToUERuntimeNodeState* SWebToUEView::FindRuntimeState(const FWebToUENode& Node) const
-{
-	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
-	return RuntimeDocument && RuntimeDocument->IsValidRuntimeNodeStateIndex(Node)
-		? &RuntimeDocument->GetRuntimeNodeState(Node)
-		: nullptr;
-}
-
-bool SWebToUEView::IsRichText(const FWebToUENode& Node) const
-{
-	if (const FWebToUERuntimeNodeState* State = FindRuntimeState(Node))
-	{
-		return State->bHasRichTextOverride ? State->bRichTextOverride : Node.bRichText;
-	}
-	return Node.bRichText;
-}
-
 void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 {
 	SCOPE_CYCLE_COUNTER(STAT_WebToUE_Hydrate);
@@ -102,9 +73,7 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Hydrate);
 	DocumentAsset = InDocument;
 	RuntimeInstance->Reset();
-	TextLayouts.Reset();
-	PaintOrderNodes.Reset();
-	PaintOrderRanges.Reset();
+	Presentation->Reset();
 	if (InDocument)
 	{
 		RuntimeInstance->Hydrate(*InDocument);
@@ -117,156 +86,19 @@ FVector2D SWebToUEView::ComputeDesiredSize(float LayoutScaleMultiplier) const
 	return FVector2D(320.0, 180.0);
 }
 
-static ETextJustify::Type ToTextJustification(const FString& TextAlign)
-{
-	if (TextAlign == TEXT("center")) return ETextJustify::Center;
-	if (TextAlign == TEXT("right")) return ETextJustify::Right;
-	return ETextJustify::Left;
-}
-
-static FTextBlockStyle MakeTextBlockStyle(const FWebToUEComputedStyle& ComputedStyle)
-{
-	const UWebToUESettings* Settings = GetDefault<UWebToUESettings>();
-	FTextBlockStyle Style = FTextBlockStyle::GetDefault();
-	Style.SetFont(Settings->ResolveFont(
-		ComputedStyle.FontFamily, ComputedStyle.FontSize, ComputedStyle.FontWeight));
-	Style.SetColorAndOpacity(ComputedStyle.Color);
-	return Style;
-}
-
-static TSharedRef<FSlateStyleSet> MakeRichTextStyleSet(const FWebToUEComputedStyle& ComputedStyle)
-{
-	FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
-	TSharedRef<FSlateStyleSet> StyleSet = MakeShared<FSlateStyleSet>(TEXT("WebToUERichText"));
-	const FTextBlockStyle BaseStyle = MakeTextBlockStyle(ComputedStyle);
-	const UWebToUESettings* Settings = GetDefault<UWebToUESettings>();
-	const auto AddStyle = [&](const FName Name, bool bBold, bool bItalic, bool bUnderline)
-	{
-		FTextBlockStyle Style = BaseStyle;
-		if (bBold || bItalic)
-		{
-			Style.SetFont(Settings->ResolveFont(ComputedStyle.FontFamily, ComputedStyle.FontSize,
-				bBold ? TEXT("bold") : ComputedStyle.FontWeight));
-			if (bItalic) Style.SetTypefaceFontName(bBold ? TEXT("BoldItalic") : TEXT("Italic"));
-		}
-		if (bUnderline) Style.SetUnderlineBrush(*FCoreStyle::Get().GetBrush(TEXT("DefaultTextUnderline")));
-		StyleSet->Set(Name, Style);
-	};
-	AddStyle(TEXT("strong"), true, false, false);
-	AddStyle(TEXT("em"), false, true, false);
-	AddStyle(TEXT("underline"), false, false, true);
-	AddStyle(TEXT("strong_em"), true, true, false);
-	AddStyle(TEXT("strong_underline"), true, false, true);
-	AddStyle(TEXT("em_underline"), false, true, true);
-	AddStyle(TEXT("strong_em_underline"), true, true, true);
-	return StyleSet;
-}
-
 FText SWebToUEView::GetDisplayText(const FWebToUENode& Node) const
 {
-	if (const FWebToUERuntimeNodeState* State = FindRuntimeState(Node); State && State->bHasBoundText)
-	{
-		return State->BoundText;
-	}
-	return Node.bHasLocalizedText ? Node.LocalizedText : FText::FromString(Node.Text);
+	return Presentation->GetDisplayText(Node);
 }
-
-FSlateTextBlockLayout& SWebToUEView::PrepareTextLayout(const FWebToUENode& Node,
-	const FWebToUEComputedStyle& Style, float WrapWidth) const
-{
-	TUniquePtr<FWebToUETextLayoutCache>& Cache = TextLayouts.FindOrAdd(&Node);
-	const bool bRichText = IsRichText(Node);
-	if (!Cache || Cache->bRichText != bRichText)
-	{
-		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TextLayoutBuilds);
-		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
-		Cache = MakeUnique<FWebToUETextLayoutCache>();
-		Cache->bRichText = bRichText;
-		TSharedRef<ITextLayoutMarshaller> Marshaller = FPlainTextLayoutMarshaller::Create();
-		if (bRichText)
-		{
-			Cache->RichTextStyleSet = MakeRichTextStyleSet(Style);
-			Marshaller = FRichTextLayoutMarshaller::Create(TArray<TSharedRef<ITextDecorator>>(), Cache->RichTextStyleSet.Get());
-		}
-		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
-		Cache->Layout = MakeUnique<FSlateTextBlockLayout>(const_cast<SWebToUEView*>(this), FTextBlockStyle::GetDefault(),
-			TOptional<ETextShapingMethod>(), TOptional<ETextFlowDirection>(), FCreateSlateTextLayout(),
-			Marshaller, nullptr);
-	}
-	const float EffectiveWrapWidth = Style.WhiteSpace == TEXT("normal") && FMath::IsFinite(WrapWidth) && WrapWidth > 0.0f
-		? WrapWidth : 0.0f;
-	const FSlateTextBlockLayout::FWidgetDesiredSizeArgs DesiredSizeArgs(
-		GetDisplayText(Node), FText::GetEmpty(), EffectiveWrapWidth, false,
-		ETextWrappingPolicy::DefaultWrapping, ETextTransformPolicy::None, FMargin(), 1.0f, true,
-		ToTextJustification(Style.TextAlign));
-	FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TextLayoutComputes);
-	Cache->Layout->ComputeDesiredSize(DesiredSizeArgs, 1.0f, MakeTextBlockStyle(Style));
-	return *Cache->Layout;
-}
-
-FVector2f SWebToUEView::MeasureNode(const FWebToUENode& Node,
-	const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const
-{
-	return MeasureNodeWithStyle(Node, GetComputedStyle(Node), Constraints);
-}
-
-FVector2f SWebToUEView::MeasureNodeWithStyle(const FWebToUENode& Node,
-	const FWebToUEComputedStyle& Style, const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const
-{
-	if (Node.Type == EWebToUENodeType::Text)
-	{
-		if (FSlateApplication::IsInitialized())
-		{
-			const float WrapWidth = Constraints.WidthMode == FWebToUELayoutEngine::EMeasureMode::Undefined
-				? 0.0f : Constraints.Width;
-			return FVector2f(PrepareTextLayout(Node, Style, WrapWidth).GetDesiredSize());
-		}
-		const float CharacterWidth = Style.FontSize * 0.5f;
-		const float UnwrappedWidth = Node.Text.Len() * CharacterWidth;
-		const bool bCanWrap = Style.WhiteSpace == TEXT("normal") &&
-			Constraints.WidthMode != FWebToUELayoutEngine::EMeasureMode::Undefined && Constraints.Width > 0.0f;
-		const int32 LineCount = bCanWrap ? FMath::Max(1, FMath::CeilToInt(UnwrappedWidth / Constraints.Width)) : 1;
-		return FVector2f(bCanWrap ? FMath::Min(UnwrappedWidth, Constraints.Width) : UnwrappedWidth,
-			LineCount * Style.FontSize * 1.25f);
-	}
-	if (Node.Tag == TEXT("img"))
-	{
-		if (const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(&Node))
-		{
-			return (*Brush)->ImageSize;
-		}
-	}
-	return FVector2f::ZeroVector;
-}
-
 #if WITH_DEV_AUTOMATION_TESTS
 FVector2f SWebToUEView::MeasureTextForTesting(const FString& Text, float Width, bool bWrap) const
 {
-	FWebToUENode Node;
-	Node.Type = EWebToUENodeType::Text;
-	Node.Tag = TEXT("#text");
-	Node.Text = Text;
-	FWebToUEComputedStyle Style;
-	Style.WhiteSpace = bWrap ? TEXT("normal") : TEXT("nowrap");
-	FWebToUELayoutEngine::FMeasureConstraints Constraints;
-	Constraints.Width = Width;
-	Constraints.WidthMode = FWebToUELayoutEngine::EMeasureMode::AtMost;
-	return MeasureNodeWithStyle(Node, Style, Constraints);
+	return Presentation->MeasureTextForTesting(Text, Width, bWrap);
 }
 
 FVector2f SWebToUEView::MeasureRichTextForTesting(const FString& Markup, float Width, bool bWrap) const
 {
-	FWebToUENode Node;
-	Node.Type = EWebToUENodeType::Text;
-	Node.Tag = TEXT("#text");
-	Node.Text = Markup;
-	Node.bRichText = true;
-	FWebToUEComputedStyle Style;
-	Style.WhiteSpace = bWrap ? TEXT("normal") : TEXT("nowrap");
-	FWebToUELayoutEngine::FMeasureConstraints Constraints;
-	Constraints.Width = Width;
-	Constraints.WidthMode = FWebToUELayoutEngine::EMeasureMode::AtMost;
-	return MeasureNodeWithStyle(Node, Style, Constraints);
+	return Presentation->MeasureRichTextForTesting(Markup, Width, bWrap);
 }
 
 FText SWebToUEView::GetDisplayTextForTesting(const FWebToUENode& Node) const
@@ -282,25 +114,12 @@ void SWebToUEView::SetRuntimeDocumentForTesting(TSharedRef<FWebToUEDocument> InD
 
 void SWebToUEView::LayoutForTesting(const FVector2f& ViewportSize) const
 {
-	FWebToUEDocument* RuntimeDocument = const_cast<FWebToUEDocument*>(GetRuntimeDocument());
-	if (!RuntimeDocument || !RuntimeDocument->Root) return;
-	FWebToUELayoutEngine::Layout(*RuntimeDocument, ViewportSize,
-		[this](const FWebToUENode& Node, const FWebToUELayoutEngine::FMeasureConstraints& Constraints)
-		{
-			return MeasureNode(Node, Constraints);
-		});
-	LastViewportSize = ViewportSize;
-	bLayoutDirty = false;
+	Presentation->Layout(ViewportSize);
 }
 
 FVector2f SWebToUEView::GetVisualPositionForTesting(const FWebToUENode& Node) const
 {
-	FVector2f ScrollOffset = FVector2f::ZeroVector;
-	for (const FWebToUENode* Parent = Node.Parent; Parent; Parent = Parent->Parent)
-	{
-		ScrollOffset += GetRuntimeState(*Parent).ScrollOffset;
-	}
-	return GetLayoutResult(Node).Position - ScrollOffset;
+	return Presentation->GetVisualPosition(Node);
 }
 
 TConstArrayView<FWebToUENode*> SWebToUEView::GetPaintOrderForTesting(const FWebToUENode& Parent) const
@@ -345,6 +164,27 @@ FWebToUENode* SWebToUEView::FindRuntimeNodeByIdForTesting(const FString& Id) con
 	}
 	return Result;
 }
+
+int32 SWebToUEView::GetPresentationTextCacheCountForTesting() const
+{
+	return Presentation->GetTextLayoutCacheCountForTesting();
+}
+
+int32 SWebToUEView::GetPresentationBrushCacheCountForTesting() const
+{
+	return Presentation->GetBrushCacheCountForTesting();
+}
+
+const void* SWebToUEView::GetPresentationTextCacheIdentityForTesting(
+	const FWebToUENode& Node) const
+{
+	return Presentation->GetTextLayoutCacheIdentityForTesting(Node);
+}
+
+bool SWebToUEView::IsPresentationLayoutDirtyForTesting() const
+{
+	return Presentation->IsLayoutDirtyForTesting();
+}
 #endif
 
 int32 SWebToUEView::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
@@ -354,208 +194,24 @@ int32 SWebToUEView::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeo
 	SCOPE_CYCLE_COUNTER(STAT_WebToUE_PaintBuild);
 	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_PaintBuild);
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::PaintBuild);
-	FWebToUEDocument* RuntimeDocument = const_cast<FWebToUEDocument*>(GetRuntimeDocument());
-	if (!RuntimeDocument || !RuntimeDocument->Root)
-	{
-		return LayerId;
-	}
-	const FVector2f ViewportSize = FVector2f(AllottedGeometry.GetLocalSize());
-	if (bLayoutDirty || !ViewportSize.Equals(LastViewportSize, 0.1f))
-	{
-		FWebToUELayoutEngine::Layout(*RuntimeDocument, ViewportSize,
-			[this](const FWebToUENode& Node, const FWebToUELayoutEngine::FMeasureConstraints& Constraints)
-			{
-				return MeasureNode(Node, Constraints);
-			});
-		LastViewportSize = ViewportSize;
-		bLayoutDirty = false;
-	}
-	return PaintNode(*RuntimeDocument, *RuntimeDocument->Root, Args, AllottedGeometry,
-		MyCullingRect, OutDrawElements, LayerId,
-		InWidgetStyle, 1.0f, bParentEnabled, FVector2f::ZeroVector);
-}
-
-int32 SWebToUEView::PaintNode(const FWebToUEDocument& RuntimeDocument, const FWebToUENode& Node,
-	const FPaintArgs& Args, const FGeometry& Geometry,
-	const FSlateRect& CullingRect, FSlateWindowElementList& Out, int32 LayerId,
-	const FWidgetStyle& WidgetStyle, float ParentOpacity, bool bParentEnabled,
-	const FVector2f& InheritedScrollOffset) const
-{
-	if (!RuntimeDocument.IsDisplayed(Node)) return LayerId;
-	const FWebToUEComputedStyle& Style = RuntimeDocument.GetComputedStyle(Node);
-	const FWebToUERuntimeLayoutResult& LayoutResult = RuntimeDocument.GetLayoutResult(Node);
-	const float Opacity = ParentOpacity * Style.Opacity;
-	const float DrawOpacity = Opacity * WidgetStyle.GetColorAndOpacityTint().A;
-	const FVector2f Position = LayoutResult.Position - InheritedScrollOffset;
-	const FVector2f Size = LayoutResult.Size;
-	const FPaintGeometry PaintGeometry = Geometry.ToPaintGeometry(Size, FSlateLayoutTransform(Position));
-
-	if (Node.Type == EWebToUENodeType::Element)
-	{
-		if (const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(&Node))
-		{
-			if (Node.Tag == TEXT("img"))
-			{
-				FVector2f ImagePosition = Position;
-				FVector2f ImageSize = Size;
-				bool bClipImage = false;
-				const FVector2f IntrinsicSize = (*Brush)->ImageSize;
-				if (IntrinsicSize.X > 0.0f && IntrinsicSize.Y > 0.0f &&
-					(Style.ObjectFit == TEXT("contain") || Style.ObjectFit == TEXT("cover")))
-				{
-					const float ScaleX = Size.X / IntrinsicSize.X;
-					const float ScaleY = Size.Y / IntrinsicSize.Y;
-					const float Scale = Style.ObjectFit == TEXT("cover") ? FMath::Max(ScaleX, ScaleY) : FMath::Min(ScaleX, ScaleY);
-					ImageSize = IntrinsicSize * Scale;
-					ImagePosition += (Size - ImageSize) * 0.5f;
-					bClipImage = Style.ObjectFit == TEXT("cover");
-				}
-				if (bClipImage) Out.PushClip(FSlateClippingZone(Geometry.MakeChild(Size, FSlateLayoutTransform(Position))));
-				FSlateDrawElement::MakeBox(Out, LayerId++, Geometry.ToPaintGeometry(ImageSize, FSlateLayoutTransform(ImagePosition)), Brush->Get(),
-					bParentEnabled && Style.bEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect,
-					FLinearColor(1.0f, 1.0f, 1.0f, DrawOpacity));
-				if (bClipImage) Out.PopClip();
-			}
-			else if (Style.BackgroundColor.A > 0.0f || Style.BorderWidth > 0.0f)
-			{
-				FSlateDrawElement::MakeBox(Out, LayerId++, PaintGeometry, Brush->Get(),
-					bParentEnabled && Style.bEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect,
-					FLinearColor(1.0f, 1.0f, 1.0f, DrawOpacity));
-			}
-		}
-	}
-	else
-	{
-		FSlateTextBlockLayout& TextLayout = PrepareTextLayout(Node, Style, Size.X);
-		const FGeometry TextGeometry = Geometry.MakeChild(Size, FSlateLayoutTransform(Position));
-		FWidgetStyle TextWidgetStyle = WidgetStyle;
-		TextWidgetStyle.BlendColorAndOpacityTint(FLinearColor(1.0f, 1.0f, 1.0f, Opacity));
-		LayerId = TextLayout.OnPaint(Args, TextGeometry, CullingRect, Out, LayerId, TextWidgetStyle,
-			bParentEnabled && Style.bEnabled) + 1;
-	}
-
-	bool bPushedClip = false;
-	if (RuntimeDocument.ClipsOverflow(Node))
-	{
-		const FGeometry ClipGeometry = Geometry.MakeChild(Size, FSlateLayoutTransform(Position));
-		Out.PushClip(FSlateClippingZone(ClipGeometry));
-		bPushedClip = true;
-	}
-
-	for (const FWebToUENode* Child : GetPaintOrder(Node))
-	{
-		const FVector2f ChildScrollOffset = InheritedScrollOffset +
-			(RuntimeDocument.IsScrollable(Node)
-				? RuntimeDocument.GetRuntimeNodeState(Node).ScrollOffset : FVector2f::ZeroVector);
-		LayerId = PaintNode(RuntimeDocument, *Child, Args, Geometry, CullingRect, Out, LayerId, WidgetStyle,
-			Opacity, bParentEnabled && Style.bEnabled, ChildScrollOffset);
-	}
-	if (bPushedClip) Out.PopClip();
-	return LayerId;
-}
-
-void SWebToUEView::RebuildBrushes() const
-{
-	Brushes.Reset();
-	LoadedResources.Reset();
-	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
-	if (!RuntimeDocument) return;
-	RuntimeDocument->ForEachNode([this](FWebToUENode& Node)
-	{
-		const FWebToUEComputedStyle& Style = GetComputedStyle(Node);
-		if (Node.Tag == TEXT("img"))
-		{
-			const FString Source = Node.GetAttribute(TEXT("src"));
-			if (UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Source))
-			{
-				LoadedResources.Emplace(Texture);
-				FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
-				FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
-				TSharedPtr<FSlateBrush> Brush = MakeShared<FSlateBrush>();
-				Brush->DrawAs = ESlateBrushDrawType::Image;
-				Brush->SetResourceObject(Texture);
-				Brush->ImageSize = FVector2f(Texture->GetSizeX(), Texture->GetSizeY());
-				Brushes.Add(&Node, MoveTemp(Brush));
-			}
-		}
-		else if (Node.Type == EWebToUENodeType::Element)
-		{
-			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
-			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
-			Brushes.Add(&Node, MakeShared<FSlateRoundedBoxBrush>(Style.BackgroundColor,
-				Style.BorderRadius, Style.BorderColor, Style.BorderWidth, FVector2f(32.0f, 32.0f)));
-		}
-	});
+	return Presentation->Paint(Args, AllottedGeometry, MyCullingRect, OutDrawElements,
+		LayerId, InWidgetStyle, bParentEnabled);
 }
 
 void SWebToUEView::RebuildStylesAndBrushes()
 {
-	TextLayouts.Reset();
 	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (RuntimeDocument)
 	{
 		FWebToUEStyleResolver::Resolve(*RuntimeDocument);
-		RebuildPaintOrderCache();
-		RebuildBrushes();
 	}
-	else
-	{
-		PaintOrderNodes.Reset();
-		PaintOrderRanges.Reset();
-	}
-	bLayoutDirty = true;
+	Presentation->RebuildCaches();
 	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-}
-
-void SWebToUEView::RebuildPaintOrderCache()
-{
-	PaintOrderNodes.Reset();
-	PaintOrderRanges.Reset();
-	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
-	if (!RuntimeDocument)
-	{
-		return;
-	}
-
-	int32 ChildCount = 0;
-	int32 ParentCount = 0;
-	RuntimeDocument->ForEachNode([&ChildCount, &ParentCount](FWebToUENode& Node)
-	{
-		ChildCount += Node.Children.Num();
-		ParentCount += Node.Children.IsEmpty() ? 0 : 1;
-	});
-	PaintOrderNodes.Reserve(ChildCount);
-	PaintOrderRanges.Reserve(ParentCount);
-
-	RuntimeDocument->ForEachNode([this](FWebToUENode& Node)
-	{
-		if (Node.Children.IsEmpty())
-		{
-			return;
-		}
-
-		const int32 StartIndex = PaintOrderNodes.Num();
-		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
-		{
-			PaintOrderNodes.Add(Child.Get());
-		}
-		const int32 Num = PaintOrderNodes.Num() - StartIndex;
-		TArrayView<FWebToUENode*> Children(PaintOrderNodes.GetData() + StartIndex, Num);
-		Algo::StableSort(Children, [this](const FWebToUENode* A, const FWebToUENode* B)
-		{
-			return GetComputedStyle(*A).ZIndex < GetComputedStyle(*B).ZIndex;
-		});
-		PaintOrderRanges.Add(&Node, { StartIndex, Num });
-	});
 }
 
 TConstArrayView<FWebToUENode*> SWebToUEView::GetPaintOrder(const FWebToUENode& Parent) const
 {
-	if (const FWebToUEPaintOrderRange* Range = PaintOrderRanges.Find(&Parent))
-	{
-		return TConstArrayView<FWebToUENode*>(PaintOrderNodes.GetData() + Range->StartIndex, Range->Num);
-	}
-	return {};
+	return Presentation->GetPaintOrder(Parent);
 }
 
 static bool ReadPropertyAsText(UObject* Context, const FString& Field, FText& Out)
@@ -683,68 +339,8 @@ void SWebToUEView::ReportBindingErrorOnce(const FString& Field, const FString& M
 
 FWebToUENode* SWebToUEView::HitTest(const FVector2f& LocalPosition) const
 {
-	SCOPE_CYCLE_COUNTER(STAT_WebToUE_HitTest);
-	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_HitTest);
-	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::HitTest);
-	FWebToUENode* Best = nullptr;
-	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
-	if (!RuntimeDocument || !RuntimeDocument->Root) return nullptr;
-
-	TFunction<void(FWebToUENode&, const FVector2f&, const FVector2f&, const FVector2f&, bool)> Visit;
-	Visit = [&](FWebToUENode& Node, const FVector2f& InheritedScrollOffset,
-		const FVector2f& ClipMin, const FVector2f& ClipMax, bool bHasClip)
-	{
-		const FWebToUERuntimeNodeState& State = GetRuntimeState(Node);
-		if (!RuntimeDocument->IsDisplayed(Node)) return;
-		if (bHasClip && (LocalPosition.X < ClipMin.X || LocalPosition.Y < ClipMin.Y ||
-			LocalPosition.X > ClipMax.X || LocalPosition.Y > ClipMax.Y)) return;
-
-		const FWebToUEComputedStyle& Style = GetComputedStyle(Node);
-		const FWebToUERuntimeLayoutResult& LayoutResult = GetLayoutResult(Node);
-		const FVector2f Position = LayoutResult.Position - InheritedScrollOffset;
-		const FVector2f NodeMax = Position + LayoutResult.Size;
-		const bool bInsideNode = LocalPosition.X >= Position.X && LocalPosition.Y >= Position.Y &&
-			LocalPosition.X <= NodeMax.X && LocalPosition.Y <= NodeMax.Y;
-		if (bInsideNode && Node.IsInteractive() && Style.bEnabled)
-		{
-			if (!Best)
-			{
-				Best = &Node;
-			}
-			else
-			{
-				const FWebToUEComputedStyle& BestStyle = GetComputedStyle(*Best);
-				const FWebToUERuntimeLayoutResult& BestLayout = GetLayoutResult(*Best);
-				if (Style.ZIndex > BestStyle.ZIndex ||
-					(Style.ZIndex == BestStyle.ZIndex && LayoutResult.PaintOrder > BestLayout.PaintOrder))
-				{
-					Best = &Node;
-				}
-			}
-		}
-
-		FVector2f ChildClipMin = ClipMin;
-		FVector2f ChildClipMax = ClipMax;
-		bool bChildHasClip = bHasClip;
-		if (RuntimeDocument->ClipsOverflow(Node))
-		{
-			ChildClipMin = bHasClip ? FVector2f(FMath::Max(ClipMin.X, Position.X), FMath::Max(ClipMin.Y, Position.Y)) : Position;
-			ChildClipMax = bHasClip ? FVector2f(FMath::Min(ClipMax.X, NodeMax.X), FMath::Min(ClipMax.Y, NodeMax.Y)) : NodeMax;
-			bChildHasClip = true;
-			if (ChildClipMin.X > ChildClipMax.X || ChildClipMin.Y > ChildClipMax.Y) return;
-		}
-
-		const FVector2f ChildScrollOffset = InheritedScrollOffset +
-			(RuntimeDocument->IsScrollable(Node) ? State.ScrollOffset : FVector2f::ZeroVector);
-		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
-		{
-			Visit(*Child, ChildScrollOffset, ChildClipMin, ChildClipMax, bChildHasClip);
-		}
-	};
-	Visit(*RuntimeDocument->Root, FVector2f::ZeroVector, FVector2f::ZeroVector, FVector2f::ZeroVector, false);
-	return Best;
+	return Presentation->HitTest(LocalPosition);
 }
-
 bool SWebToUEView::ScrollAt(const FVector2f& LocalPosition, float WheelDelta)
 {
 	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
