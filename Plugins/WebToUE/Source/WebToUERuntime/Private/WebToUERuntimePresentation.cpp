@@ -140,15 +140,18 @@ void FWebToUERuntimePresentation::Reset()
 	LoadedResources.Reset();
 	PaintOrderNodes.Reset();
 	PaintOrderRanges.Reset();
+#if WITH_DEV_AUTOMATION_TESTS
+	ResourceLoadAttemptsForTesting = 0;
+#endif
 }
 
-void FWebToUERuntimePresentation::RebuildCaches()
+void FWebToUERuntimePresentation::RebuildCaches(bool bReloadResources)
 {
 	TextLayouts.Reset();
 	if (GetDocument())
 	{
 		RebuildPaintOrderCache();
-		RebuildBrushes();
+		RebuildBrushes(bReloadResources);
 	}
 	else
 	{
@@ -364,18 +367,25 @@ int32 FWebToUERuntimePresentation::PaintNode(const FWebToUEDocument& RuntimeDocu
 	return LayerId;
 }
 
-void FWebToUERuntimePresentation::RebuildBrushes() const
+void FWebToUERuntimePresentation::RebuildBrushes(bool bReloadResources) const
 {
-	Brushes.Reset();
-	LoadedResources.Reset();
+	if (bReloadResources)
+	{
+		Brushes.Reset();
+		LoadedResources.Reset();
+	}
 	const FWebToUEDocument* RuntimeDocument = GetDocument();
 	if (!RuntimeDocument) return;
-	RuntimeDocument->ForEachNode([this](FWebToUENode& Node)
+	RuntimeDocument->ForEachNode([this, bReloadResources](FWebToUENode& Node)
 	{
 		const FWebToUEComputedStyle& Style = GetStyle(Node);
 		if (Node.Tag == TEXT("img"))
 		{
+			if (!bReloadResources) return;
 			const FString Source = Node.GetAttribute(TEXT("src"));
+#if WITH_DEV_AUTOMATION_TESTS
+			++ResourceLoadAttemptsForTesting;
+#endif
 			if (UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Source))
 			{
 				LoadedResources.Emplace(Texture);
@@ -399,6 +409,15 @@ void FWebToUERuntimePresentation::RebuildBrushes() const
 		}
 	});
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+const void* FWebToUERuntimePresentation::GetBrushIdentityForTesting(
+	const FWebToUENode& Node) const
+{
+	const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(&Node);
+	return Brush ? Brush->Get() : nullptr;
+}
+#endif
 
 void FWebToUERuntimePresentation::RebuildPaintOrderCache()
 {

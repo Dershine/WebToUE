@@ -6,6 +6,89 @@
 
 namespace WebToUE::Private
 {
+	namespace
+	{
+		constexpr EWebToUEStyleImpact StyleImpact = EWebToUEStyleImpact::Style;
+		constexpr EWebToUEStyleImpact Paint = StyleImpact | EWebToUEStyleImpact::Paint;
+		constexpr EWebToUEStyleImpact PaintHitTest = Paint | EWebToUEStyleImpact::HitTest;
+		constexpr EWebToUEStyleImpact Layout = PaintHitTest | EWebToUEStyleImpact::Layout;
+		constexpr EWebToUEStyleImpact Measure = Layout | EWebToUEStyleImpact::Measure;
+		constexpr EWebToUEStyleImpact MeasureResource = Measure | EWebToUEStyleImpact::Resource;
+
+		// Property IDs are serialized and append-only, so this table deliberately follows their numeric order.
+		constexpr FWebToUECssPropertyMetadata PropertyMetadata[] = {
+			{ EWebToUECssProperty::Invalid, TEXT("invalid"), false, EWebToUEStyleImpact::None },
+			{ EWebToUECssProperty::Display, TEXT("display"), false, Layout },
+			{ EWebToUECssProperty::Position, TEXT("position"), false, Layout },
+			{ EWebToUECssProperty::Visibility, TEXT("visibility"), false, PaintHitTest },
+			{ EWebToUECssProperty::Overflow, TEXT("overflow"), false, Layout },
+			{ EWebToUECssProperty::Width, TEXT("width"), false, Layout },
+			{ EWebToUECssProperty::Height, TEXT("height"), false, Layout },
+			{ EWebToUECssProperty::MinWidth, TEXT("min-width"), false, Layout },
+			{ EWebToUECssProperty::MinHeight, TEXT("min-height"), false, Layout },
+			{ EWebToUECssProperty::MaxWidth, TEXT("max-width"), false, Layout },
+			{ EWebToUECssProperty::MaxHeight, TEXT("max-height"), false, Layout },
+			{ EWebToUECssProperty::Left, TEXT("left"), false, Layout },
+			{ EWebToUECssProperty::Top, TEXT("top"), false, Layout },
+			{ EWebToUECssProperty::Right, TEXT("right"), false, Layout },
+			{ EWebToUECssProperty::Bottom, TEXT("bottom"), false, Layout },
+			{ EWebToUECssProperty::Margin, TEXT("margin"), false, Layout },
+			{ EWebToUECssProperty::MarginLeft, TEXT("margin-left"), false, Layout },
+			{ EWebToUECssProperty::MarginTop, TEXT("margin-top"), false, Layout },
+			{ EWebToUECssProperty::MarginRight, TEXT("margin-right"), false, Layout },
+			{ EWebToUECssProperty::MarginBottom, TEXT("margin-bottom"), false, Layout },
+			{ EWebToUECssProperty::Padding, TEXT("padding"), false, Layout },
+			{ EWebToUECssProperty::PaddingLeft, TEXT("padding-left"), false, Layout },
+			{ EWebToUECssProperty::PaddingTop, TEXT("padding-top"), false, Layout },
+			{ EWebToUECssProperty::PaddingRight, TEXT("padding-right"), false, Layout },
+			{ EWebToUECssProperty::PaddingBottom, TEXT("padding-bottom"), false, Layout },
+			{ EWebToUECssProperty::Gap, TEXT("gap"), false, Layout },
+			{ EWebToUECssProperty::RowGap, TEXT("row-gap"), false, Layout },
+			{ EWebToUECssProperty::ColumnGap, TEXT("column-gap"), false, Layout },
+			{ EWebToUECssProperty::Flex, TEXT("flex"), false, Layout },
+			{ EWebToUECssProperty::FlexDirection, TEXT("flex-direction"), false, Layout },
+			{ EWebToUECssProperty::FlexWrap, TEXT("flex-wrap"), false, Layout },
+			{ EWebToUECssProperty::FlexGrow, TEXT("flex-grow"), false, Layout },
+			{ EWebToUECssProperty::FlexShrink, TEXT("flex-shrink"), false, Layout },
+			{ EWebToUECssProperty::FlexBasis, TEXT("flex-basis"), false, Layout },
+			{ EWebToUECssProperty::JustifyContent, TEXT("justify-content"), false, Layout },
+			{ EWebToUECssProperty::AlignItems, TEXT("align-items"), false, Layout },
+			{ EWebToUECssProperty::AlignSelf, TEXT("align-self"), false, Layout },
+			{ EWebToUECssProperty::Color, TEXT("color"), true, Paint },
+			{ EWebToUECssProperty::Background, TEXT("background"), false, Paint },
+			{ EWebToUECssProperty::BackgroundColor, TEXT("background-color"), false, Paint },
+			{ EWebToUECssProperty::Border, TEXT("border"), false, Layout },
+			{ EWebToUECssProperty::BorderColor, TEXT("border-color"), false, Paint },
+			{ EWebToUECssProperty::BorderWidth, TEXT("border-width"), false, Layout },
+			{ EWebToUECssProperty::BorderStyle, TEXT("border-style"), false, Layout },
+			{ EWebToUECssProperty::BorderRadius, TEXT("border-radius"), false, Paint },
+			{ EWebToUECssProperty::Opacity, TEXT("opacity"), false, Paint },
+			{ EWebToUECssProperty::FontFamily, TEXT("font-family"), true, MeasureResource },
+			{ EWebToUECssProperty::FontSize, TEXT("font-size"), true, Measure },
+			{ EWebToUECssProperty::FontWeight, TEXT("font-weight"), true, MeasureResource },
+			{ EWebToUECssProperty::TextAlign, TEXT("text-align"), true, Paint },
+			{ EWebToUECssProperty::WhiteSpace, TEXT("white-space"), true, Measure },
+			{ EWebToUECssProperty::ObjectFit, TEXT("object-fit"), false, Paint },
+			{ EWebToUECssProperty::ZIndex, TEXT("z-index"), false, PaintHitTest }
+		};
+
+		static_assert(UE_ARRAY_COUNT(PropertyMetadata) ==
+			static_cast<uint8>(EWebToUECssProperty::ZIndex) + 1,
+			"Every serialized CSS property ID must have exactly one metadata entry.");
+	}
+
+	const FWebToUECssPropertyMetadata& GetCssPropertyMetadata(EWebToUECssProperty Property)
+	{
+		const uint8 PropertyIndex = static_cast<uint8>(Property);
+		return PropertyIndex < UE_ARRAY_COUNT(PropertyMetadata)
+			? PropertyMetadata[PropertyIndex] : PropertyMetadata[0];
+	}
+
+	TConstArrayView<FWebToUECssPropertyMetadata> GetAllCssPropertyMetadata()
+	{
+		return MakeArrayView(PropertyMetadata).RightChop(1);
+	}
+
 	static bool TryParseLength(const FString& Raw, FWebToUELength& OutLength)
 	{
 		FString Value = Raw.TrimStartAndEnd().ToLower();
@@ -172,76 +255,26 @@ namespace WebToUE::Private
 
 	bool TryGetCssProperty(const FString& Name, EWebToUECssProperty& OutProperty)
 	{
-		static const TMap<FString, EWebToUECssProperty> Properties = {
-			{ TEXT("display"), EWebToUECssProperty::Display },
-			{ TEXT("position"), EWebToUECssProperty::Position },
-			{ TEXT("visibility"), EWebToUECssProperty::Visibility },
-			{ TEXT("overflow"), EWebToUECssProperty::Overflow },
-			{ TEXT("width"), EWebToUECssProperty::Width }, { TEXT("height"), EWebToUECssProperty::Height },
-			{ TEXT("min-width"), EWebToUECssProperty::MinWidth }, { TEXT("min-height"), EWebToUECssProperty::MinHeight },
-			{ TEXT("max-width"), EWebToUECssProperty::MaxWidth }, { TEXT("max-height"), EWebToUECssProperty::MaxHeight },
-			{ TEXT("left"), EWebToUECssProperty::Left }, { TEXT("top"), EWebToUECssProperty::Top },
-			{ TEXT("right"), EWebToUECssProperty::Right }, { TEXT("bottom"), EWebToUECssProperty::Bottom },
-			{ TEXT("margin"), EWebToUECssProperty::Margin }, { TEXT("margin-left"), EWebToUECssProperty::MarginLeft },
-			{ TEXT("margin-top"), EWebToUECssProperty::MarginTop }, { TEXT("margin-right"), EWebToUECssProperty::MarginRight },
-			{ TEXT("margin-bottom"), EWebToUECssProperty::MarginBottom },
-			{ TEXT("padding"), EWebToUECssProperty::Padding }, { TEXT("padding-left"), EWebToUECssProperty::PaddingLeft },
-			{ TEXT("padding-top"), EWebToUECssProperty::PaddingTop }, { TEXT("padding-right"), EWebToUECssProperty::PaddingRight },
-			{ TEXT("padding-bottom"), EWebToUECssProperty::PaddingBottom },
-			{ TEXT("gap"), EWebToUECssProperty::Gap }, { TEXT("row-gap"), EWebToUECssProperty::RowGap },
-			{ TEXT("column-gap"), EWebToUECssProperty::ColumnGap },
-			{ TEXT("flex"), EWebToUECssProperty::Flex }, { TEXT("flex-direction"), EWebToUECssProperty::FlexDirection },
-			{ TEXT("flex-wrap"), EWebToUECssProperty::FlexWrap }, { TEXT("flex-grow"), EWebToUECssProperty::FlexGrow },
-			{ TEXT("flex-shrink"), EWebToUECssProperty::FlexShrink }, { TEXT("flex-basis"), EWebToUECssProperty::FlexBasis },
-			{ TEXT("justify-content"), EWebToUECssProperty::JustifyContent },
-			{ TEXT("align-items"), EWebToUECssProperty::AlignItems }, { TEXT("align-self"), EWebToUECssProperty::AlignSelf },
-			{ TEXT("color"), EWebToUECssProperty::Color }, { TEXT("background"), EWebToUECssProperty::Background },
-			{ TEXT("background-color"), EWebToUECssProperty::BackgroundColor }, { TEXT("border"), EWebToUECssProperty::Border },
-			{ TEXT("border-color"), EWebToUECssProperty::BorderColor }, { TEXT("border-width"), EWebToUECssProperty::BorderWidth },
-			{ TEXT("border-style"), EWebToUECssProperty::BorderStyle }, { TEXT("border-radius"), EWebToUECssProperty::BorderRadius },
-			{ TEXT("opacity"), EWebToUECssProperty::Opacity }, { TEXT("font-family"), EWebToUECssProperty::FontFamily },
-			{ TEXT("font-size"), EWebToUECssProperty::FontSize }, { TEXT("font-weight"), EWebToUECssProperty::FontWeight },
-			{ TEXT("text-align"), EWebToUECssProperty::TextAlign }, { TEXT("white-space"), EWebToUECssProperty::WhiteSpace },
-			{ TEXT("object-fit"), EWebToUECssProperty::ObjectFit }, { TEXT("z-index"), EWebToUECssProperty::ZIndex }
-		};
-		const EWebToUECssProperty* Found = Properties.Find(Name.TrimStartAndEnd().ToLower());
-		if (!Found) return false;
-		OutProperty = *Found;
+		static const TMap<FString, EWebToUECssProperty> Properties = []
+		{
+			TMap<FString, EWebToUECssProperty> Result;
+			Result.Reserve(GetAllCssPropertyMetadata().Num());
+			for (const FWebToUECssPropertyMetadata& Metadata : GetAllCssPropertyMetadata())
+			{
+				Result.Add(Metadata.Name, Metadata.Property);
+			}
+			return Result;
+		}();
+		const FString CanonicalName = Name.TrimStartAndEnd().ToLower();
+		const EWebToUECssProperty* Property = Properties.Find(CanonicalName);
+		if (!Property) return false;
+		OutProperty = *Property;
 		return true;
 	}
 
 	const TCHAR* LexToString(EWebToUECssProperty Property)
 	{
-		switch (Property)
-		{
-		case EWebToUECssProperty::Display: return TEXT("display"); case EWebToUECssProperty::Position: return TEXT("position");
-		case EWebToUECssProperty::Visibility: return TEXT("visibility"); case EWebToUECssProperty::Overflow: return TEXT("overflow");
-		case EWebToUECssProperty::Width: return TEXT("width"); case EWebToUECssProperty::Height: return TEXT("height");
-		case EWebToUECssProperty::MinWidth: return TEXT("min-width"); case EWebToUECssProperty::MinHeight: return TEXT("min-height");
-		case EWebToUECssProperty::MaxWidth: return TEXT("max-width"); case EWebToUECssProperty::MaxHeight: return TEXT("max-height");
-		case EWebToUECssProperty::Left: return TEXT("left"); case EWebToUECssProperty::Top: return TEXT("top");
-		case EWebToUECssProperty::Right: return TEXT("right"); case EWebToUECssProperty::Bottom: return TEXT("bottom");
-		case EWebToUECssProperty::Margin: return TEXT("margin"); case EWebToUECssProperty::MarginLeft: return TEXT("margin-left");
-		case EWebToUECssProperty::MarginTop: return TEXT("margin-top"); case EWebToUECssProperty::MarginRight: return TEXT("margin-right");
-		case EWebToUECssProperty::MarginBottom: return TEXT("margin-bottom"); case EWebToUECssProperty::Padding: return TEXT("padding");
-		case EWebToUECssProperty::PaddingLeft: return TEXT("padding-left"); case EWebToUECssProperty::PaddingTop: return TEXT("padding-top");
-		case EWebToUECssProperty::PaddingRight: return TEXT("padding-right"); case EWebToUECssProperty::PaddingBottom: return TEXT("padding-bottom");
-		case EWebToUECssProperty::Gap: return TEXT("gap"); case EWebToUECssProperty::RowGap: return TEXT("row-gap");
-		case EWebToUECssProperty::ColumnGap: return TEXT("column-gap"); case EWebToUECssProperty::Flex: return TEXT("flex");
-		case EWebToUECssProperty::FlexDirection: return TEXT("flex-direction"); case EWebToUECssProperty::FlexWrap: return TEXT("flex-wrap");
-		case EWebToUECssProperty::FlexGrow: return TEXT("flex-grow"); case EWebToUECssProperty::FlexShrink: return TEXT("flex-shrink");
-		case EWebToUECssProperty::FlexBasis: return TEXT("flex-basis"); case EWebToUECssProperty::JustifyContent: return TEXT("justify-content");
-		case EWebToUECssProperty::AlignItems: return TEXT("align-items"); case EWebToUECssProperty::AlignSelf: return TEXT("align-self");
-		case EWebToUECssProperty::Color: return TEXT("color"); case EWebToUECssProperty::Background: return TEXT("background");
-		case EWebToUECssProperty::BackgroundColor: return TEXT("background-color"); case EWebToUECssProperty::Border: return TEXT("border");
-		case EWebToUECssProperty::BorderColor: return TEXT("border-color"); case EWebToUECssProperty::BorderWidth: return TEXT("border-width");
-		case EWebToUECssProperty::BorderStyle: return TEXT("border-style"); case EWebToUECssProperty::BorderRadius: return TEXT("border-radius");
-		case EWebToUECssProperty::Opacity: return TEXT("opacity"); case EWebToUECssProperty::FontFamily: return TEXT("font-family");
-		case EWebToUECssProperty::FontSize: return TEXT("font-size"); case EWebToUECssProperty::FontWeight: return TEXT("font-weight");
-		case EWebToUECssProperty::TextAlign: return TEXT("text-align"); case EWebToUECssProperty::WhiteSpace: return TEXT("white-space");
-		case EWebToUECssProperty::ObjectFit: return TEXT("object-fit"); case EWebToUECssProperty::ZIndex: return TEXT("z-index");
-		default: return TEXT("invalid");
-		}
+		return GetCssPropertyMetadata(Property).Name;
 	}
 
 	static bool TryKeywordValue(const FString& Raw,
@@ -441,6 +474,25 @@ namespace WebToUE::Private
 		case EWebToUECssProperty::ObjectFit: Style.ObjectFit = KeywordToString(Value.Keyword); break;
 		case EWebToUECssProperty::ZIndex: Style.ZIndex = Value.Integer; break;
 		default: break;
+		}
+	}
+
+	void ApplyInheritedProperties(const FWebToUEComputedStyle& ParentStyle,
+		FWebToUEComputedStyle& Style)
+	{
+		for (const FWebToUECssPropertyMetadata& Metadata : GetAllCssPropertyMetadata())
+		{
+			if (!Metadata.bInherited) continue;
+			switch (Metadata.Property)
+			{
+			case EWebToUECssProperty::Color: Style.Color = ParentStyle.Color; break;
+			case EWebToUECssProperty::FontFamily: Style.FontFamily = ParentStyle.FontFamily; break;
+			case EWebToUECssProperty::FontSize: Style.FontSize = ParentStyle.FontSize; break;
+			case EWebToUECssProperty::FontWeight: Style.FontWeight = ParentStyle.FontWeight; break;
+			case EWebToUECssProperty::TextAlign: Style.TextAlign = ParentStyle.TextAlign; break;
+			case EWebToUECssProperty::WhiteSpace: Style.WhiteSpace = ParentStyle.WhiteSpace; break;
+			default: checkNoEntry(); break;
+			}
 		}
 	}
 

@@ -78,6 +78,7 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	{
 		RuntimeInstance->Hydrate(*InDocument);
 	}
+	CachePseudoStateImpacts();
 	RebuildStylesAndBrushes();
 }
 
@@ -109,6 +110,7 @@ FText SWebToUEView::GetDisplayTextForTesting(const FWebToUENode& Node) const
 void SWebToUEView::SetRuntimeDocumentForTesting(TSharedRef<FWebToUEDocument> InDocument)
 {
 	RuntimeInstance->AdoptDocumentForTesting(MoveTemp(InDocument));
+	CachePseudoStateImpacts();
 	RebuildStylesAndBrushes();
 }
 
@@ -175,6 +177,17 @@ int32 SWebToUEView::GetPresentationBrushCacheCountForTesting() const
 	return Presentation->GetBrushCacheCountForTesting();
 }
 
+const void* SWebToUEView::GetPresentationBrushIdentityForTesting(
+	const FWebToUENode& Node) const
+{
+	return Presentation->GetBrushIdentityForTesting(Node);
+}
+
+uint64 SWebToUEView::GetPresentationResourceLoadAttemptsForTesting() const
+{
+	return Presentation->GetResourceLoadAttemptsForTesting();
+}
+
 const void* SWebToUEView::GetPresentationTextCacheIdentityForTesting(
 	const FWebToUENode& Node) const
 {
@@ -198,15 +211,36 @@ int32 SWebToUEView::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeo
 		LayerId, InWidgetStyle, bParentEnabled);
 }
 
-void SWebToUEView::RebuildStylesAndBrushes()
+void SWebToUEView::RebuildStylesAndBrushes(EWebToUEStyleImpact Impacts)
 {
 	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (RuntimeDocument)
 	{
 		FWebToUEStyleResolver::Resolve(*RuntimeDocument);
 	}
-	Presentation->RebuildCaches();
+	Presentation->RebuildCaches(EnumHasAnyFlags(Impacts, EWebToUEStyleImpact::Resource));
 	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+}
+
+void SWebToUEView::CachePseudoStateImpacts()
+{
+	PseudoStateImpacts = EWebToUEStyleImpact::Style;
+	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
+	if (!RuntimeDocument) return;
+	for (const FWebToUEStyleRule& Rule : RuntimeDocument->Rules)
+	{
+		const bool bHasPseudoState = Rule.Selector.ContainsByPredicate(
+			[](const FWebToUESelectorSegment& Segment)
+			{
+				return Segment.RequiredState != EWebToUEPseudoState::None;
+			});
+		if (!bHasPseudoState) continue;
+		for (const FWebToUEStyleDeclaration& Declaration : Rule.Declarations)
+		{
+			PseudoStateImpacts |=
+				WebToUE::Private::GetCssPropertyMetadata(Declaration.Property).Impacts;
+		}
+	}
 }
 
 TConstArrayView<FWebToUENode*> SWebToUEView::GetPaintOrder(const FWebToUENode& Parent) const
@@ -440,7 +474,7 @@ void SWebToUEView::SetHoveredNode(FWebToUENode* Node)
 	RuntimeInstance->SetHoveredNode(Node);
 	ClearStateFlag(EWebToUEPseudoState::Hover);
 	SetStatePath(Node, EWebToUEPseudoState::Hover);
-	RebuildStylesAndBrushes();
+	RebuildStylesAndBrushes(PseudoStateImpacts);
 }
 
 void SWebToUEView::SetPressedNode(FWebToUENode* Node)
@@ -449,7 +483,7 @@ void SWebToUEView::SetPressedNode(FWebToUENode* Node)
 	RuntimeInstance->SetPressedNode(Node);
 	ClearStateFlag(EWebToUEPseudoState::Active);
 	if (Node) GetRuntimeState(*Node).PseudoStates |= EWebToUEPseudoState::Active;
-	RebuildStylesAndBrushes();
+	RebuildStylesAndBrushes(PseudoStateImpacts);
 }
 
 void SWebToUEView::SetFocusedNode(FWebToUENode* Node)
@@ -458,7 +492,7 @@ void SWebToUEView::SetFocusedNode(FWebToUENode* Node)
 	RuntimeInstance->SetFocusedNode(Node);
 	ClearStateFlag(EWebToUEPseudoState::Focus);
 	if (Node) GetRuntimeState(*Node).PseudoStates |= EWebToUEPseudoState::Focus;
-	RebuildStylesAndBrushes();
+	RebuildStylesAndBrushes(PseudoStateImpacts);
 }
 
 FReply SWebToUEView::OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)

@@ -43,12 +43,7 @@ namespace WebToUE::Private
 		}
 		if (ParentStyle)
 		{
-			Style.Color = ParentStyle->Color;
-			Style.FontFamily = ParentStyle->FontFamily;
-			Style.FontSize = ParentStyle->FontSize;
-			Style.FontWeight = ParentStyle->FontWeight;
-			Style.TextAlign = ParentStyle->TextAlign;
-			Style.WhiteSpace = ParentStyle->WhiteSpace;
+			ApplyInheritedProperties(*ParentStyle, Style);
 		}
 
 		TArray<const FWebToUEStyleRule*> Matches;

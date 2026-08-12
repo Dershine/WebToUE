@@ -13,6 +13,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEOrderedDeclarationsTest, "WebToUE.Core.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETypedPropertiesTest, "WebToUE.Core.TypedProperties",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPropertyMetadataTest, "WebToUE.Core.PropertyMetadata",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 bool FWebToUEHtmlCssTest::RunTest(const FString& Parameters)
 {
 	const FString Html = TEXT(R"(
@@ -191,6 +194,119 @@ bool FWebToUETypedPropertiesTest::RunTest(const FString& Parameters)
 		WebToUE::Private::TryParseCssDeclaration(TEXT("made-up-property"), TEXT("1px"), InvalidDeclaration));
 	TestFalse(TEXT("Invalid values do not produce typed declarations"),
 		WebToUE::Private::TryParseCssDeclaration(TEXT("width"), TEXT("invalid"), InvalidDeclaration));
+	return true;
+}
+
+bool FWebToUEPropertyMetadataTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::Private;
+	const TConstArrayView<FWebToUECssPropertyMetadata> Metadata = GetAllCssPropertyMetadata();
+	TestEqual(TEXT("All 52 supported properties have metadata"), Metadata.Num(), 52);
+	TSet<FString> Names;
+	TSet<EWebToUECssProperty> InheritedProperties;
+	for (int32 Index = 0; Index < Metadata.Num(); ++Index)
+	{
+		const FWebToUECssPropertyMetadata& Entry = Metadata[Index];
+		const EWebToUECssProperty ExpectedProperty =
+			static_cast<EWebToUECssProperty>(Index + 1);
+		TestEqual(*FString::Printf(TEXT("Metadata entry %d follows its serialized property ID"), Index),
+			Entry.Property, ExpectedProperty);
+		TestEqual(*FString::Printf(TEXT("Property %d is directly indexable"), Index),
+			&GetCssPropertyMetadata(Entry.Property), &Entry);
+		TestFalse(*FString::Printf(TEXT("%s has one canonical name"), Entry.Name),
+			Names.Contains(Entry.Name));
+		Names.Add(Entry.Name);
+		TestTrue(*FString::Printf(TEXT("%s always invalidates computed style"), Entry.Name),
+			EnumHasAnyFlags(Entry.Impacts, EWebToUEStyleImpact::Style));
+		TestEqual(*FString::Printf(TEXT("%s uses metadata for canonical spelling"), Entry.Name),
+			FString(LexToString(Entry.Property)), FString(Entry.Name));
+		EWebToUECssProperty RoundTrippedProperty = EWebToUECssProperty::Invalid;
+		TestTrue(*FString::Printf(TEXT("%s resolves from its canonical spelling"), Entry.Name),
+			TryGetCssProperty(Entry.Name, RoundTrippedProperty));
+		TestEqual(*FString::Printf(TEXT("%s round-trips its property ID"), Entry.Name),
+			RoundTrippedProperty, Entry.Property);
+		if (Entry.bInherited) InheritedProperties.Add(Entry.Property);
+	}
+
+	const TSet<EWebToUECssProperty> ExpectedInherited = {
+		EWebToUECssProperty::Color,
+		EWebToUECssProperty::FontFamily,
+		EWebToUECssProperty::FontSize,
+		EWebToUECssProperty::FontWeight,
+		EWebToUECssProperty::TextAlign,
+		EWebToUECssProperty::WhiteSpace
+	};
+	bool bInheritedPropertiesMatch = InheritedProperties.Num() == ExpectedInherited.Num();
+	for (const EWebToUECssProperty Property : ExpectedInherited)
+	{
+		bInheritedPropertiesMatch &= InheritedProperties.Contains(Property);
+	}
+	TestTrue(TEXT("Only the six supported inherited properties are marked inherited"),
+		bInheritedPropertiesMatch);
+
+	const EWebToUEStyleImpact Paint =
+		EWebToUEStyleImpact::Style | EWebToUEStyleImpact::Paint;
+	const EWebToUEStyleImpact PaintHitTest = Paint | EWebToUEStyleImpact::HitTest;
+	const EWebToUEStyleImpact Layout = PaintHitTest | EWebToUEStyleImpact::Layout;
+	const EWebToUEStyleImpact Measure = Layout | EWebToUEStyleImpact::Measure;
+	const EWebToUEStyleImpact MeasureResource = Measure | EWebToUEStyleImpact::Resource;
+	struct FImpactGroup
+	{
+		EWebToUEStyleImpact Impact;
+		TArray<EWebToUECssProperty> Properties;
+	};
+	const FImpactGroup ImpactGroups[] = {
+		{ Layout, TArray<EWebToUECssProperty>{
+			EWebToUECssProperty::Display, EWebToUECssProperty::Position,
+			EWebToUECssProperty::Overflow, EWebToUECssProperty::Width,
+			EWebToUECssProperty::Height, EWebToUECssProperty::MinWidth,
+			EWebToUECssProperty::MinHeight, EWebToUECssProperty::MaxWidth,
+			EWebToUECssProperty::MaxHeight, EWebToUECssProperty::Left,
+			EWebToUECssProperty::Top, EWebToUECssProperty::Right,
+			EWebToUECssProperty::Bottom, EWebToUECssProperty::Margin,
+			EWebToUECssProperty::MarginLeft, EWebToUECssProperty::MarginTop,
+			EWebToUECssProperty::MarginRight, EWebToUECssProperty::MarginBottom,
+			EWebToUECssProperty::Padding, EWebToUECssProperty::PaddingLeft,
+			EWebToUECssProperty::PaddingTop, EWebToUECssProperty::PaddingRight,
+			EWebToUECssProperty::PaddingBottom, EWebToUECssProperty::Gap,
+			EWebToUECssProperty::RowGap, EWebToUECssProperty::ColumnGap,
+			EWebToUECssProperty::Flex, EWebToUECssProperty::FlexDirection,
+			EWebToUECssProperty::FlexWrap, EWebToUECssProperty::FlexGrow,
+			EWebToUECssProperty::FlexShrink, EWebToUECssProperty::FlexBasis,
+			EWebToUECssProperty::JustifyContent, EWebToUECssProperty::AlignItems,
+			EWebToUECssProperty::AlignSelf, EWebToUECssProperty::Border,
+			EWebToUECssProperty::BorderWidth, EWebToUECssProperty::BorderStyle } },
+		{ PaintHitTest, TArray<EWebToUECssProperty>{
+			EWebToUECssProperty::Visibility, EWebToUECssProperty::ZIndex } },
+		{ Paint, TArray<EWebToUECssProperty>{
+			EWebToUECssProperty::Color, EWebToUECssProperty::Background,
+			EWebToUECssProperty::BackgroundColor, EWebToUECssProperty::BorderColor,
+			EWebToUECssProperty::BorderRadius, EWebToUECssProperty::Opacity,
+			EWebToUECssProperty::TextAlign, EWebToUECssProperty::ObjectFit } },
+		{ Measure, TArray<EWebToUECssProperty>{
+			EWebToUECssProperty::FontSize, EWebToUECssProperty::WhiteSpace } },
+		{ MeasureResource, TArray<EWebToUECssProperty>{
+			EWebToUECssProperty::FontFamily, EWebToUECssProperty::FontWeight } }
+	};
+	int32 ClassifiedPropertyCount = 0;
+	TSet<EWebToUECssProperty> ClassifiedProperties;
+	for (const FImpactGroup& Group : ImpactGroups)
+	{
+		for (const EWebToUECssProperty Property : Group.Properties)
+		{
+			const FWebToUECssPropertyMetadata& Entry = GetCssPropertyMetadata(Property);
+			TestFalse(*FString::Printf(TEXT("%s is classified exactly once"), Entry.Name),
+				ClassifiedProperties.Contains(Property));
+			ClassifiedProperties.Add(Property);
+			TestEqual(*FString::Printf(TEXT("%s has its exact invalidation impact"), Entry.Name),
+				Entry.Impacts, Group.Impact);
+			++ClassifiedPropertyCount;
+		}
+	}
+	TestEqual(TEXT("Every supported property has one exact impact classification"),
+		ClassifiedPropertyCount, Metadata.Num());
+	TestEqual(TEXT("The impact groups cover every unique supported property"),
+		ClassifiedProperties.Num(), Metadata.Num());
 	return true;
 }
 

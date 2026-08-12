@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "WebToUERuntimeInstance.h"
+#include "WebToUEStyleProperties.h"
 #include "Widgets/SLeafWidget.h"
 
 class UWebToUEDocument;
@@ -56,6 +57,8 @@ public:
 	const void* GetPresentationIdentityForTesting() const { return Presentation.Get(); }
 	int32 GetPresentationTextCacheCountForTesting() const;
 	int32 GetPresentationBrushCacheCountForTesting() const;
+	const void* GetPresentationBrushIdentityForTesting(const FWebToUENode& Node) const;
+	uint64 GetPresentationResourceLoadAttemptsForTesting() const;
 	const void* GetPresentationTextCacheIdentityForTesting(const FWebToUENode& Node) const;
 	bool IsPresentationLayoutDirtyForTesting() const;
 #endif
@@ -66,6 +69,7 @@ private:
 	TUniquePtr<FWebToUERuntimeInstance> RuntimeInstance;
 	TUniquePtr<FWebToUERuntimePresentation> Presentation;
 	TSet<FString> LoggedBindingErrors;
+	EWebToUEStyleImpact PseudoStateImpacts = EWebToUEStyleImpact::Style;
 
 	FWebToUEDocument* GetRuntimeDocument();
 	const FWebToUEDocument* GetRuntimeDocument() const;
@@ -76,7 +80,9 @@ private:
 	FWebToUERuntimeLayoutResult& GetLayoutResult(FWebToUENode& Node);
 	const FWebToUERuntimeLayoutResult& GetLayoutResult(const FWebToUENode& Node) const;
 
-	void RebuildStylesAndBrushes();
+	void RebuildStylesAndBrushes(
+		EWebToUEStyleImpact Impacts = EWebToUEStyleImpact::Resource);
+	void CachePseudoStateImpacts();
 	TConstArrayView<FWebToUENode*> GetPaintOrder(const FWebToUENode& Parent) const;
 	FText GetDisplayText(const FWebToUENode& Node) const;
 	FWebToUENode* HitTest(const FVector2f& LocalPosition) const;

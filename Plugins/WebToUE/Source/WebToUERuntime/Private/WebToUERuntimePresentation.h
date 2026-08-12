@@ -35,7 +35,7 @@ public:
 	~FWebToUERuntimePresentation();
 
 	void Reset();
-	void RebuildCaches();
+	void RebuildCaches(bool bReloadResources);
 	void Layout(const FVector2f& ViewportSize) const;
 	int32 Paint(const FPaintArgs& Args, const FGeometry& Geometry,
 		const FSlateRect& CullingRect, FSlateWindowElementList& Out, int32 LayerId,
@@ -50,6 +50,8 @@ public:
 	FVector2f MeasureRichTextForTesting(const FString& Markup, float Width, bool bWrap) const;
 	int32 GetTextLayoutCacheCountForTesting() const { return TextLayouts.Num(); }
 	int32 GetBrushCacheCountForTesting() const { return Brushes.Num(); }
+	const void* GetBrushIdentityForTesting(const FWebToUENode& Node) const;
+	uint64 GetResourceLoadAttemptsForTesting() const { return ResourceLoadAttemptsForTesting; }
 	const void* GetTextLayoutCacheIdentityForTesting(const FWebToUENode& Node) const;
 	bool IsLayoutDirtyForTesting() const { return bLayoutDirty; }
 #endif
@@ -64,6 +66,9 @@ private:
 	mutable TArray<TStrongObjectPtr<UObject>> LoadedResources;
 	TArray<FWebToUENode*> PaintOrderNodes;
 	TMap<const FWebToUENode*, FWebToUEPaintOrderRange> PaintOrderRanges;
+#if WITH_DEV_AUTOMATION_TESTS
+	mutable uint64 ResourceLoadAttemptsForTesting = 0;
+#endif
 
 	FWebToUEDocument* GetDocument();
 	const FWebToUEDocument* GetDocument() const;
@@ -83,6 +88,6 @@ private:
 		const FPaintArgs& Args, const FGeometry& Geometry, const FSlateRect& CullingRect,
 		FSlateWindowElementList& Out, int32 LayerId, const FWidgetStyle& WidgetStyle,
 		float ParentOpacity, bool bParentEnabled, const FVector2f& InheritedScrollOffset) const;
-	void RebuildBrushes() const;
+	void RebuildBrushes(bool bReloadResources) const;
 	void RebuildPaintOrderCache();
 };
