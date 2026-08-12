@@ -1,4 +1,5 @@
 #include "WebToUECoreTypes.h"
+#include "WebToUEPerformance.h"
 
 FString FWebToUENode::GetAttribute(const FString& Name) const
 {
@@ -24,9 +25,9 @@ bool FWebToUENode::IsInteractive() const
 	return Tag == TEXT("button") || !GetAttribute(TEXT("data-ue-on-click")).IsEmpty();
 }
 
-bool FWebToUENode::IsDisplayed() const
+bool FWebToUENode::IsDisplayed(const FWebToUERuntimeNodeState& State) const
 {
-	return Style.Display != EWebToUEDisplay::None && Style.bVisible;
+	return Style.Display != EWebToUEDisplay::None && Style.bVisible && State.bRuntimeVisible;
 }
 
 bool FWebToUEDocument::HasErrors() const
@@ -35,6 +36,29 @@ bool FWebToUEDocument::HasErrors() const
 	{
 		return Diagnostic.Severity == EWebToUEDiagnosticSeverity::Error;
 	});
+}
+
+void FWebToUEDocument::InitializeRuntimeNodeStates()
+{
+	RuntimeNodeStates.Reset();
+	int32 NodeCount = 0;
+	ForEachNode([&NodeCount](FWebToUENode&) { ++NodeCount; });
+	if (NodeCount > 0)
+	{
+		RuntimeNodeStates.Reserve(NodeCount);
+		FWebToUEPerformanceCapture::RecordAllocationPayload(
+			static_cast<uint64>(NodeCount) * sizeof(FWebToUERuntimeNodeState));
+	}
+	ForEachNode([this](FWebToUENode& Node)
+	{
+		AddRuntimeNodeState(Node);
+	});
+}
+
+FWebToUERuntimeNodeState& FWebToUEDocument::AddRuntimeNodeState(FWebToUENode& Node)
+{
+	Node.RuntimeStateIndex = RuntimeNodeStates.AddDefaulted();
+	return RuntimeNodeStates[Node.RuntimeStateIndex];
 }
 
 void FWebToUEDocument::ForEachNode(TFunctionRef<void(FWebToUENode&)> Visitor) const

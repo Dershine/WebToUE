@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WebToUERuntimeInstance.h"
 #include "Widgets/SLeafWidget.h"
 #include "Widgets/Text/SlateTextBlockLayout.h"
 #include "WebToUECompiler.h"
@@ -61,12 +62,16 @@ public:
 	FVector2f GetVisualPositionForTesting(const FWebToUENode& Node) const;
 	TConstArrayView<FWebToUENode*> GetPaintOrderForTesting(const FWebToUENode& Parent) const;
 	void SetHoveredNodeForTesting(FWebToUENode* Node) { SetHoveredNode(Node); }
+	void SetFocusedNodeForTesting(FWebToUENode* Node) { SetFocusedNode(Node); }
+	void SetBoundTextForTesting(FWebToUENode& Node, const FText& Text);
+	const FWebToUERuntimeNodeState& GetRuntimeStateForTesting(const FWebToUENode& Node) const;
+	FWebToUENode* FindRuntimeNodeByIdForTesting(const FString& Id) const;
 #endif
 
 private:
 	TWeakObjectPtr<UWebToUEView> Owner;
 	TWeakObjectPtr<UWebToUEDocument> DocumentAsset;
-	TSharedPtr<FWebToUEDocument> RuntimeDocument;
+	TUniquePtr<FWebToUERuntimeInstance> RuntimeInstance;
 	mutable FVector2f LastViewportSize = FVector2f(-1.0f, -1.0f);
 	mutable bool bLayoutDirty = true;
 	mutable TMap<const FWebToUENode*, TSharedPtr<FSlateBrush>> Brushes;
@@ -75,9 +80,13 @@ private:
 	TArray<FWebToUENode*> PaintOrderNodes;
 	TMap<const FWebToUENode*, FWebToUEPaintOrderRange> PaintOrderRanges;
 	TSet<FString> LoggedBindingErrors;
-	FWebToUENode* HoveredNode = nullptr;
-	FWebToUENode* PressedNode = nullptr;
-	FWebToUENode* FocusedNode = nullptr;
+
+	FWebToUEDocument* GetRuntimeDocument();
+	const FWebToUEDocument* GetRuntimeDocument() const;
+	FWebToUERuntimeNodeState& GetRuntimeState(FWebToUENode& Node);
+	const FWebToUERuntimeNodeState& GetRuntimeState(const FWebToUENode& Node) const;
+	const FWebToUERuntimeNodeState* FindRuntimeState(const FWebToUENode& Node) const;
+	bool IsRichText(const FWebToUENode& Node) const;
 
 	void RebuildStylesAndBrushes();
 	void RebuildBrushes() const;

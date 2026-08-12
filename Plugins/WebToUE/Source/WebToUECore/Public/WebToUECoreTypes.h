@@ -130,6 +130,19 @@ struct WEBTOUECORE_API FWebToUEComputedStyle
 	int32 ZIndex = 0;
 };
 
+struct WEBTOUECORE_API FWebToUERuntimeNodeState
+{
+	EWebToUEPseudoState PseudoStates = EWebToUEPseudoState::None;
+	bool bRuntimeVisible = true;
+	bool bRuntimeEnabled = true;
+	bool bHasBoundText = false;
+	FText BoundText;
+	bool bHasRichTextOverride = false;
+	bool bRichTextOverride = false;
+	FVector2f ScrollOffset = FVector2f::ZeroVector;
+	FVector2f MaxScrollOffset = FVector2f::ZeroVector;
+};
+
 struct WEBTOUECORE_API FWebToUENode : public TSharedFromThis<FWebToUENode>
 {
 	EWebToUENodeType Type = EWebToUENodeType::Element;
@@ -143,20 +156,16 @@ struct WEBTOUECORE_API FWebToUENode : public TSharedFromThis<FWebToUENode>
 	TMap<FString, FString> Attributes;
 	TArray<TSharedPtr<FWebToUENode>> Children;
 	FWebToUENode* Parent = nullptr;
-	EWebToUEPseudoState StateFlags = EWebToUEPseudoState::None;
+	int32 RuntimeStateIndex = INDEX_NONE;
 	FWebToUEComputedStyle Style;
-	bool bRuntimeVisible = true;
-	bool bRuntimeEnabled = true;
 	FVector2f Position = FVector2f::ZeroVector;
 	FVector2f Size = FVector2f::ZeroVector;
-	FVector2f ScrollOffset = FVector2f::ZeroVector;
-	FVector2f MaxScrollOffset = FVector2f::ZeroVector;
 	int32 PaintOrder = 0;
 
 	FString GetAttribute(const FString& Name) const;
 	bool HasClass(const FString& ClassName) const;
 	bool IsInteractive() const;
-	bool IsDisplayed() const;
+	bool IsDisplayed(const FWebToUERuntimeNodeState& State) const;
 	bool ClipsOverflow() const { return Style.Overflow != EWebToUEOverflow::Visible; }
 	bool IsScrollable() const { return Style.Overflow == EWebToUEOverflow::Auto || Style.Overflow == EWebToUEOverflow::Scroll; }
 };
@@ -191,7 +200,18 @@ struct WEBTOUECORE_API FWebToUEDocument
 	TArray<FWebToUEStyleRule> Rules;
 	TArray<FString> LinkedStylesheets;
 	TArray<FWebToUEDiagnostic> Diagnostics;
+	TArray<FWebToUERuntimeNodeState> RuntimeNodeStates;
 
 	bool HasErrors() const;
+	void InitializeRuntimeNodeStates();
+	FWebToUERuntimeNodeState& AddRuntimeNodeState(FWebToUENode& Node);
+	FORCEINLINE FWebToUERuntimeNodeState& GetRuntimeNodeState(FWebToUENode& Node)
+	{
+		return RuntimeNodeStates[Node.RuntimeStateIndex];
+	}
+	FORCEINLINE const FWebToUERuntimeNodeState& GetRuntimeNodeState(const FWebToUENode& Node) const
+	{
+		return RuntimeNodeStates[Node.RuntimeStateIndex];
+	}
 	void ForEachNode(TFunctionRef<void(FWebToUENode&)> Visitor) const;
 };

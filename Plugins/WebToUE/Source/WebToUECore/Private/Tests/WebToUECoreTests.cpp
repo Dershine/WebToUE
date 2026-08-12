@@ -24,7 +24,7 @@ bool FWebToUEHtmlCssTest::RunTest(const FString& Parameters)
 	if (Button)
 	{
 		TestEqual(TEXT("ID selector wins"), Button->Style.Color, FLinearColor::Red);
-		Button->StateFlags |= EWebToUEPseudoState::Hover;
+		Document->GetRuntimeNodeState(*Button).PseudoStates |= EWebToUEPseudoState::Hover;
 		FWebToUEStyleResolver::Resolve(*Document);
 		TestEqual(TEXT("Higher-specificity hover selector wins"), Button->Style.Color, FLinearColor(0, 1, 0, 1));
 		TestTrue(TEXT("Entity decoded"), Button->Children.Num() > 0 && Button->Children[0]->Text == TEXT("Start & Play"));
@@ -157,14 +157,15 @@ bool FWebToUEScrollLayoutTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Scroll container exists"), Scroll);
 	if (Scroll)
 	{
+		FWebToUERuntimeNodeState& ScrollState = Document->GetRuntimeNodeState(*Scroll);
 		TestEqual(TEXT("Overflow auto resolves to a scroll container"), Scroll->Style.Overflow, EWebToUEOverflow::Auto);
 		TestTrue(TEXT("Overflowing children produce a vertical scroll range"),
-			FMath::IsNearlyEqual(Scroll->MaxScrollOffset.Y, 140.0f, 0.1f));
-		Scroll->ScrollOffset.Y = 1000.0f;
+			FMath::IsNearlyEqual(ScrollState.MaxScrollOffset.Y, 140.0f, 0.1f));
+		ScrollState.ScrollOffset.Y = 1000.0f;
 		FWebToUELayoutEngine::Layout(*Document, FVector2f(200, 200),
 			[](const FWebToUENode&, const FWebToUELayoutEngine::FMeasureConstraints&) { return FVector2f::ZeroVector; });
 		TestTrue(TEXT("Relayout clamps an existing scroll offset"),
-			FMath::IsNearlyEqual(Scroll->ScrollOffset.Y, Scroll->MaxScrollOffset.Y, 0.1f));
+			FMath::IsNearlyEqual(ScrollState.ScrollOffset.Y, ScrollState.MaxScrollOffset.Y, 0.1f));
 	}
 	return true;
 }

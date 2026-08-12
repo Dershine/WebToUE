@@ -29,7 +29,8 @@ class WEBTOUECORE_API FWebToUEStyleResolver
 {
 public:
 	static void Resolve(FWebToUEDocument& Document);
-	static bool Matches(const FWebToUEStyleRule& Rule, const FWebToUENode& Node);
+	static bool Matches(const FWebToUEStyleRule& Rule, const FWebToUENode& Node,
+		const FWebToUEDocument& Document);
 };
 
 class WEBTOUECORE_API FWebToUELayoutEngine

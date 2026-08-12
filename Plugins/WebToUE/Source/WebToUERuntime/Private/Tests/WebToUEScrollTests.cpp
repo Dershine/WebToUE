@@ -31,8 +31,9 @@ bool FWebToUEScrollInteractionTest::RunTest(const FString& Parameters)
 		View->HitTestForTesting(FVector2f(50.0f, 150.0f)));
 	TestTrue(TEXT("Wheel input over the container scrolls it"),
 		View->ScrollAtForTesting(FVector2f(50.0f, 50.0f), -4.0f));
+	const FWebToUERuntimeNodeState& ScrollState = View->GetRuntimeStateForTesting(*Scroll);
 	TestTrue(TEXT("Wheel scrolling clamps to the content range"),
-		FMath::IsNearlyEqual(Scroll->ScrollOffset.Y, Scroll->MaxScrollOffset.Y, 0.1f));
+		FMath::IsNearlyEqual(ScrollState.ScrollOffset.Y, ScrollState.MaxScrollOffset.Y, 0.1f));
 	TestTrue(TEXT("Scrolling changes the descendant visual position"),
 		FMath::IsNearlyEqual(View->GetVisualPositionForTesting(*Third).Y, 20.0f, 0.1f));
 	TestEqual(TEXT("The revealed button participates in hit testing"),

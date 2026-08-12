@@ -1110,7 +1110,8 @@ namespace WebToUE::Private
 		if (const FString* V = Value(TEXT("z-index"))) Style.ZIndex = FCString::Atoi(**V);
 	}
 
-	static bool SegmentMatches(const FWebToUESelectorSegment& Segment, const FWebToUENode& Node)
+	static bool SegmentMatches(const FWebToUESelectorSegment& Segment, const FWebToUENode& Node,
+		const FWebToUERuntimeNodeState& State)
 	{
 		if (Node.Type != EWebToUENodeType::Element) return false;
 		if (!Segment.Type.IsEmpty() && Node.Tag != Segment.Type) return false;
@@ -1119,11 +1120,12 @@ namespace WebToUE::Private
 		{
 			if (!Node.HasClass(Class)) return false;
 		}
-		return EnumHasAllFlags(Node.StateFlags, Segment.RequiredState);
+		return EnumHasAllFlags(State.PseudoStates, Segment.RequiredState);
 	}
 
-	static void ResolveNode(FWebToUENode& Node, const FWebToUEDocument& Document, const FWebToUEComputedStyle* ParentStyle)
+	static void ResolveNode(FWebToUENode& Node, FWebToUEDocument& Document, const FWebToUEComputedStyle* ParentStyle)
 	{
+		FWebToUERuntimeNodeState& RuntimeState = Document.GetRuntimeNodeState(Node);
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::StyleNodeVisits);
 		FWebToUEComputedStyle Style;
 		if (Node.Type == EWebToUENodeType::Text)
@@ -1155,7 +1157,7 @@ namespace WebToUE::Private
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::SelectorEvaluations, Document.Rules.Num());
 		for (const FWebToUEStyleRule& Rule : Document.Rules)
 		{
-			if (FWebToUEStyleResolver::Matches(Rule, Node))
+			if (FWebToUEStyleResolver::Matches(Rule, Node, Document))
 			{
 				FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::SelectorMatches);
 				if (Matches.Num() == Matches.Max())
@@ -1186,10 +1188,10 @@ namespace WebToUE::Private
 			}
 		}
 		ApplyProperties(Properties, Style);
-		Style.bVisible = Style.bVisible && Node.bRuntimeVisible;
-		Style.bEnabled = !Node.Attributes.Contains(TEXT("disabled")) && Node.bRuntimeEnabled;
-		if (!Style.bEnabled) Node.StateFlags |= EWebToUEPseudoState::Disabled;
-		else Node.StateFlags &= ~EWebToUEPseudoState::Disabled;
+		Style.bVisible = Style.bVisible && RuntimeState.bRuntimeVisible;
+		Style.bEnabled = !Node.Attributes.Contains(TEXT("disabled")) && RuntimeState.bRuntimeEnabled;
+		if (!Style.bEnabled) RuntimeState.PseudoStates |= EWebToUEPseudoState::Disabled;
+		else RuntimeState.PseudoStates &= ~EWebToUEPseudoState::Disabled;
 		Node.Style = MoveTemp(Style);
 		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
 		{
@@ -1348,28 +1350,29 @@ namespace WebToUE::Private
 		}
 	}
 
-	static FVector2f UpdateScrollExtents(FWebToUENode& Node)
+	static FVector2f UpdateScrollExtents(FWebToUEDocument& Document, FWebToUENode& Node)
 	{
+		FWebToUERuntimeNodeState& RuntimeState = Document.GetRuntimeNodeState(Node);
 		FVector2f ContentMax = Node.Position + Node.Size;
 		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
 		{
-			const FVector2f ChildContentMax = UpdateScrollExtents(*Child);
+			const FVector2f ChildContentMax = UpdateScrollExtents(Document, *Child);
 			ContentMax.X = FMath::Max(ContentMax.X, Child->ClipsOverflow() ? Child->Position.X + Child->Size.X : ChildContentMax.X);
 			ContentMax.Y = FMath::Max(ContentMax.Y, Child->ClipsOverflow() ? Child->Position.Y + Child->Size.Y : ChildContentMax.Y);
 		}
 
 		if (Node.IsScrollable())
 		{
-			Node.MaxScrollOffset = FVector2f(
+			RuntimeState.MaxScrollOffset = FVector2f(
 				FMath::Max(0.0f, ContentMax.X - (Node.Position.X + Node.Size.X)),
 				FMath::Max(0.0f, ContentMax.Y - (Node.Position.Y + Node.Size.Y)));
-			Node.ScrollOffset.X = FMath::Clamp(Node.ScrollOffset.X, 0.0f, Node.MaxScrollOffset.X);
-			Node.ScrollOffset.Y = FMath::Clamp(Node.ScrollOffset.Y, 0.0f, Node.MaxScrollOffset.Y);
+			RuntimeState.ScrollOffset.X = FMath::Clamp(RuntimeState.ScrollOffset.X, 0.0f, RuntimeState.MaxScrollOffset.X);
+			RuntimeState.ScrollOffset.Y = FMath::Clamp(RuntimeState.ScrollOffset.Y, 0.0f, RuntimeState.MaxScrollOffset.Y);
 		}
 		else
 		{
-			Node.ScrollOffset = FVector2f::ZeroVector;
-			Node.MaxScrollOffset = FVector2f::ZeroVector;
+			RuntimeState.ScrollOffset = FVector2f::ZeroVector;
+			RuntimeState.MaxScrollOffset = FVector2f::ZeroVector;
 		}
 
 		return Node.ClipsOverflow() ? Node.Position + Node.Size : ContentMax;
@@ -1402,17 +1405,20 @@ TSharedRef<FWebToUEDocument> FWebToUECompiler::Compile(const FString& Html,
 	{
 		ParseCss(StyleSheet, *Document);
 	}
+	Document->InitializeRuntimeNodeStates();
 	FWebToUEStyleResolver::Resolve(*Document);
 	return Document;
 }
 
-bool FWebToUEStyleResolver::Matches(const FWebToUEStyleRule& Rule, const FWebToUENode& Node)
+bool FWebToUEStyleResolver::Matches(const FWebToUEStyleRule& Rule, const FWebToUENode& Node,
+	const FWebToUEDocument& Document)
 {
 	using namespace WebToUE::Private;
 	if (Rule.Selector.IsEmpty()) return false;
 	TFunction<bool(int32, const FWebToUENode*)> MatchAt = [&](int32 Index, const FWebToUENode* Current)
 	{
-		if (!Current || Index < 0 || !SegmentMatches(Rule.Selector[Index], *Current)) return false;
+		if (!Current || Index < 0 ||
+			!SegmentMatches(Rule.Selector[Index], *Current, Document.GetRuntimeNodeState(*Current))) return false;
 		if (Index == 0) return true;
 		if (Rule.Selector[Index].RelationToPrevious == EWebToUECombinator::Child)
 		{
@@ -1451,6 +1457,6 @@ void FWebToUELayoutEngine::Layout(FWebToUEDocument& Document, const FVector2f& V
 	YGNodeCalculateLayout(Root, ViewportSize.X, ViewportSize.Y, YGDirectionLTR);
 	int32 PaintOrder = 0;
 	WebToUE::Private::CopyYogaLayout(*Document.Root, Root, FVector2f::ZeroVector, PaintOrder);
-	WebToUE::Private::UpdateScrollExtents(*Document.Root);
+	WebToUE::Private::UpdateScrollExtents(Document, *Document.Root);
 	YGNodeFreeRecursive(Root);
 }

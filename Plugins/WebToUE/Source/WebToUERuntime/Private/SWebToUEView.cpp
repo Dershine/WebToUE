@@ -6,6 +6,7 @@
 #include "WebToUEPerformance.h"
 #include "WebToUESettings.h"
 #include "WebToUEView.h"
+#include "WebToUERuntimeInstance.h"
 
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Engine/Texture2D.h"
@@ -33,7 +34,45 @@ SWebToUEView::~SWebToUEView() = default;
 void SWebToUEView::Construct(const FArguments& InArgs)
 {
 	Owner = InArgs._Owner;
+	RuntimeInstance = MakeUnique<FWebToUERuntimeInstance>();
 	SetCanTick(false);
+}
+
+FWebToUEDocument* SWebToUEView::GetRuntimeDocument()
+{
+	return RuntimeInstance ? RuntimeInstance->GetDocument() : nullptr;
+}
+
+const FWebToUEDocument* SWebToUEView::GetRuntimeDocument() const
+{
+	return RuntimeInstance ? RuntimeInstance->GetDocument() : nullptr;
+}
+
+FWebToUERuntimeNodeState& SWebToUEView::GetRuntimeState(FWebToUENode& Node)
+{
+	return RuntimeInstance->GetState(Node);
+}
+
+const FWebToUERuntimeNodeState& SWebToUEView::GetRuntimeState(const FWebToUENode& Node) const
+{
+	return RuntimeInstance->GetState(Node);
+}
+
+const FWebToUERuntimeNodeState* SWebToUEView::FindRuntimeState(const FWebToUENode& Node) const
+{
+	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
+	return RuntimeDocument && RuntimeDocument->RuntimeNodeStates.IsValidIndex(Node.RuntimeStateIndex)
+		? &RuntimeDocument->RuntimeNodeStates[Node.RuntimeStateIndex]
+		: nullptr;
+}
+
+bool SWebToUEView::IsRichText(const FWebToUENode& Node) const
+{
+	if (const FWebToUERuntimeNodeState* State = FindRuntimeState(Node))
+	{
+		return State->bHasRichTextOverride ? State->bRichTextOverride : Node.bRichText;
+	}
+	return Node.bRichText;
 }
 
 void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
@@ -42,67 +81,13 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Hydrate);
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Hydrate);
 	DocumentAsset = InDocument;
-	RuntimeDocument.Reset();
+	RuntimeInstance->Reset();
 	TextLayouts.Reset();
 	PaintOrderNodes.Reset();
 	PaintOrderRanges.Reset();
-	HoveredNode = PressedNode = FocusedNode = nullptr;
-	if (InDocument && InDocument->GetCompiledNodes().IsValidIndex(InDocument->GetRootNodeIndex()))
+	if (InDocument)
 	{
-		const TArray<FWebToUECompiledNode>& CompiledNodes = InDocument->GetCompiledNodes();
-		const TArray<FWebToUECompiledRule>& CompiledRules = InDocument->GetCompiledRules();
-		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::HydratedNodes, CompiledNodes.Num());
-		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::HydratedRules, CompiledRules.Num());
-		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
-		RuntimeDocument = MakeShared<FWebToUEDocument>();
-		TArray<TSharedPtr<FWebToUENode>> Nodes;
-		if (!CompiledNodes.IsEmpty())
-		{
-			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
-		}
-		Nodes.Reserve(CompiledNodes.Num());
-		for (const FWebToUECompiledNode& Source : CompiledNodes)
-		{
-			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
-			TSharedPtr<FWebToUENode> Node = MakeShared<FWebToUENode>();
-			Node->Type = static_cast<EWebToUENodeType>(Source.Type);
-			Node->Tag = Source.Tag;
-			Node->Text = Source.Text;
-			Node->LocalizedText = Source.LocalizedText;
-			Node->bHasLocalizedText = Node->Type == EWebToUENodeType::Text;
-			Node->bRichText = Source.bRichText;
-			for (const FWebToUECompiledAttribute& Attribute : Source.Attributes) Node->Attributes.Add(Attribute.Name, Attribute.Value);
-			Nodes.Add(MoveTemp(Node));
-		}
-		for (int32 Index = 0; Index < CompiledNodes.Num(); ++Index)
-		{
-			const int32 ParentIndex = CompiledNodes[Index].ParentIndex;
-			if (Nodes.IsValidIndex(ParentIndex))
-			{
-				Nodes[Index]->Parent = Nodes[ParentIndex].Get();
-				Nodes[ParentIndex]->Children.Add(Nodes[Index]);
-			}
-		}
-		RuntimeDocument->Root = Nodes[InDocument->GetRootNodeIndex()];
-		for (const FWebToUECompiledRule& SourceRule : CompiledRules)
-		{
-			FWebToUEStyleRule Rule;
-			Rule.Specificity = SourceRule.Specificity;
-			Rule.SourceOrder = SourceRule.SourceOrder;
-			for (const FWebToUECompiledSelectorSegment& SourceSegment : SourceRule.Selector)
-			{
-				FWebToUESelectorSegment Segment;
-				Segment.Type = SourceSegment.Type;
-				Segment.Id = SourceSegment.Id;
-				Segment.Classes = SourceSegment.Classes;
-				Segment.RequiredState = static_cast<EWebToUEPseudoState>(SourceSegment.RequiredState);
-				Segment.RelationToPrevious = static_cast<EWebToUECombinator>(SourceSegment.RelationToPrevious);
-				Rule.Selector.Add(MoveTemp(Segment));
-			}
-			for (const FWebToUECompiledDeclaration& Declaration : SourceRule.Declarations) Rule.Declarations.Add(Declaration.Name, Declaration.Value);
-			RuntimeDocument->Rules.Add(MoveTemp(Rule));
-		}
-		FWebToUEStyleResolver::Resolve(*RuntimeDocument);
+		RuntimeInstance->Hydrate(*InDocument);
 	}
 	RebuildStylesAndBrushes();
 }
@@ -158,20 +143,25 @@ static TSharedRef<FSlateStyleSet> MakeRichTextStyleSet(const FWebToUENode& Node)
 
 FText SWebToUEView::GetDisplayText(const FWebToUENode& Node) const
 {
+	if (const FWebToUERuntimeNodeState* State = FindRuntimeState(Node); State && State->bHasBoundText)
+	{
+		return State->BoundText;
+	}
 	return Node.bHasLocalizedText ? Node.LocalizedText : FText::FromString(Node.Text);
 }
 
 FSlateTextBlockLayout& SWebToUEView::PrepareTextLayout(const FWebToUENode& Node, float WrapWidth) const
 {
 	TUniquePtr<FWebToUETextLayoutCache>& Cache = TextLayouts.FindOrAdd(&Node);
-	if (!Cache || Cache->bRichText != Node.bRichText)
+	const bool bRichText = IsRichText(Node);
+	if (!Cache || Cache->bRichText != bRichText)
 	{
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TextLayoutBuilds);
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 		Cache = MakeUnique<FWebToUETextLayoutCache>();
-		Cache->bRichText = Node.bRichText;
+		Cache->bRichText = bRichText;
 		TSharedRef<ITextLayoutMarshaller> Marshaller = FPlainTextLayoutMarshaller::Create();
-		if (Node.bRichText)
+		if (bRichText)
 		{
 			Cache->RichTextStyleSet = MakeRichTextStyleSet(Node);
 			Marshaller = FRichTextLayoutMarshaller::Create(TArray<TSharedRef<ITextDecorator>>(), Cache->RichTextStyleSet.Get());
@@ -256,12 +246,13 @@ FText SWebToUEView::GetDisplayTextForTesting(const FWebToUENode& Node) const
 
 void SWebToUEView::SetRuntimeDocumentForTesting(TSharedRef<FWebToUEDocument> InDocument)
 {
-	RuntimeDocument = MoveTemp(InDocument);
+	RuntimeInstance->AdoptDocumentForTesting(MoveTemp(InDocument));
 	RebuildStylesAndBrushes();
 }
 
 void SWebToUEView::LayoutForTesting(const FVector2f& ViewportSize) const
 {
+	FWebToUEDocument* RuntimeDocument = const_cast<FWebToUEDocument*>(GetRuntimeDocument());
 	if (!RuntimeDocument || !RuntimeDocument->Root) return;
 	FWebToUELayoutEngine::Layout(*RuntimeDocument, ViewportSize,
 		[this](const FWebToUENode& Node, const FWebToUELayoutEngine::FMeasureConstraints& Constraints)
@@ -277,7 +268,7 @@ FVector2f SWebToUEView::GetVisualPositionForTesting(const FWebToUENode& Node) co
 	FVector2f ScrollOffset = FVector2f::ZeroVector;
 	for (const FWebToUENode* Parent = Node.Parent; Parent; Parent = Parent->Parent)
 	{
-		ScrollOffset += Parent->ScrollOffset;
+		ScrollOffset += GetRuntimeState(*Parent).ScrollOffset;
 	}
 	return Node.Position - ScrollOffset;
 }
@@ -285,6 +276,34 @@ FVector2f SWebToUEView::GetVisualPositionForTesting(const FWebToUENode& Node) co
 TConstArrayView<FWebToUENode*> SWebToUEView::GetPaintOrderForTesting(const FWebToUENode& Parent) const
 {
 	return GetPaintOrder(Parent);
+}
+
+const FWebToUERuntimeNodeState& SWebToUEView::GetRuntimeStateForTesting(const FWebToUENode& Node) const
+{
+	return GetRuntimeState(Node);
+}
+
+void SWebToUEView::SetBoundTextForTesting(FWebToUENode& Node, const FText& Text)
+{
+	FWebToUERuntimeNodeState& State = GetRuntimeState(Node);
+	State.BoundText = Text;
+	State.bHasBoundText = true;
+}
+
+FWebToUENode* SWebToUEView::FindRuntimeNodeByIdForTesting(const FString& Id) const
+{
+	FWebToUENode* Result = nullptr;
+	if (const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument())
+	{
+		RuntimeDocument->ForEachNode([&Result, &Id](FWebToUENode& Node)
+		{
+			if (!Result && Node.GetAttribute(TEXT("id")) == Id)
+			{
+				Result = &Node;
+			}
+		});
+	}
+	return Result;
 }
 #endif
 
@@ -295,6 +314,7 @@ int32 SWebToUEView::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeo
 	SCOPE_CYCLE_COUNTER(STAT_WebToUE_PaintBuild);
 	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_PaintBuild);
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::PaintBuild);
+	FWebToUEDocument* RuntimeDocument = const_cast<FWebToUEDocument*>(GetRuntimeDocument());
 	if (!RuntimeDocument || !RuntimeDocument->Root)
 	{
 		return LayerId;
@@ -319,7 +339,7 @@ int32 SWebToUEView::PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, 
 	const FWidgetStyle& WidgetStyle, float ParentOpacity, bool bParentEnabled,
 	const FVector2f& InheritedScrollOffset) const
 {
-	if (!Node.IsDisplayed()) return LayerId;
+	if (!Node.IsDisplayed(GetRuntimeState(Node))) return LayerId;
 	const float Opacity = ParentOpacity * Node.Style.Opacity;
 	const float DrawOpacity = Opacity * WidgetStyle.GetColorAndOpacityTint().A;
 	const FVector2f Position = Node.Position - InheritedScrollOffset;
@@ -380,7 +400,8 @@ int32 SWebToUEView::PaintNode(const FWebToUENode& Node, const FPaintArgs& Args, 
 
 	for (const FWebToUENode* Child : GetPaintOrder(Node))
 	{
-		const FVector2f ChildScrollOffset = InheritedScrollOffset + (Node.IsScrollable() ? Node.ScrollOffset : FVector2f::ZeroVector);
+		const FVector2f ChildScrollOffset = InheritedScrollOffset +
+			(Node.IsScrollable() ? GetRuntimeState(Node).ScrollOffset : FVector2f::ZeroVector);
 		LayerId = PaintNode(*Child, Args, Geometry, CullingRect, Out, LayerId, WidgetStyle,
 			Opacity, bParentEnabled && Node.Style.bEnabled, ChildScrollOffset);
 	}
@@ -392,6 +413,7 @@ void SWebToUEView::RebuildBrushes() const
 {
 	Brushes.Reset();
 	LoadedResources.Reset();
+	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (!RuntimeDocument) return;
 	RuntimeDocument->ForEachNode([this](FWebToUENode& Node)
 	{
@@ -423,6 +445,7 @@ void SWebToUEView::RebuildBrushes() const
 void SWebToUEView::RebuildStylesAndBrushes()
 {
 	TextLayouts.Reset();
+	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (RuntimeDocument)
 	{
 		FWebToUEStyleResolver::Resolve(*RuntimeDocument);
@@ -442,6 +465,7 @@ void SWebToUEView::RebuildPaintOrderCache()
 {
 	PaintOrderNodes.Reset();
 	PaintOrderRanges.Reset();
+	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (!RuntimeDocument)
 	{
 		return;
@@ -530,8 +554,9 @@ void SWebToUEView::RefreshBindings(UObject* DataContext)
 	SCOPE_CYCLE_COUNTER(STAT_WebToUE_Binding);
 	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Binding);
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Binding);
+	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (!RuntimeDocument || !DataContext) return;
-	RuntimeDocument->ForEachNode([this, DataContext](FWebToUENode& Node)
+	RuntimeDocument->ForEachNode([this, RuntimeDocument, DataContext](FWebToUENode& Node)
 	{
 		if (Node.Type != EWebToUENodeType::Element) return;
 		const FString TextField = Node.GetAttribute(TEXT("data-ue-bind-text"));
@@ -555,12 +580,15 @@ void SWebToUEView::RefreshBindings(UObject* DataContext)
 					TextNode->Type = EWebToUENodeType::Text;
 					TextNode->Tag = TEXT("#text");
 					TextNode->Parent = &Node;
+					RuntimeDocument->AddRuntimeNodeState(*TextNode);
 					Node.Children.Insert(TextNode, 0);
 				}
-				TextNode->Text = Value.ToString();
-				TextNode->LocalizedText = MoveTemp(Value);
-				TextNode->bHasLocalizedText = true;
-				TextNode->bRichText = Node.GetAttribute(TEXT("data-ue-rich-text")).Equals(TEXT("true"), ESearchCase::IgnoreCase);
+				FWebToUERuntimeNodeState& TextState = GetRuntimeState(*TextNode);
+				TextState.BoundText = MoveTemp(Value);
+				TextState.bHasBoundText = true;
+				TextState.bHasRichTextOverride = true;
+				TextState.bRichTextOverride = Node.GetAttribute(TEXT("data-ue-rich-text")).Equals(
+					TEXT("true"), ESearchCase::IgnoreCase);
 			}
 			else ReportBindingErrorOnce(TextField, TEXT("Text binding property was not found."));
 		}
@@ -568,14 +596,14 @@ void SWebToUEView::RefreshBindings(UObject* DataContext)
 		if (!VisibleField.IsEmpty())
 		{
 			bool bValue = true;
-			if (ReadPropertyAsBool(DataContext, VisibleField, bValue)) Node.bRuntimeVisible = bValue;
+			if (ReadPropertyAsBool(DataContext, VisibleField, bValue)) GetRuntimeState(Node).bRuntimeVisible = bValue;
 			else ReportBindingErrorOnce(VisibleField, TEXT("Visible binding requires a bool UPROPERTY."));
 		}
 		const FString EnabledField = Node.GetAttribute(TEXT("data-ue-bind-enabled"));
 		if (!EnabledField.IsEmpty())
 		{
 			bool bValue = true;
-			if (ReadPropertyAsBool(DataContext, EnabledField, bValue)) Node.bRuntimeEnabled = bValue;
+			if (ReadPropertyAsBool(DataContext, EnabledField, bValue)) GetRuntimeState(Node).bRuntimeEnabled = bValue;
 			else ReportBindingErrorOnce(EnabledField, TEXT("Enabled binding requires a bool UPROPERTY."));
 		}
 	});
@@ -585,6 +613,7 @@ void SWebToUEView::RefreshBindings(UObject* DataContext)
 TSet<FName> SWebToUEView::GetBoundFields() const
 {
 	TSet<FName> Result;
+	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (!RuntimeDocument) return Result;
 	RuntimeDocument->ForEachNode([&Result](FWebToUENode& Node)
 	{
@@ -612,13 +641,15 @@ FWebToUENode* SWebToUEView::HitTest(const FVector2f& LocalPosition) const
 	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_HitTest);
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::HitTest);
 	FWebToUENode* Best = nullptr;
+	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (!RuntimeDocument || !RuntimeDocument->Root) return nullptr;
 
 	TFunction<void(FWebToUENode&, const FVector2f&, const FVector2f&, const FVector2f&, bool)> Visit;
 	Visit = [&](FWebToUENode& Node, const FVector2f& InheritedScrollOffset,
 		const FVector2f& ClipMin, const FVector2f& ClipMax, bool bHasClip)
 	{
-		if (!Node.IsDisplayed()) return;
+		const FWebToUERuntimeNodeState& State = GetRuntimeState(Node);
+		if (!Node.IsDisplayed(State)) return;
 		if (bHasClip && (LocalPosition.X < ClipMin.X || LocalPosition.Y < ClipMin.Y ||
 			LocalPosition.X > ClipMax.X || LocalPosition.Y > ClipMax.Y)) return;
 
@@ -643,7 +674,8 @@ FWebToUENode* SWebToUEView::HitTest(const FVector2f& LocalPosition) const
 			if (ChildClipMin.X > ChildClipMax.X || ChildClipMin.Y > ChildClipMax.Y) return;
 		}
 
-		const FVector2f ChildScrollOffset = InheritedScrollOffset + (Node.IsScrollable() ? Node.ScrollOffset : FVector2f::ZeroVector);
+		const FVector2f ChildScrollOffset = InheritedScrollOffset +
+			(Node.IsScrollable() ? State.ScrollOffset : FVector2f::ZeroVector);
 		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
 		{
 			Visit(*Child, ChildScrollOffset, ChildClipMin, ChildClipMax, bChildHasClip);
@@ -655,6 +687,7 @@ FWebToUENode* SWebToUEView::HitTest(const FVector2f& LocalPosition) const
 
 bool SWebToUEView::ScrollAt(const FVector2f& LocalPosition, float WheelDelta)
 {
+	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (!RuntimeDocument || !RuntimeDocument->Root || FMath::IsNearlyZero(WheelDelta)) return false;
 
 	struct FScrollCandidate
@@ -667,7 +700,8 @@ bool SWebToUEView::ScrollAt(const FVector2f& LocalPosition, float WheelDelta)
 	Visit = [&](FWebToUENode& Node, const FVector2f& InheritedScrollOffset,
 		const FVector2f& ClipMin, const FVector2f& ClipMax, bool bHasClip, int32 Depth)
 	{
-		if (!Node.IsDisplayed()) return;
+		const FWebToUERuntimeNodeState& State = GetRuntimeState(Node);
+		if (!Node.IsDisplayed(State)) return;
 		if (bHasClip && (LocalPosition.X < ClipMin.X || LocalPosition.Y < ClipMin.Y ||
 			LocalPosition.X > ClipMax.X || LocalPosition.Y > ClipMax.Y)) return;
 
@@ -675,7 +709,7 @@ bool SWebToUEView::ScrollAt(const FVector2f& LocalPosition, float WheelDelta)
 		const FVector2f NodeMax = Position + Node.Size;
 		const bool bInsideNode = LocalPosition.X >= Position.X && LocalPosition.Y >= Position.Y &&
 			LocalPosition.X <= NodeMax.X && LocalPosition.Y <= NodeMax.Y;
-		if (bInsideNode && Node.IsScrollable() && Node.MaxScrollOffset.Y > 0.0f)
+		if (bInsideNode && Node.IsScrollable() && State.MaxScrollOffset.Y > 0.0f)
 		{
 			Candidates.Add({ &Node, Depth });
 		}
@@ -691,7 +725,8 @@ bool SWebToUEView::ScrollAt(const FVector2f& LocalPosition, float WheelDelta)
 			if (ChildClipMin.X > ChildClipMax.X || ChildClipMin.Y > ChildClipMax.Y) return;
 		}
 
-		const FVector2f ChildScrollOffset = InheritedScrollOffset + (Node.IsScrollable() ? Node.ScrollOffset : FVector2f::ZeroVector);
+		const FVector2f ChildScrollOffset = InheritedScrollOffset +
+			(Node.IsScrollable() ? State.ScrollOffset : FVector2f::ZeroVector);
 		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
 		{
 			Visit(*Child, ChildScrollOffset, ChildClipMin, ChildClipMax, bChildHasClip, Depth + 1);
@@ -708,10 +743,11 @@ bool SWebToUEView::ScrollAt(const FVector2f& LocalPosition, float WheelDelta)
 	constexpr float WheelScrollAmount = 48.0f;
 	for (const FScrollCandidate& Candidate : Candidates)
 	{
-		const float PreviousOffset = Candidate.Node->ScrollOffset.Y;
-		Candidate.Node->ScrollOffset.Y = FMath::Clamp(
-			PreviousOffset - WheelDelta * WheelScrollAmount, 0.0f, Candidate.Node->MaxScrollOffset.Y);
-		if (!FMath::IsNearlyEqual(PreviousOffset, Candidate.Node->ScrollOffset.Y))
+		FWebToUERuntimeNodeState& State = GetRuntimeState(*Candidate.Node);
+		const float PreviousOffset = State.ScrollOffset.Y;
+		State.ScrollOffset.Y = FMath::Clamp(
+			PreviousOffset - WheelDelta * WheelScrollAmount, 0.0f, State.MaxScrollOffset.Y);
+		if (!FMath::IsNearlyEqual(PreviousOffset, State.ScrollOffset.Y))
 		{
 			Invalidate(EInvalidateWidgetReason::Paint);
 			SetHoveredNode(HitTest(LocalPosition));
@@ -723,19 +759,26 @@ bool SWebToUEView::ScrollAt(const FVector2f& LocalPosition, float WheelDelta)
 
 void SWebToUEView::ClearStateFlag(EWebToUEPseudoState Flag)
 {
+	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (!RuntimeDocument) return;
-	RuntimeDocument->ForEachNode([Flag](FWebToUENode& Node) { Node.StateFlags &= ~Flag; });
+	RuntimeDocument->ForEachNode([this, Flag](FWebToUENode& Node)
+	{
+		GetRuntimeState(Node).PseudoStates &= ~Flag;
+	});
 }
 
 void SWebToUEView::SetStatePath(FWebToUENode* Node, EWebToUEPseudoState Flag)
 {
-	for (FWebToUENode* Current = Node; Current; Current = Current->Parent) Current->StateFlags |= Flag;
+	for (FWebToUENode* Current = Node; Current; Current = Current->Parent)
+	{
+		GetRuntimeState(*Current).PseudoStates |= Flag;
+	}
 }
 
 void SWebToUEView::SetHoveredNode(FWebToUENode* Node)
 {
-	if (HoveredNode == Node) return;
-	HoveredNode = Node;
+	if (RuntimeInstance->GetHoveredNode() == Node) return;
+	RuntimeInstance->SetHoveredNode(Node);
 	ClearStateFlag(EWebToUEPseudoState::Hover);
 	SetStatePath(Node, EWebToUEPseudoState::Hover);
 	RebuildStylesAndBrushes();
@@ -743,19 +786,19 @@ void SWebToUEView::SetHoveredNode(FWebToUENode* Node)
 
 void SWebToUEView::SetPressedNode(FWebToUENode* Node)
 {
-	if (PressedNode == Node) return;
-	PressedNode = Node;
+	if (RuntimeInstance->GetPressedNode() == Node) return;
+	RuntimeInstance->SetPressedNode(Node);
 	ClearStateFlag(EWebToUEPseudoState::Active);
-	if (Node) Node->StateFlags |= EWebToUEPseudoState::Active;
+	if (Node) GetRuntimeState(*Node).PseudoStates |= EWebToUEPseudoState::Active;
 	RebuildStylesAndBrushes();
 }
 
 void SWebToUEView::SetFocusedNode(FWebToUENode* Node)
 {
-	if (FocusedNode == Node) return;
-	FocusedNode = Node;
+	if (RuntimeInstance->GetFocusedNode() == Node) return;
+	RuntimeInstance->SetFocusedNode(Node);
 	ClearStateFlag(EWebToUEPseudoState::Focus);
-	if (Node) Node->StateFlags |= EWebToUEPseudoState::Focus;
+	if (Node) GetRuntimeState(*Node).PseudoStates |= EWebToUEPseudoState::Focus;
 	RebuildStylesAndBrushes();
 }
 
@@ -783,6 +826,7 @@ FReply SWebToUEView::OnMouseButtonDown(const FGeometry& MyGeometry, const FPoint
 
 FReply SWebToUEView::OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
 {
+	FWebToUENode* PressedNode = RuntimeInstance->GetPressedNode();
 	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !PressedNode) return FReply::Unhandled();
 	FWebToUENode* Released = PressedNode;
 	const bool bActivate = HitTest(FVector2f(MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()))) == Released;
@@ -800,20 +844,22 @@ FReply SWebToUEView::OnMouseWheel(const FGeometry& MyGeometry, const FPointerEve
 void SWebToUEView::MoveFocus(int32 Direction)
 {
 	TArray<FWebToUENode*> Nodes;
+	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (!RuntimeDocument) return;
-	RuntimeDocument->ForEachNode([&Nodes](FWebToUENode& Node)
+	RuntimeDocument->ForEachNode([this, &Nodes](FWebToUENode& Node)
 	{
-		if (Node.IsInteractive() && Node.IsDisplayed() && Node.Style.bEnabled) Nodes.Add(&Node);
+		if (Node.IsInteractive() && Node.IsDisplayed(GetRuntimeState(Node)) && Node.Style.bEnabled) Nodes.Add(&Node);
 	});
 	Nodes.Sort([](const FWebToUENode& A, const FWebToUENode& B) { return A.PaintOrder < B.PaintOrder; });
 	if (Nodes.IsEmpty()) return;
-	int32 Index = Nodes.IndexOfByKey(FocusedNode);
+	int32 Index = Nodes.IndexOfByKey(RuntimeInstance->GetFocusedNode());
 	Index = Index == INDEX_NONE ? (Direction > 0 ? 0 : Nodes.Num() - 1) : (Index + Direction + Nodes.Num()) % Nodes.Num();
 	SetFocusedNode(Nodes[Index]);
 }
 
 void SWebToUEView::ActivateFocusedNode()
 {
+	FWebToUENode* FocusedNode = RuntimeInstance->GetFocusedNode();
 	if (FocusedNode && FocusedNode->Style.bEnabled) DispatchClick(*FocusedNode);
 }
 
@@ -834,7 +880,7 @@ FReply SWebToUEView::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& Key
 
 FReply SWebToUEView::OnFocusReceived(const FGeometry& MyGeometry, const FFocusEvent& InFocusEvent)
 {
-	if (!FocusedNode) MoveFocus(1);
+	if (!RuntimeInstance->GetFocusedNode()) MoveFocus(1);
 	return FReply::Handled();
 }
 
