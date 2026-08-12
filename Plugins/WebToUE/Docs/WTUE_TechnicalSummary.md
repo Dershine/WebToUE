@@ -10,7 +10,7 @@
 >
 > 当前里程碑：M2——增量原生运行时
 >
-> 最近核验：2026-08-12，基于 Git `82365d39edbf` + working tree
+> 最近核验：2026-08-12，基于 Git `982db64fd8dc` + working tree
 >
 > 统一术语：[CONTEXT.md](../../../CONTEXT.md)
 
@@ -82,7 +82,7 @@
 | 自动化测试 | 23 / 23 通过（2026-08-12，working tree） |
 | 当前编译验证 | UE 5.8 Win64 Editor Development 通过（2026-08-12，working tree） |
 | 历史发布验证 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 均曾通过；发布前必须在当前提交重新执行 |
-| Git 基线 | `82365d39edbf` + working tree；未提交，不生成伪哈希 |
+| Git 基线 | `982db64fd8dc` + working tree；未提交，不生成伪哈希 |
 | 当前发布级别 | Developer Preview / 技术可行性与基础能力阶段 |
 
 ### 2.3 宏观里程碑
@@ -455,11 +455,17 @@ M2.0 只验收性能可观测性基础设施是否形成闭环：固定工作负
 
 ### M2.2——类型化样式与选择器索引 ⬜ 0 / 5
 
-- [ ] CSS Property ID + Typed Value，停止在热路径解析字符串。
-- [ ] 声明保持源顺序，正确处理同规则重复属性。
-- [ ] 规则按 ID/Class/Tag/Pseudo 候选索引。
-- [ ] 属性元数据声明 Inherited 及影响 Style/Measure/Layout/Paint 的范围。
-- [ ] Cascade 结果和浏览器式无效声明语义有专项测试。
+以下顺序同时是依赖顺序和微观交付顺序；每一项都必须形成独立可验收闭环，不把 Ordered Declaration、Typed Value 和 Selector Index 合并成一次不可归因的大迁移。
+
+- [ ] 声明模型保持源顺序并正确处理同规则重复属性；先用专项测试锁定重复声明、有效/无效声明交错和最后有效声明获胜的语义。
+- [ ] 建立 CSS Property ID + Typed Value，在编译边界完成解析，Runtime/Cascade 热路径不再解析属性名和值字符串；若写入 Compiled UI IR，必须同步自定义版本、旧资产重编译策略和失败诊断。
+- [ ] 属性元数据声明 Inherited 及影响 Style/Measure/Layout/Paint/HitTest/Resource 的范围，作为 Dirty Graph 和缓存失效的唯一影响分类来源。
+- [ ] 规则按 ID/Class/Tag/Pseudo 建立候选索引；完成后立即在 500/200 Corpus 记录候选规则数和 Selector 求值数，证明结构工作量低于当前每次 `100,000` 次求值，再进入 M2.3。
+- [ ] Cascade 全面消费有序的类型化声明，并以专项测试覆盖 specificity、source order、inline style、重复属性和浏览器式无效声明语义。
+
+M2.2 有三个中途门：第一项先建立正确性基线；第二项若改变资产 payload，先完成版本/迁移闭环再继续；第四项完成后立即运行固定 Corpus，不以代码形状推断索引有效。Hover/FieldNotify `< 0.5 ms` 仍属于 M2.3，因为只有候选索引而没有 Dirty Graph 时仍可能访问全树节点。
+
+资源安全作为第三项属性元数据的交付门但不单独计数：Paint-only 伪状态变化不得进入同步纹理加载或重建无关图片资源，并以计数或回归测试证明。编译期资源依赖、持久 Resource Cache 和异步策略仍完整保留在 M2.4。
 
 ### M2.3——Dirty Graph ⬜ 0 / 6
 
@@ -506,14 +512,14 @@ M2.0 只验收性能可观测性基础设施是否形成闭环：固定工作负
 - [ ] R-01～R-06 关闭或降至可接受等级。
 - [ ] 文档、示例和升级说明同步。
 
-### 建议的前六个实现变更
+### 当前建议的后六个实现变更
 
-1. Benchmark/Stats 基础与固定压力文档。
-2. Compiler/View 拆分和 Compiled IR/Runtime State 类型设计。
-3. Dirty Flags 与属性影响元数据。
-4. Selector Index 与局部 Pseudo State 重算。
+1. Ordered Declaration 与 Cascade 正确性基线。
+2. CSS Property ID、Typed Value 与属性影响元数据。
+3. Selector Index 与候选/求值工作量门。
+4. Dirty Graph 与局部 Pseudo State/FieldNotify 更新。
 5. Persistent Yoga/Text/Resource Cache。
-6. Display List、Paint/Hit Test 优化及 M2 性能门禁。
+6. Display List、Paint/Hit Test 优化及 M2 性能总门。
 
 ---
 
@@ -580,6 +586,7 @@ Editor 生命周期基础设施另有 Pester 3 / 3：可写隔离环境 Prefligh
 
 | 日期 | 基线 | 变化 | 路线影响 |
 | --- | --- | --- | --- |
+| 2026-08-12 | `982db64` + working tree | 调整 M2.2 的依赖顺序：先以 Ordered Declaration 和无效声明专项锁定正确性，再建立 Property ID/Typed Value 与统一属性影响元数据，随后实现 Selector Index 并立即用 500/200 Corpus 验证候选规则数和 Selector 求值工作量，最后收口类型化 Cascade。增加资产版本中途门和 Paint-only 更新不得触发同步纹理加载/无关图片重建的资源安全门。 | M2.2 仍为 0/5，宏观路线、预算和 M2.4 Resource Cache 归属不变；减少大迁移不可归因和索引实现后延迟验证的风险。 |
 | 2026-08-12 | `82365d3` + working tree | 将 Core 的 CSS Property 应用、Style Resolver 和 Yoga Layout Adapter 从 `WebToUECompiler.cpp` 拆为独立实现；新增每视图 `FWebToUERuntimePresentation`，集中持有 Layout Dirty、Text Layout、Paint Order、Brush 与 Resource Cache，`SWebToUEView` 只保留宿主、绑定、输入和事件协调。新增 `RuntimePresentationIsolation`，以双 View 的真实 Slate `OnPaint` 验证 Cache 身份、单实例样式失效、文档清理和 Compiled payload 不变。UE 5.8 Win64 Editor Development build、PID 22452 readiness/MCP/Python/World、聚焦 4/4、固定性能 5/5 和完整 23/23 通过；最终 P95 为暖 Layout `0.735801 ms`、未变化 Paint `0.300501 ms` 且 `0 / 0 B`，Hover/FieldNotify `58.171101 / 58.069199 ms`。 | M2.1 达到 6/6，M2 宏观达到 3/7；R-03 降为 Medium、R-05 降为 Low 并标记 Mitigated。资产 schema、自定义版本和旧资产行为不变；硬性能门继续通过，但不宣称性能改善。 |
 | 2026-08-12 | `18226f9` + working tree | 将 Computed Style 与 Layout Result 从 Hydration Node 移入每视图连续 `FWebToUERuntimeRenderData`，并与连续 NodeState 共用稳定索引但保持独立生命周期；Runtime/Compiler/View 全部改走显式访问边界。新增 `RuntimeCacheSeparation`，以同一 Document、不同 viewport 和单实例 Hover 验证双实例 Style/Layout 地址及结果互不污染，并确认 Compiled Node/Rule payload 不变。UE 5.8 Win64 Editor Development build、readiness/MCP/Python/World、聚焦正确性 7/7、两轮性能 4/4 和完整 22/22 通过；最终完整回归暖 Layout P95 `0.760999 ms` 与未变化 Paint `0 / 0 B` 继续通过硬门，Hover/FieldNotify P95 `59.009600 / 59.390798 ms` 仍未达标。 | M2.1 达到 5/6；R-03 继续缓解但保持 High，因为 Cache 所有权和 Compiler/View 职责仍未收口；资产 schema、自定义版本和旧资产行为不变，不宣称性能改善。 |
 | 2026-08-12 | `3a9b800` + working tree | 新增每视图 `FWebToUERuntimeInstance` 和连续 `FWebToUERuntimeNodeState`：Hydration 节点以稳定索引访问状态，Pseudo/Disabled、绑定文本/可见/启用、Focus/Pressed/Hover 与 Scroll 不再存放于 `FWebToUENode` 或 View 零散字段；新增 `RuntimeInstanceIsolation` 验证同一 Document 的双实例在 Pseudo/Focus、Scroll、Bound Text 上互不污染且不修改 Compiled payload。Win64 Editor Development build、readiness/MCP/Python/World、聚焦 8/8 和完整 21/21 通过；两次聚焦和完整回归继续通过暖 Layout `< 2.0 ms` 与未变化 Paint `0 / 0 B` 硬门，最终完整回归 P95 分别为暖 Layout `0.762999 ms`、未变化 Paint `0.262398 ms`、Hover `56.711402 ms`、FieldNotify `56.511901 ms`。 | M2.1 达到 4/6；R-03 继续缓解但保持 High，因为 Computed Style、Layout 和 Cache 尚未完全分离；资产 schema、自定义版本和旧资产行为不变。 |
