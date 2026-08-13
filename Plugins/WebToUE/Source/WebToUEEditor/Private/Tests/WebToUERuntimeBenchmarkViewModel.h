@@ -16,6 +16,22 @@ public:
 		return UE_MVVM_SET_PROPERTY_VALUE(BenchmarkLabel, NewValue);
 	}
 
+	bool SetBenchmarkVisible(bool bNewValue)
+	{
+		return UE_MVVM_SET_PROPERTY_VALUE(BenchmarkVisible, bNewValue);
+	}
+
+	bool SetUnrelatedLabel(const FText& NewValue)
+	{
+		return UE_MVVM_SET_PROPERTY_VALUE(UnrelatedLabel, NewValue);
+	}
+
 	UPROPERTY(FieldNotify)
 	FText BenchmarkLabel;
+
+	UPROPERTY(FieldNotify)
+	bool BenchmarkVisible = true;
+
+	UPROPERTY(FieldNotify)
+	FText UnrelatedLabel;
 };

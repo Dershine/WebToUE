@@ -41,6 +41,10 @@ namespace WebToUE::Performance::Tests
 		AddAttribute(Button, TEXT("id"), TEXT("performance-target"));
 		AddAttribute(Button, TEXT("data-ue-bind-text"), TEXT("LocalizationNamespace"));
 		AddAttribute(Button, TEXT("data-ue-on-click"), TEXT("MeasuredClick"));
+		FWebToUECompiledBindingOp& BindingOp = CompiledDocument.BindingOps.AddDefaulted_GetRef();
+		BindingOp.RootField = FName(TEXT("LocalizationNamespace"));
+		BindingOp.Kind = EWebToUEBindingKind::Text;
+		BindingOp.TargetNodeIndex = 1;
 
 		FWebToUECompiledNode& Text = CompiledDocument.Nodes.AddDefaulted_GetRef();
 		Text.Type = static_cast<uint8>(EWebToUENodeType::Text);
@@ -108,24 +112,30 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::HydratedNodes), uint64(3));
 	TestEqual(TEXT("Hydrate records the compiled rule count"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::HydratedRules), uint64(1));
-	TestEqual(TEXT("Three style passes visit all three nodes"),
-		Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(9));
-	TestEqual(TEXT("Three style passes select only the button rule candidate"),
-		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorCandidates), uint64(3));
-	TestEqual(TEXT("Three style passes evaluate only the selected candidate"),
-		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), uint64(3));
+	TestEqual(TEXT("Hydrate and initial cache setup visit all three style nodes"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(6));
+	TestEqual(TEXT("Two style passes select only the button rule candidate"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorCandidates), uint64(2));
+	TestEqual(TEXT("Two style passes evaluate only the selected candidate"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), uint64(2));
 	TestEqual(TEXT("The button selector matches once per style pass"),
-		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorMatches), uint64(3));
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorMatches), uint64(2));
 	TestEqual(TEXT("Layout builds one Yoga node per runtime node"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(3));
 	TestEqual(TEXT("The text cache is built once"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutBuilds), uint64(1));
 	TestEqual(TEXT("Text layout is computed for measure and paint"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(2));
-	TestEqual(TEXT("Two style refreshes each build body and button brushes"),
-		Snapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(4));
-	TestEqual(TEXT("Fixed cascade slots avoid one matched-rule growth per style pass"),
-		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations), uint64(17));
+	TestEqual(TEXT("Initial cache setup builds body and button brushes once"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(2));
+	TestEqual(TEXT("Direct binding avoids global cache rebuild allocations"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations), uint64(15));
+	TestEqual(TEXT("The direct binding reads one root field"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::BindingFieldsRead), uint64(1));
+	TestEqual(TEXT("The direct binding executes one compiled op"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::BindingOpsExecuted), uint64(1));
+	TestEqual(TEXT("The direct binding updates one text node"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::BindingNodesUpdated), uint64(1));
 	TestEqual(TEXT("Runtime state and render data each have a known owned payload"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadEvents), uint64(2));
 	TestEqual(TEXT("The separated runtime payloads are sized for every hydrated node"),
@@ -143,7 +153,7 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 			TelemetryMeasurements.Add(Name, Value);
 		});
 	TestEqual(TEXT("The telemetry schema has the expected version"),
-		FWebToUEPerformanceSnapshot::TelemetrySchemaVersion, 4);
+		FWebToUEPerformanceSnapshot::TelemetrySchemaVersion, 5);
 	TestEqual(TEXT("The telemetry schema exposes every phase field and workload counter"),
 		TelemetryMeasurements.Num(), FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);
 	static constexpr const TCHAR* ExpectedTelemetryNames[] = {
@@ -179,7 +189,10 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		TEXT("workload.style_dirty_targets"),
 		TEXT("workload.style_property_changes"),
 		TEXT("workload.text_cache_invalidations"),
-		TEXT("workload.paint_order_cache_builds")
+		TEXT("workload.paint_order_cache_builds"),
+		TEXT("workload.binding_fields_read"),
+		TEXT("workload.binding_ops_executed"),
+		TEXT("workload.binding_nodes_updated")
 	};
 	static_assert(UE_ARRAY_COUNT(ExpectedTelemetryNames) ==
 		FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);
@@ -193,11 +206,11 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Telemetry exposes hydrate inclusive time"),
 		TelemetryMeasurements.FindRef(TEXT("phase.hydrate.inclusive_ms")) > 0.0);
 	TestEqual(TEXT("Telemetry exposes selector candidates"),
-		TelemetryMeasurements.FindRef(TEXT("workload.selector_candidates")), 3.0);
+		TelemetryMeasurements.FindRef(TEXT("workload.selector_candidates")), 2.0);
 	TestEqual(TEXT("Telemetry exposes selector evaluations"),
-		TelemetryMeasurements.FindRef(TEXT("workload.selector_evaluations")), 3.0);
+		TelemetryMeasurements.FindRef(TEXT("workload.selector_evaluations")), 2.0);
 	TestEqual(TEXT("Telemetry exposes tracked allocation events"),
-		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocations")), 17.0);
+		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocations")), 15.0);
 	TestEqual(TEXT("Telemetry exposes tracked allocation payload events"),
 		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocation_payload_events")), 2.0);
 	TestEqual(TEXT("Telemetry exposes tracked allocation payload bytes"),

@@ -36,6 +36,7 @@ public:
 
 	void Reset();
 	void RebuildCaches(bool bReloadResources);
+	void InvalidateBoundText(FWebToUENode& Node);
 	void ApplyStyleUpdates(TConstArrayView<FWebToUEStyleUpdate> Updates);
 	void Layout(const FVector2f& ViewportSize) const;
 	int32 Paint(const FPaintArgs& Args, const FGeometry& Geometry,

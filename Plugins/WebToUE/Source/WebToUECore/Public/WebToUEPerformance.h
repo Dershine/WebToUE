@@ -52,6 +52,9 @@ enum class EWebToUEPerformanceCounter : uint8
 	StylePropertyChanges,
 	TextCacheInvalidations,
 	PaintOrderCacheBuilds,
+	BindingFieldsRead,
+	BindingOpsExecuted,
+	BindingNodesUpdated,
 	Count
 };
 
@@ -67,7 +70,7 @@ struct WEBTOUECORE_API FWebToUEPerformanceSnapshot
 {
 	static constexpr int32 PhaseCount = static_cast<int32>(EWebToUEPerformancePhase::Count);
 	static constexpr int32 CounterCount = static_cast<int32>(EWebToUEPerformanceCounter::Count);
-	static constexpr int32 TelemetrySchemaVersion = 4;
+	static constexpr int32 TelemetrySchemaVersion = 5;
 	static constexpr int32 TelemetryMeasurementCount = (PhaseCount * 2) + CounterCount;
 	TStaticArray<FWebToUEPerformanceMetric, PhaseCount> Metrics;
 	TStaticArray<uint64, CounterCount> Counters{};

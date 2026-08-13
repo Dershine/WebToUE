@@ -23,7 +23,7 @@ public:
 	virtual ~SWebToUEView() override;
 	void Construct(const FArguments& InArgs);
 	void SetDocument(UWebToUEDocument* InDocument);
-	void RefreshBindings(UObject* DataContext);
+	void RefreshBindings(UObject* DataContext, FName ChangedField = NAME_None);
 	TSet<FName> GetBoundFields() const;
 
 	virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override;

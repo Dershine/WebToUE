@@ -93,6 +93,16 @@ FWebToUENode* UWebToUEView::FindRuntimeNodeByIdForTesting(const FString& Id) con
 	return SlateView ? SlateView->FindRuntimeNodeByIdForTesting(Id) : nullptr;
 }
 
+FText UWebToUEView::GetDisplayTextForTesting(const FWebToUENode& Node) const
+{
+	return SlateView ? SlateView->GetDisplayTextForTesting(Node) : FText::GetEmpty();
+}
+
+bool UWebToUEView::GetRuntimeVisibleForTesting(const FWebToUENode& Node) const
+{
+	return SlateView && SlateView->GetRuntimeStateForTesting(Node).bRuntimeVisible;
+}
+
 FWebToUEInstanceHandle UWebToUEView::GetInstanceHandleForTesting(
 	const FWebToUENode& Node) const
 {
@@ -138,7 +148,10 @@ void UWebToUEView::UnbindFieldNotifications()
 
 void UWebToUEView::HandleFieldValueChanged(UObject* Object, UE::FieldNotification::FFieldId FieldId)
 {
-	RefreshBindings();
+	if (Object == DataContext && SlateView && FieldId.IsValid())
+	{
+		SlateView->RefreshBindings(DataContext, FieldId.GetName());
+	}
 }
 
 void UWebToUEView::HandleDocumentChanged(UWebToUEDocument* ChangedDocument)

@@ -49,7 +49,10 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.style_dirty_targets"),
 		TEXT("workload.style_property_changes"),
 		TEXT("workload.text_cache_invalidations"),
-		TEXT("workload.paint_order_cache_builds")
+		TEXT("workload.paint_order_cache_builds"),
+		TEXT("workload.binding_fields_read"),
+		TEXT("workload.binding_ops_executed"),
+		TEXT("workload.binding_nodes_updated")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -247,6 +250,9 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::StylePropertyChanges: return TEXT("style_property_changes");
 	case EWebToUEPerformanceCounter::TextCacheInvalidations: return TEXT("text_cache_invalidations");
 	case EWebToUEPerformanceCounter::PaintOrderCacheBuilds: return TEXT("paint_order_cache_builds");
+	case EWebToUEPerformanceCounter::BindingFieldsRead: return TEXT("binding_fields_read");
+	case EWebToUEPerformanceCounter::BindingOpsExecuted: return TEXT("binding_ops_executed");
+	case EWebToUEPerformanceCounter::BindingNodesUpdated: return TEXT("binding_nodes_updated");
 	default: return TEXT("unknown");
 	}
 }

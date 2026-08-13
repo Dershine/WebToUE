@@ -279,11 +279,9 @@ void SWebToUEView::RebuildStylesAndBrushes(EWebToUEStyleImpact Impacts)
 	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 }
 
-static bool ReadPropertyAsText(UObject* Context, const FString& Field, FText& Out)
+static bool ReadPropertyAsText(UObject* Context, const FProperty* Property, FText& Out)
 {
-	if (!Context) return false;
-	FProperty* Property = FindFProperty<FProperty>(Context->GetClass(), FName(*Field));
-	if (!Property) return false;
+	if (!Context || !Property) return false;
 	if (const FTextProperty* TextProperty = CastField<FTextProperty>(Property))
 	{
 		Out = TextProperty->GetPropertyValue_InContainer(Context);
@@ -305,35 +303,67 @@ static bool ReadPropertyAsText(UObject* Context, const FString& Field, FText& Ou
 	return true;
 }
 
-static bool ReadPropertyAsBool(UObject* Context, const FString& Field, bool& Out)
+static bool ReadPropertyAsBool(UObject* Context, const FProperty* Property, bool& Out)
 {
 	if (!Context) return false;
-	if (const FBoolProperty* Property = FindFProperty<FBoolProperty>(Context->GetClass(), FName(*Field)))
+	if (const FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
 	{
-		Out = Property->GetPropertyValue_InContainer(Context);
+		Out = BoolProperty->GetPropertyValue_InContainer(Context);
 		return true;
 	}
 	return false;
 }
 
-void SWebToUEView::RefreshBindings(UObject* DataContext)
+void SWebToUEView::RefreshBindings(UObject* DataContext, FName ChangedField)
 {
 	SCOPE_CYCLE_COUNTER(STAT_WebToUE_Binding);
 	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Binding);
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Binding);
 	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (!RuntimeDocument || !DataContext) return;
-	RuntimeDocument->ForEachNode([this, RuntimeDocument, DataContext](FWebToUENode& Node)
+	TSet<FWebToUEInstanceHandle> UpdatedNodes;
+	TArray<FWebToUEInstanceHandle> StyleTargets;
+	bool bTextChanged = false;
+	bool bPaintChanged = false;
+	const auto ApplyField = [&](FName RootField)
 	{
-		if (Node.Type != EWebToUENodeType::Element) return;
-		const FString TextField = Node.GetAttribute(TEXT("data-ue-bind-text"));
-		if (!TextField.IsEmpty())
+		const TConstArrayView<FWebToUERuntimeBindingOp> Ops =
+			RuntimeInstance->GetBindingOps(RootField);
+		if (Ops.IsEmpty()) return;
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::BindingFieldsRead);
+		const FProperty* Property = FindFProperty<FProperty>(
+			DataContext->GetClass(), RootField);
+		if (!Property)
 		{
-			FText Value;
-			if (ReadPropertyAsText(DataContext, TextField, Value))
+			ReportBindingErrorOnce(RootField.ToString(),
+				TEXT("Binding property was not found."));
+			return;
+		}
+		FText TextValue;
+		bool bTextRead = false;
+		bool bBoolValue = true;
+		bool bBoolRead = false;
+		for (const FWebToUERuntimeBindingOp& Op : Ops)
+		{
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::BindingOpsExecuted);
+			FWebToUENode* Node = RuntimeInstance->ResolveNode(Op.Target);
+			if (!Node || Node->Type != EWebToUENodeType::Element) continue;
+			if (Op.Kind == EWebToUEBindingKind::Text)
 			{
+				if (!bTextRead)
+				{
+					bTextRead = ReadPropertyAsText(DataContext, Property, TextValue);
+					if (!bTextRead)
+					{
+						ReportBindingErrorOnce(RootField.ToString(),
+							TEXT("Text binding property could not be read."));
+					}
+				}
+				if (!bTextRead) continue;
 				TSharedPtr<FWebToUENode> TextNode;
-				if (TSharedPtr<FWebToUENode>* Existing = Node.Children.FindByPredicate([](const TSharedPtr<FWebToUENode>& Child)
+				if (TSharedPtr<FWebToUENode>* Existing = Node->Children.FindByPredicate([](const TSharedPtr<FWebToUENode>& Child)
 				{
 					return Child->Type == EWebToUENodeType::Text;
 				}))
@@ -346,35 +376,85 @@ void SWebToUEView::RefreshBindings(UObject* DataContext)
 					TextNode = MakeShared<FWebToUENode>();
 					TextNode->Type = EWebToUENodeType::Text;
 					TextNode->Tag = TEXT("#text");
-					TextNode->Parent = &Node;
+					TextNode->Parent = Node;
 					RuntimeDocument->AddRuntimeNodeData(*TextNode);
-					Node.Children.Insert(TextNode, 0);
+					Node->Children.Insert(TextNode, 0);
+					StyleTargets.AddUnique(TextNode->InstanceHandle);
 				}
 				FWebToUERuntimeNodeState& TextState = GetRuntimeState(*TextNode);
-				TextState.BoundText = MoveTemp(Value);
+				if (TextState.bHasBoundText && TextState.BoundText.EqualTo(TextValue) &&
+					TextState.bHasRichTextOverride &&
+					TextState.bRichTextOverride == Op.bRichText)
+				{
+					continue;
+				}
+				TextState.BoundText = TextValue;
 				TextState.bHasBoundText = true;
 				TextState.bHasRichTextOverride = true;
-				TextState.bRichTextOverride = Node.GetAttribute(TEXT("data-ue-rich-text")).Equals(
-					TEXT("true"), ESearchCase::IgnoreCase);
+				TextState.bRichTextOverride = Op.bRichText;
+				UpdatedNodes.Add(TextNode->InstanceHandle);
+				Presentation->InvalidateBoundText(*TextNode);
+				bTextChanged = true;
 			}
-			else ReportBindingErrorOnce(TextField, TEXT("Text binding property was not found."));
+			else
+			{
+				if (!bBoolRead)
+				{
+					bBoolRead = ReadPropertyAsBool(DataContext, Property, bBoolValue);
+					if (!bBoolRead)
+					{
+						ReportBindingErrorOnce(RootField.ToString(),
+							TEXT("Visible and enabled bindings require a bool UPROPERTY."));
+					}
+				}
+				if (!bBoolRead) continue;
+				FWebToUERuntimeNodeState& State = GetRuntimeState(*Node);
+				bool& Current = Op.Kind == EWebToUEBindingKind::Visible
+					? State.bRuntimeVisible : State.bRuntimeEnabled;
+				if (Current == bBoolValue) continue;
+				Current = bBoolValue;
+				UpdatedNodes.Add(Node->InstanceHandle);
+				StyleTargets.AddUnique(Node->InstanceHandle);
+				bPaintChanged = true;
+			}
 		}
-		const FString VisibleField = Node.GetAttribute(TEXT("data-ue-bind-visible"));
-		if (!VisibleField.IsEmpty())
+	};
+
+	if (ChangedField.IsNone())
+	{
+		for (const TPair<FName, TArray<FWebToUERuntimeBindingOp>>& Pair :
+			RuntimeInstance->GetBindingIndex())
 		{
-			bool bValue = true;
-			if (ReadPropertyAsBool(DataContext, VisibleField, bValue)) GetRuntimeState(Node).bRuntimeVisible = bValue;
-			else ReportBindingErrorOnce(VisibleField, TEXT("Visible binding requires a bool UPROPERTY."));
+			ApplyField(Pair.Key);
 		}
-		const FString EnabledField = Node.GetAttribute(TEXT("data-ue-bind-enabled"));
-		if (!EnabledField.IsEmpty())
-		{
-			bool bValue = true;
-			if (ReadPropertyAsBool(DataContext, EnabledField, bValue)) GetRuntimeState(Node).bRuntimeEnabled = bValue;
-			else ReportBindingErrorOnce(EnabledField, TEXT("Enabled binding requires a bool UPROPERTY."));
-		}
-	});
-	RebuildStylesAndBrushes();
+	}
+	else
+	{
+		ApplyField(ChangedField);
+	}
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::BindingNodesUpdated, UpdatedNodes.Num());
+
+	TArray<FWebToUEStyleUpdate> StyleUpdates;
+	if (!StyleTargets.IsEmpty())
+	{
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::StyleDirtyTargets, StyleTargets.Num());
+		FWebToUEStyleResolver::ResolveIncremental(
+			*RuntimeDocument, StyleTargets, StyleUpdates);
+		Presentation->ApplyStyleUpdates(StyleUpdates);
+	}
+	if (bTextChanged || bPaintChanged || !StyleUpdates.IsEmpty())
+	{
+		const bool bNeedsLayout = bTextChanged || StyleUpdates.ContainsByPredicate(
+			[](const FWebToUEStyleUpdate& Update)
+			{
+				return EnumHasAnyFlags(Update.Changes.Impacts,
+					EWebToUEStyleImpact::Measure | EWebToUEStyleImpact::Layout);
+			});
+		Invalidate(bNeedsLayout ? EInvalidateWidgetReason::LayoutAndVolatility
+			: EInvalidateWidgetReason::Paint);
+	}
 }
 
 TSet<FName> SWebToUEView::GetBoundFields() const

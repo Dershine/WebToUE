@@ -63,6 +63,8 @@ public:
 	void LayoutForTesting(const FVector2f& ViewportSize);
 	bool GetRuntimeMemoryCensusForTesting(FWebToUERuntimeMemoryCensus& OutCensus) const;
 	FWebToUENode* FindRuntimeNodeByIdForTesting(const FString& Id) const;
+	FText GetDisplayTextForTesting(const FWebToUENode& Node) const;
+	bool GetRuntimeVisibleForTesting(const FWebToUENode& Node) const;
 	FWebToUEInstanceHandle GetInstanceHandleForTesting(const FWebToUENode& Node) const;
 	FWebToUENode* ResolveInstanceHandleForTesting(FWebToUEInstanceHandle Handle) const;
 #endif

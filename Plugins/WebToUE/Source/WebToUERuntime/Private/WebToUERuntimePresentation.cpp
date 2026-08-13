@@ -187,6 +187,16 @@ void FWebToUERuntimePresentation::RebuildCaches(bool bReloadResources)
 	bLayoutDirty = true;
 }
 
+void FWebToUERuntimePresentation::InvalidateBoundText(FWebToUENode& Node)
+{
+	if (TextLayouts.Remove(RuntimeInstance.GetHandle(&Node)) > 0)
+	{
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::TextCacheInvalidations);
+	}
+	bLayoutDirty = true;
+}
+
 void FWebToUERuntimePresentation::ApplyStyleUpdates(
 	TConstArrayView<FWebToUEStyleUpdate> Updates)
 {
