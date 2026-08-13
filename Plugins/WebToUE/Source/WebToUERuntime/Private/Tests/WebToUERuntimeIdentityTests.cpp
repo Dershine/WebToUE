@@ -46,6 +46,16 @@ bool FWebToUERuntimeIdentityTest::RunTest(const FString& Parameters)
 	Text.LocalizedText = FText::FromString(Text.Text);
 	Text.ParentIndex = 1;
 
+	FWebToUECompiledRule& ButtonRule = CompiledDocument.Rules.AddDefaulted_GetRef();
+	ButtonRule.Specificity = 1;
+	FWebToUECompiledSelectorSegment& ButtonSelector = ButtonRule.Selector.AddDefaulted_GetRef();
+	ButtonSelector.Type = TEXT("button");
+	FWebToUECompiledDeclaration& OpacityDeclaration =
+		ButtonRule.Declarations.AddDefaulted_GetRef();
+	OpacityDeclaration.Property = EWebToUECssProperty::Opacity;
+	OpacityDeclaration.TypedValue.Type = EWebToUEStyleValueType::Number;
+	OpacityDeclaration.TypedValue.Number = 0.75f;
+
 	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
 	const TSharedRef<SWebToUEView> FirstView = SNew(SWebToUEView);
 	const TSharedRef<SWebToUEView> SecondView = SNew(SWebToUEView);
@@ -81,6 +91,12 @@ bool FWebToUERuntimeIdentityTest::RunTest(const FString& Parameters)
 		SecondView->ResolveInstanceHandleForTesting(SecondHandle), SecondButton);
 	TestNull(TEXT("A handle cannot resolve in another View"),
 		SecondView->ResolveInstanceHandleForTesting(FirstHandle));
+	const void* InitialSharedStyleTemplate =
+		FirstView->GetSharedStyleTemplateIdentityForTesting();
+	TestNotNull(TEXT("Hydration prepares a shared immutable style template"),
+		InitialSharedStyleTemplate);
+	TestEqual(TEXT("Two Views share hydrated rules and Selector Metadata"),
+		SecondView->GetSharedStyleTemplateIdentityForTesting(), InitialSharedStyleTemplate);
 
 	FWebToUENode* DynamicText = FirstView->AddDynamicTextNodeForTesting(*FirstButton);
 	TestNotNull(TEXT("A dynamic runtime text node can be registered"), DynamicText);
@@ -117,6 +133,52 @@ bool FWebToUERuntimeIdentityTest::RunTest(const FString& Parameters)
 		FirstView->ResolveInstanceHandleForTesting(DynamicHandle));
 	TestEqual(TEXT("The current-generation handle resolves the rehydrated node"),
 		FirstView->ResolveInstanceHandleForTesting(RehydratedHandle), RehydratedButton);
+	TestEqual(TEXT("Rehydrating the same revision reuses the shared style template"),
+		FirstView->GetSharedStyleTemplateIdentityForTesting(), InitialSharedStyleTemplate);
+
+	FWebToUECompiledDocumentData RevisedDocument;
+	RevisedDocument.RootNodeIndex = 0;
+	RevisedDocument.Nodes = Document->GetCompiledNodes();
+	RevisedDocument.Rules = Document->GetCompiledRules();
+	FWebToUECompiledNode& AddedNode = RevisedDocument.Nodes.AddDefaulted_GetRef();
+	AddedNode.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	AddedNode.Tag = TEXT("div");
+	AddedNode.ParentIndex = 0;
+	AddAttribute(AddedNode, TEXT("id"), TEXT("added-after-reimport"));
+	Document->CommitCompiledDocument(MoveTemp(RevisedDocument));
+
+	FirstView->SetDocument(Document);
+	const void* RevisedSharedStyleTemplate =
+		FirstView->GetSharedStyleTemplateIdentityForTesting();
+	TestNotNull(TEXT("A revised document prepares a replacement style template"),
+		RevisedSharedStyleTemplate);
+	TestTrue(TEXT("A structural revision invalidates the document's cached style template"),
+		RevisedSharedStyleTemplate != InitialSharedStyleTemplate);
+	TestNull(TEXT("A pre-revision handle cannot resolve after reimport hydration"),
+		FirstView->ResolveInstanceHandleForTesting(RehydratedHandle));
+	TestEqual(TEXT("An existing View safely retains the old immutable revision until refresh"),
+		SecondView->GetSharedStyleTemplateIdentityForTesting(), InitialSharedStyleTemplate);
+	SecondView->SetDocument(Document);
+	TestEqual(TEXT("Refreshing another View adopts the same revised style template"),
+		SecondView->GetSharedStyleTemplateIdentityForTesting(), RevisedSharedStyleTemplate);
+
+	FWebToUEInstanceHandle DestroyedViewHandle;
+	{
+		const TSharedRef<SWebToUEView> DestroyedView = SNew(SWebToUEView);
+		DestroyedView->SetDocument(Document);
+		FWebToUENode* DestroyedViewButton =
+			DestroyedView->FindRuntimeNodeByIdForTesting(TEXT("target"));
+		TestNotNull(TEXT("The disposable View hydrates the target"), DestroyedViewButton);
+		if (!DestroyedViewButton)
+		{
+			return false;
+		}
+		DestroyedViewHandle = DestroyedView->GetInstanceHandleForTesting(*DestroyedViewButton);
+	}
+	const TSharedRef<SWebToUEView> ReplacementView = SNew(SWebToUEView);
+	ReplacementView->SetDocument(Document);
+	TestNull(TEXT("A destroyed View's handle cannot resolve in a replacement View"),
+		ReplacementView->ResolveInstanceHandleForTesting(DestroyedViewHandle));
 
 	return true;
 }

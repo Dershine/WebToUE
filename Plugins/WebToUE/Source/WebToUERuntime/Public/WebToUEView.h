@@ -11,6 +11,7 @@ class UWebToUEDocument;
 #if WITH_DEV_AUTOMATION_TESTS
 struct FWebToUERuntimeMemoryCensus
 {
+	uint64 SharedStyleTemplateKnownOwnedBytes = 0;
 	uint64 RuntimeKnownOwnedBytes = 0;
 	uint64 PresentationKnownOwnedBytes = 0;
 	int32 RuntimeNodeCount = 0;

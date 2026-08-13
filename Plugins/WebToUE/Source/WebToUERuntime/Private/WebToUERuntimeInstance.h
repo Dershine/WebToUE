@@ -34,6 +34,8 @@ public:
 
 #if WITH_DEV_AUTOMATION_TESTS
 	uint64 GetKnownOwnedBytesForTesting() const;
+	uint64 GetSharedStyleTemplateKnownOwnedBytesForTesting() const;
+	const void* GetSharedStyleTemplateIdentityForTesting() const;
 	int32 GetRuntimeNodeCountForTesting() const;
 	int32 GetRuntimeRuleCountForTesting() const;
 #endif

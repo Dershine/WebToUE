@@ -117,6 +117,7 @@ public:
 	const FString& GetLocalizationNamespace() const { return LocalizationNamespace; }
 	const TArray<FWebToUECompiledNode>& GetCompiledNodes() const { return CompiledNodes; }
 	const TArray<FWebToUECompiledRule>& GetCompiledRules() const { return CompiledRules; }
+	TSharedPtr<const FWebToUERuntimeStyleTemplate> GetOrCreateRuntimeStyleTemplate() const;
 	int32 GetRootNodeIndex() const { return RootNodeIndex; }
 	const TArray<TSoftObjectPtr<UTexture2D>>& GetReferencedTextures() const { return ReferencedTextures; }
 	const TArray<TSoftObjectPtr<UStringTable>>& GetReferencedStringTables() const { return ReferencedStringTables; }
@@ -181,4 +182,6 @@ private:
 
 	UPROPERTY()
 	TArray<TSoftObjectPtr<UStringTable>> ReferencedStringTables;
+
+	mutable TSharedPtr<const FWebToUERuntimeStyleTemplate> RuntimeStyleTemplate;
 };

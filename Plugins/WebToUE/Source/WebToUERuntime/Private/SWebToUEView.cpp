@@ -129,6 +129,8 @@ bool SWebToUEView::GetRuntimeMemoryCensusForTesting(
 	{
 		return false;
 	}
+	OutCensus.SharedStyleTemplateKnownOwnedBytes =
+		RuntimeInstance->GetSharedStyleTemplateKnownOwnedBytesForTesting();
 	OutCensus.RuntimeKnownOwnedBytes = RuntimeInstance->GetKnownOwnedBytesForTesting();
 	OutCensus.PresentationKnownOwnedBytes = Presentation->GetKnownOwnedBytesForTesting();
 	OutCensus.RuntimeNodeCount = RuntimeInstance->GetRuntimeNodeCountForTesting();
@@ -163,6 +165,11 @@ FWebToUENode* SWebToUEView::ResolveInstanceHandleForTesting(
 	FWebToUEInstanceHandle Handle) const
 {
 	return const_cast<FWebToUENode*>(RuntimeInstance->ResolveNode(Handle));
+}
+
+const void* SWebToUEView::GetSharedStyleTemplateIdentityForTesting() const
+{
+	return RuntimeInstance->GetSharedStyleTemplateIdentityForTesting();
 }
 
 FWebToUENode* SWebToUEView::AddDynamicTextNodeForTesting(FWebToUENode& Parent)
@@ -279,7 +286,7 @@ void SWebToUEView::CachePseudoStateImpacts()
 	PseudoStateImpacts = EWebToUEStyleImpact::Style;
 	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
 	if (!RuntimeDocument) return;
-	for (const FWebToUEStyleRule& Rule : RuntimeDocument->Rules)
+	for (const FWebToUEStyleRule& Rule : RuntimeDocument->GetRules())
 	{
 		const bool bHasPseudoState = Rule.Selector.ContainsByPredicate(
 			[](const FWebToUESelectorSegment& Segment)

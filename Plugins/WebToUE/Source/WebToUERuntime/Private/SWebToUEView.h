@@ -53,6 +53,7 @@ public:
 	FWebToUEInstanceHandle GetInstanceHandleForTesting(const FWebToUENode& Node) const;
 	FWebToUETemplateNodeId GetTemplateNodeIdForTesting(const FWebToUENode& Node) const;
 	FWebToUENode* ResolveInstanceHandleForTesting(FWebToUEInstanceHandle Handle) const;
+	const void* GetSharedStyleTemplateIdentityForTesting() const;
 	FWebToUENode* AddDynamicTextNodeForTesting(FWebToUENode& Parent);
 	void SetHoveredNodeForTesting(FWebToUENode* Node) { SetHoveredNode(Node); }
 	void SetFocusedNodeForTesting(FWebToUENode* Node) { SetFocusedNode(Node); }

@@ -182,6 +182,8 @@ bool FWebToUERuntimeHydrationBenchmarkTest::RunTest(const FString& Parameters)
 				Sample.Census.RuntimeNodeCount, Scenario.Definition.NodeCount);
 			TestEqual(*(SamplePrefix + TEXT("census sees every runtime rule")),
 				Sample.Census.RuntimeRuleCount, Scenario.Definition.RuleCount);
+			TestTrue(*(SamplePrefix + TEXT("reports a shared immutable style template")),
+				Sample.Census.SharedStyleTemplateKnownOwnedBytes > 0);
 			TestTrue(*(SamplePrefix + TEXT("records positive runtime-owned bytes")),
 				Sample.Census.RuntimeKnownOwnedBytes > 0);
 			TestTrue(*(SamplePrefix + TEXT("records positive presentation-owned bytes")),
@@ -272,6 +274,9 @@ bool FWebToUERuntimeHydrationBenchmarkTest::RunTest(const FString& Parameters)
 			SecondViewCensus.RuntimeNodeCount, Scenario.Definition.NodeCount);
 		TestEqual(*(Prefix + TEXT("first and second View known-owned totals are deterministic")),
 			FirstViewCensus.GetTotalKnownOwnedBytes(), SecondViewCensus.GetTotalKnownOwnedBytes());
+		TestEqual(*(Prefix + TEXT("first and second View reference one deterministic shared style payload")),
+			FirstViewCensus.SharedStyleTemplateKnownOwnedBytes,
+			SecondViewCensus.SharedStyleTemplateKnownOwnedBytes);
 
 		const int64 FirstViewRssDelta = SignedDelta(RssAfterFirstView, RssBeforeViews);
 		const int64 SecondViewRssDelta = SignedDelta(RssAfterSecondView, RssAfterFirstView);
@@ -298,6 +303,8 @@ bool FWebToUERuntimeHydrationBenchmarkTest::RunTest(const FString& Parameters)
 			PhaseDistribution.P95, SummaryContext);
 		AddTelemetryData(TEXT("runtime.memory.first_view.runtime_known_owned_bytes"),
 			static_cast<double>(FirstViewCensus.RuntimeKnownOwnedBytes), SummaryContext);
+		AddTelemetryData(TEXT("runtime.memory.shared_style_template_known_owned_bytes"),
+			static_cast<double>(FirstViewCensus.SharedStyleTemplateKnownOwnedBytes), SummaryContext);
 		AddTelemetryData(TEXT("runtime.memory.first_view.presentation_known_owned_bytes"),
 			static_cast<double>(FirstViewCensus.PresentationKnownOwnedBytes), SummaryContext);
 		AddTelemetryData(TEXT("runtime.memory.first_view.total_known_owned_bytes"),
@@ -318,9 +325,10 @@ bool FWebToUERuntimeHydrationBenchmarkTest::RunTest(const FString& Parameters)
 			AmplifiedRssBytesPerView, SummaryContext);
 
 		AddInfo(Prefix + FString::Printf(
-			TEXT("hydrate={inclusive_p50_ms=%.6f,inclusive_p95_ms=%.6f,phase_p50_ms=%.6f,phase_p95_ms=%.6f}; memory={first_view_known_owned_bytes=%llu,second_view_incremental_known_owned_bytes=%llu,rss_first_delta_bytes=%lld,rss_second_delta_bytes=%lld,rss_%d_view_delta_bytes=%lld,rss_amplified_bytes_per_view=%.2f}"),
+			TEXT("hydrate={inclusive_p50_ms=%.6f,inclusive_p95_ms=%.6f,phase_p50_ms=%.6f,phase_p95_ms=%.6f}; memory={shared_style_template_known_owned_bytes=%llu,first_view_known_owned_bytes=%llu,second_view_incremental_known_owned_bytes=%llu,rss_first_delta_bytes=%lld,rss_second_delta_bytes=%lld,rss_%d_view_delta_bytes=%lld,rss_amplified_bytes_per_view=%.2f}"),
 			InclusiveDistribution.P50, InclusiveDistribution.P95,
 			PhaseDistribution.P50, PhaseDistribution.P95,
+			FirstViewCensus.SharedStyleTemplateKnownOwnedBytes,
 			FirstViewCensus.GetTotalKnownOwnedBytes(),
 			SecondViewCensus.GetTotalKnownOwnedBytes(),
 			FirstViewRssDelta, SecondViewRssDelta, AmplificationViewCount,

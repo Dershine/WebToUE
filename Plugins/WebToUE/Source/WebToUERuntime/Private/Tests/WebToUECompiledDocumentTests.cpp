@@ -156,17 +156,18 @@ bool FWebToUEOrderedDeclarationHydrationTest::RunTest(const FString& Parameters)
 	const FWebToUEDocument* RuntimeDocument = RuntimeInstance.GetDocument();
 	TestNotNull(TEXT("Hydration creates a runtime document"), RuntimeDocument);
 	if (!RuntimeDocument) return false;
-	TestEqual(TEXT("Hydration preserves the declaration count"), RuntimeDocument->Rules[0].Declarations.Num(), 3);
-	if (RuntimeDocument->Rules[0].Declarations.Num() == 3)
+	const TArray<FWebToUEStyleRule>& RuntimeRules = RuntimeDocument->GetRules();
+	TestEqual(TEXT("Hydration preserves the declaration count"), RuntimeRules[0].Declarations.Num(), 3);
+	if (RuntimeRules[0].Declarations.Num() == 3)
 	{
 		TestEqual(TEXT("Hydration preserves the first typed duplicate"),
-			RuntimeDocument->Rules[0].Declarations[0].TypedValue.Color, FLinearColor::Red);
+			RuntimeRules[0].Declarations[0].TypedValue.Color, FLinearColor::Red);
 		TestEqual(TEXT("Hydration upgrades the interleaved version 3 declaration once"),
-			RuntimeDocument->Rules[0].Declarations[1].Property, EWebToUECssProperty::Width);
+			RuntimeRules[0].Declarations[1].Property, EWebToUECssProperty::Width);
 		TestEqual(TEXT("Hydration parses the version 3 declaration into a length"),
-			RuntimeDocument->Rules[0].Declarations[1].TypedValue.Length.Value, 80.0f);
+			RuntimeRules[0].Declarations[1].TypedValue.Length.Value, 80.0f);
 		TestEqual(TEXT("Hydration preserves the last typed duplicate"),
-			RuntimeDocument->Rules[0].Declarations[2].TypedValue.Color, FLinearColor::Green);
+			RuntimeRules[0].Declarations[2].TypedValue.Color, FLinearColor::Green);
 	}
 
 	FWebToUENode* RuntimeTarget = nullptr;

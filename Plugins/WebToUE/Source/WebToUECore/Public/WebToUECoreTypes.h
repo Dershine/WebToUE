@@ -387,6 +387,13 @@ struct WEBTOUECORE_API FWebToUESelectorIndex
 	TArray<int32> UniversalRules;
 
 	void Reset();
+	void Initialize(const TArray<FWebToUEStyleRule>& Rules);
+};
+
+struct WEBTOUECORE_API FWebToUERuntimeStyleTemplate
+{
+	TArray<FWebToUEStyleRule> Rules;
+	FWebToUESelectorIndex SelectorIndex;
 };
 
 struct WEBTOUECORE_API FWebToUEDocument
@@ -399,10 +406,14 @@ struct WEBTOUECORE_API FWebToUEDocument
 	TArray<FWebToUERuntimeRenderData> RuntimeRenderData;
 	TArray<FWebToUENode*> RuntimeNodesBySlot;
 	FWebToUESelectorIndex SelectorIndex;
+	TSharedPtr<const FWebToUERuntimeStyleTemplate> SharedStyleTemplate;
 
 	bool HasErrors() const;
 	void InitializeRuntimeData(uint64 InOwnerId = 0, uint32 InGeneration = 1);
 	void InitializeSelectorIndex();
+	void SetSharedStyleTemplate(TSharedPtr<const FWebToUERuntimeStyleTemplate> InTemplate);
+	const TArray<FWebToUEStyleRule>& GetRules() const;
+	const FWebToUESelectorIndex& GetSelectorIndex() const;
 	void AddRuntimeNodeData(FWebToUENode& Node);
 	int32 ForEachSelectorCandidate(const FWebToUENode& Node,
 		TFunctionRef<void(const FWebToUEStyleRule&)> Visitor) const;

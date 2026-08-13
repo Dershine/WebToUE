@@ -92,7 +92,10 @@ void FWebToUEDocument::InitializeRuntimeData(uint64 InOwnerId, uint32 InGenerati
 		Node.InitializeSelectorIdentity();
 		AddRuntimeNodeData(Node);
 	});
-	InitializeSelectorIndex();
+	if (!SharedStyleTemplate)
+	{
+		InitializeSelectorIndex();
+	}
 }
 
 void FWebToUESelectorIndex::Reset()
@@ -107,9 +110,9 @@ void FWebToUESelectorIndex::Reset()
 	UniversalRules.Reset();
 }
 
-void FWebToUEDocument::InitializeSelectorIndex()
+void FWebToUESelectorIndex::Initialize(const TArray<FWebToUEStyleRule>& Rules)
 {
-	SelectorIndex.Reset();
+	Reset();
 	for (int32 RuleIndex = 0; RuleIndex < Rules.Num(); ++RuleIndex)
 	{
 		const FWebToUEStyleRule& Rule = Rules[RuleIndex];
@@ -121,37 +124,58 @@ void FWebToUEDocument::InitializeSelectorIndex()
 		const FWebToUESelectorSegment& Key = Rule.Selector.Last();
 		if (!Key.Id.IsEmpty())
 		{
-			SelectorIndex.IdRules.FindOrAdd(Key.Id.ToLower()).Add(RuleIndex);
+			IdRules.FindOrAdd(Key.Id.ToLower()).Add(RuleIndex);
 		}
 		else if (!Key.Classes.IsEmpty())
 		{
-			SelectorIndex.ClassRules.FindOrAdd(Key.Classes[0].ToLower()).Add(RuleIndex);
+			ClassRules.FindOrAdd(Key.Classes[0].ToLower()).Add(RuleIndex);
 		}
 		else if (!Key.Type.IsEmpty())
 		{
-			SelectorIndex.TagRules.FindOrAdd(Key.Type.ToLower()).Add(RuleIndex);
+			TagRules.FindOrAdd(Key.Type.ToLower()).Add(RuleIndex);
 		}
 		else if (EnumHasAnyFlags(Key.RequiredState, EWebToUEPseudoState::Hover))
 		{
-			SelectorIndex.HoverRules.Add(RuleIndex);
+			HoverRules.Add(RuleIndex);
 		}
 		else if (EnumHasAnyFlags(Key.RequiredState, EWebToUEPseudoState::Active))
 		{
-			SelectorIndex.ActiveRules.Add(RuleIndex);
+			ActiveRules.Add(RuleIndex);
 		}
 		else if (EnumHasAnyFlags(Key.RequiredState, EWebToUEPseudoState::Focus))
 		{
-			SelectorIndex.FocusRules.Add(RuleIndex);
+			FocusRules.Add(RuleIndex);
 		}
 		else if (EnumHasAnyFlags(Key.RequiredState, EWebToUEPseudoState::Disabled))
 		{
-			SelectorIndex.DisabledRules.Add(RuleIndex);
+			DisabledRules.Add(RuleIndex);
 		}
 		else
 		{
-			SelectorIndex.UniversalRules.Add(RuleIndex);
+			UniversalRules.Add(RuleIndex);
 		}
 	}
+}
+
+void FWebToUEDocument::InitializeSelectorIndex()
+{
+	SelectorIndex.Initialize(Rules);
+}
+
+void FWebToUEDocument::SetSharedStyleTemplate(
+	TSharedPtr<const FWebToUERuntimeStyleTemplate> InTemplate)
+{
+	SharedStyleTemplate = MoveTemp(InTemplate);
+}
+
+const TArray<FWebToUEStyleRule>& FWebToUEDocument::GetRules() const
+{
+	return SharedStyleTemplate ? SharedStyleTemplate->Rules : Rules;
+}
+
+const FWebToUESelectorIndex& FWebToUEDocument::GetSelectorIndex() const
+{
+	return SharedStyleTemplate ? SharedStyleTemplate->SelectorIndex : SelectorIndex;
 }
 
 int32 FWebToUEDocument::ForEachSelectorCandidate(const FWebToUENode& Node,
@@ -163,7 +187,9 @@ int32 FWebToUEDocument::ForEachSelectorCandidate(const FWebToUENode& Node,
 	}
 
 	int32 CandidateCount = 0;
-	const auto VisitRules = [this, &Visitor, &CandidateCount](const TArray<int32>* RuleIndices)
+	const TArray<FWebToUEStyleRule>& ActiveRules = GetRules();
+	const FWebToUESelectorIndex& ActiveIndex = GetSelectorIndex();
+	const auto VisitRules = [&ActiveRules, &Visitor, &CandidateCount](const TArray<int32>* RuleIndices)
 	{
 		if (!RuleIndices)
 		{
@@ -172,26 +198,26 @@ int32 FWebToUEDocument::ForEachSelectorCandidate(const FWebToUENode& Node,
 		CandidateCount += RuleIndices->Num();
 		for (const int32 RuleIndex : *RuleIndices)
 		{
-			Visitor(Rules[RuleIndex]);
+			Visitor(ActiveRules[RuleIndex]);
 		}
 	};
 
 	if (!Node.GetSelectorId().IsEmpty())
 	{
-		VisitRules(SelectorIndex.IdRules.Find(Node.GetSelectorId()));
+		VisitRules(ActiveIndex.IdRules.Find(Node.GetSelectorId()));
 	}
 	for (const FString& ClassName : Node.SelectorClasses)
 	{
-		VisitRules(SelectorIndex.ClassRules.Find(ClassName));
+		VisitRules(ActiveIndex.ClassRules.Find(ClassName));
 	}
-	VisitRules(SelectorIndex.TagRules.Find(Node.Tag));
+	VisitRules(ActiveIndex.TagRules.Find(Node.Tag));
 
 	const EWebToUEPseudoState PseudoStates = GetRuntimeNodeState(Node).PseudoStates;
-	if (EnumHasAnyFlags(PseudoStates, EWebToUEPseudoState::Hover)) VisitRules(&SelectorIndex.HoverRules);
-	if (EnumHasAnyFlags(PseudoStates, EWebToUEPseudoState::Active)) VisitRules(&SelectorIndex.ActiveRules);
-	if (EnumHasAnyFlags(PseudoStates, EWebToUEPseudoState::Focus)) VisitRules(&SelectorIndex.FocusRules);
-	if (EnumHasAnyFlags(PseudoStates, EWebToUEPseudoState::Disabled)) VisitRules(&SelectorIndex.DisabledRules);
-	VisitRules(&SelectorIndex.UniversalRules);
+	if (EnumHasAnyFlags(PseudoStates, EWebToUEPseudoState::Hover)) VisitRules(&ActiveIndex.HoverRules);
+	if (EnumHasAnyFlags(PseudoStates, EWebToUEPseudoState::Active)) VisitRules(&ActiveIndex.ActiveRules);
+	if (EnumHasAnyFlags(PseudoStates, EWebToUEPseudoState::Focus)) VisitRules(&ActiveIndex.FocusRules);
+	if (EnumHasAnyFlags(PseudoStates, EWebToUEPseudoState::Disabled)) VisitRules(&ActiveIndex.DisabledRules);
+	VisitRules(&ActiveIndex.UniversalRules);
 	return CandidateCount;
 }
 

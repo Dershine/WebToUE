@@ -48,6 +48,30 @@ namespace WebToUE::RuntimeInstance::Private
 		return Bytes;
 	}
 
+	static uint64 GetStyleTemplateOwnedBytes(const FWebToUERuntimeStyleTemplate& StyleTemplate)
+	{
+		uint64 Bytes = sizeof(StyleTemplate) + StyleTemplate.Rules.GetAllocatedSize() +
+			GetSelectorIndexOwnedBytes(StyleTemplate.SelectorIndex);
+		for (const FWebToUEStyleRule& Rule : StyleTemplate.Rules)
+		{
+			Bytes += Rule.Selector.GetAllocatedSize() + Rule.Declarations.GetAllocatedSize();
+			for (const FWebToUESelectorSegment& Segment : Rule.Selector)
+			{
+				Bytes += Segment.Type.GetAllocatedSize() + Segment.Id.GetAllocatedSize() +
+					Segment.Classes.GetAllocatedSize();
+				for (const FString& ClassName : Segment.Classes)
+				{
+					Bytes += ClassName.GetAllocatedSize();
+				}
+			}
+			for (const FWebToUEStyleDeclaration& Declaration : Rule.Declarations)
+			{
+				Bytes += GetDeclarationOwnedBytes(Declaration);
+			}
+		}
+		return Bytes;
+	}
+
 	static bool HydrateDeclaration(const FWebToUECompiledDeclaration& Source,
 		FWebToUEStyleDeclaration& OutDeclaration)
 	{
@@ -145,6 +169,21 @@ uint64 FWebToUERuntimeInstance::GetKnownOwnedBytesForTesting() const
 	return Bytes;
 }
 
+uint64 FWebToUERuntimeInstance::GetSharedStyleTemplateKnownOwnedBytesForTesting() const
+{
+	if (!RuntimeDocument || !RuntimeDocument->SharedStyleTemplate)
+	{
+		return 0;
+	}
+	return WebToUE::RuntimeInstance::Private::GetStyleTemplateOwnedBytes(
+		*RuntimeDocument->SharedStyleTemplate);
+}
+
+const void* FWebToUERuntimeInstance::GetSharedStyleTemplateIdentityForTesting() const
+{
+	return RuntimeDocument ? RuntimeDocument->SharedStyleTemplate.Get() : nullptr;
+}
+
 int32 FWebToUERuntimeInstance::GetRuntimeNodeCountForTesting() const
 {
 	int32 NodeCount = 0;
@@ -157,7 +196,7 @@ int32 FWebToUERuntimeInstance::GetRuntimeNodeCountForTesting() const
 
 int32 FWebToUERuntimeInstance::GetRuntimeRuleCountForTesting() const
 {
-	return RuntimeDocument ? RuntimeDocument->Rules.Num() : 0;
+	return RuntimeDocument ? RuntimeDocument->GetRules().Num() : 0;
 }
 #endif
 
@@ -215,10 +254,17 @@ bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 	}
 
 	const TArray<FWebToUECompiledRule>& CompiledRules = CompiledDocument.GetCompiledRules();
+	const TSharedPtr<const FWebToUERuntimeStyleTemplate> SharedStyleTemplate =
+		CompiledDocument.GetOrCreateRuntimeStyleTemplate();
+	if (!SharedStyleTemplate)
+	{
+		return false;
+	}
 	FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::HydratedNodes, CompiledNodes.Num());
 	FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::HydratedRules, CompiledRules.Num());
 	FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 	RuntimeDocument = MakeShared<FWebToUEDocument>();
+	RuntimeDocument->SetSharedStyleTemplate(SharedStyleTemplate);
 
 	TArray<TSharedPtr<FWebToUENode>> Nodes;
 	if (!CompiledNodes.IsEmpty())
@@ -278,35 +324,6 @@ bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 		}
 	}
 	RuntimeDocument->Root = Nodes[CompiledDocument.GetRootNodeIndex()];
-
-	for (const FWebToUECompiledRule& SourceRule : CompiledRules)
-	{
-		FWebToUEStyleRule Rule;
-		Rule.Specificity = SourceRule.Specificity;
-		Rule.SourceOrder = SourceRule.SourceOrder;
-		for (const FWebToUECompiledSelectorSegment& SourceSegment : SourceRule.Selector)
-		{
-			FWebToUESelectorSegment Segment;
-			Segment.Type = SourceSegment.Type;
-			Segment.Id = SourceSegment.Id;
-			Segment.Classes = SourceSegment.Classes;
-			Segment.RequiredState = static_cast<EWebToUEPseudoState>(SourceSegment.RequiredState);
-			Segment.RelationToPrevious = static_cast<EWebToUECombinator>(SourceSegment.RelationToPrevious);
-			Rule.Selector.Add(MoveTemp(Segment));
-		}
-		for (const FWebToUECompiledDeclaration& Declaration : SourceRule.Declarations)
-		{
-			FWebToUEStyleDeclaration& RuntimeDeclaration = Rule.Declarations.AddDefaulted_GetRef();
-			if (!WebToUE::RuntimeInstance::Private::HydrateDeclaration(Declaration, RuntimeDeclaration))
-			{
-				UE_LOG(LogWebToUERuntimeInstance, Error,
-					TEXT("Failed to hydrate legacy or typed style declaration '%s'."), *Declaration.Name);
-				Reset();
-				return false;
-			}
-		}
-		RuntimeDocument->Rules.Add(MoveTemp(Rule));
-	}
 
 	RuntimeDocument->InitializeRuntimeData(OwnerId, Generation);
 	FWebToUEStyleResolver::Resolve(*RuntimeDocument);
