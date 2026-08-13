@@ -51,7 +51,8 @@ namespace WebToUE::RuntimeInstance::Private
 	static uint64 GetStyleTemplateOwnedBytes(const FWebToUERuntimeStyleTemplate& StyleTemplate)
 	{
 		uint64 Bytes = sizeof(StyleTemplate) + StyleTemplate.Rules.GetAllocatedSize() +
-			GetSelectorIndexOwnedBytes(StyleTemplate.SelectorIndex);
+			GetSelectorIndexOwnedBytes(StyleTemplate.SelectorIndex) +
+			StyleTemplate.PseudoInvalidationDependencies.GetAllocatedSize();
 		for (const FWebToUEStyleRule& Rule : StyleTemplate.Rules)
 		{
 			Bytes += Rule.Selector.GetAllocatedSize() + Rule.Declarations.GetAllocatedSize();
@@ -69,6 +70,26 @@ namespace WebToUE::RuntimeInstance::Private
 				Bytes += GetDeclarationOwnedBytes(Declaration);
 			}
 		}
+		return Bytes;
+	}
+
+	static uint64 GetSelectorTargetIndexOwnedBytes(
+		const FWebToUERuntimeSelectorTargetIndex& Index)
+	{
+		uint64 Bytes = Index.IdTargets.GetAllocatedSize() +
+			Index.ClassTargets.GetAllocatedSize() + Index.TagTargets.GetAllocatedSize() +
+			Index.UniversalTargets.GetAllocatedSize();
+		const auto AddMapBytes = [&Bytes](
+			const TMap<FString, TArray<FWebToUEInstanceHandle>>& Map)
+		{
+			for (const TPair<FString, TArray<FWebToUEInstanceHandle>>& Pair : Map)
+			{
+				Bytes += Pair.Key.GetAllocatedSize() + Pair.Value.GetAllocatedSize();
+			}
+		};
+		AddMapBytes(Index.IdTargets);
+		AddMapBytes(Index.ClassTargets);
+		AddMapBytes(Index.TagTargets);
 		return Bytes;
 	}
 
@@ -119,7 +140,9 @@ uint64 FWebToUERuntimeInstance::GetKnownOwnedBytesForTesting() const
 	Bytes += RuntimeDocument->RuntimeNodeStates.GetAllocatedSize();
 	Bytes += RuntimeDocument->RuntimeRenderData.GetAllocatedSize();
 	Bytes += RuntimeDocument->RuntimeNodesBySlot.GetAllocatedSize();
+	Bytes += RuntimeDocument->PseudoInvalidationDependencies.GetAllocatedSize();
 	Bytes += GetSelectorIndexOwnedBytes(RuntimeDocument->SelectorIndex);
+	Bytes += GetSelectorTargetIndexOwnedBytes(RuntimeDocument->RuntimeSelectorTargets);
 
 	for (const FString& Stylesheet : RuntimeDocument->LinkedStylesheets)
 	{

@@ -677,9 +677,11 @@ void SWebToUEView::UpdatePseudoState(FWebToUENode* OldNode, FWebToUENode* NewNod
 
 	if (!Updates.IsEmpty())
 	{
-		Presentation->RebuildCaches(
-			EnumHasAnyFlags(CombinedImpacts, EWebToUEStyleImpact::Resource));
-		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+		Presentation->ApplyStyleUpdates(Updates);
+		Invalidate(EnumHasAnyFlags(CombinedImpacts,
+			EWebToUEStyleImpact::Measure | EWebToUEStyleImpact::Layout)
+			? EInvalidateWidgetReason::LayoutAndVolatility
+			: EInvalidateWidgetReason::Paint);
 	}
 }
 

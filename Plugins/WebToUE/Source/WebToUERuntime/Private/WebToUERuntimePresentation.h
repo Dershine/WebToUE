@@ -36,6 +36,7 @@ public:
 
 	void Reset();
 	void RebuildCaches(bool bReloadResources);
+	void ApplyStyleUpdates(TConstArrayView<FWebToUEStyleUpdate> Updates);
 	void Layout(const FVector2f& ViewportSize) const;
 	int32 Paint(const FPaintArgs& Args, const FGeometry& Geometry,
 		const FSlateRect& CullingRect, FSlateWindowElementList& Out, int32 LayerId,
@@ -93,5 +94,6 @@ private:
 		FSlateWindowElementList& Out, int32 LayerId, const FWidgetStyle& WidgetStyle,
 		float ParentOpacity, bool bParentEnabled, const FVector2f& InheritedScrollOffset) const;
 	void RebuildBrushes(bool bReloadResources) const;
+	void RebuildBrush(FWebToUENode& Node, bool bReloadResource) const;
 	void RebuildPaintOrderCache();
 };

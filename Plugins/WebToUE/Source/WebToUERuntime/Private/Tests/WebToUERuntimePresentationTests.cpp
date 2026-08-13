@@ -163,19 +163,25 @@ bool FWebToUERuntimePresentationIsolationTest::RunTest(const FString& Parameters
 		FirstView->IsPresentationLayoutDirtyForTesting());
 	TestFalse(TEXT("Final paint satisfies the second presentation layout"),
 		SecondView->IsPresentationLayoutDirtyForTesting());
+	const void* FirstButtonBrush =
+		FirstView->GetPresentationBrushIdentityForTesting(*FirstButton);
 
 	FirstView->SetHoveredNodeForTesting(FirstButton);
-	TestEqual(TEXT("A first-view style refresh invalidates only its text cache"),
-		FirstView->GetPresentationTextCacheCountForTesting(), 0);
+	TestEqual(TEXT("A paint-only style refresh preserves its unrelated text cache"),
+		FirstView->GetPresentationTextCacheCountForTesting(), 1);
+	TestEqual(TEXT("A paint-only style refresh preserves text cache identity"),
+		FirstView->GetPresentationTextCacheIdentityForTesting(FirstText), FirstTextCache);
+	TestNotEqual(TEXT("The changed background rebuilds only the affected element brush"),
+		FirstView->GetPresentationBrushIdentityForTesting(*FirstButton), FirstButtonBrush);
 	TestEqual(TEXT("The second view retains its warm text cache"),
 		SecondView->GetPresentationTextCacheCountForTesting(), 1);
-	TestTrue(TEXT("The first presentation marks layout dirty after style refresh"),
+	TestFalse(TEXT("Paint-only style does not mark the first presentation layout dirty"),
 		FirstView->IsPresentationLayoutDirtyForTesting());
 	TestFalse(TEXT("The second presentation remains layout-clean"),
 		SecondView->IsPresentationLayoutDirtyForTesting());
 
 	PaintView(FirstView);
-	TestEqual(TEXT("The first presentation rebuilds its own text cache"),
+	TestEqual(TEXT("The first presentation keeps its own text cache after repaint"),
 		FirstView->GetPresentationTextCacheCountForTesting(), 1);
 	FirstView->SetDocument(nullptr);
 	TestEqual(TEXT("Clearing a document releases the first text cache"),
@@ -308,13 +314,31 @@ bool FWebToUEPaintOnlyPseudoResourceSafetyTest::RunTest(const FString& Parameter
 	TestEqual(TEXT("Initial cache construction attempts the image resource once"),
 		View->GetPresentationResourceLoadAttemptsForTesting(), uint64(1));
 
-	View->SetHoveredNodeForTesting(RuntimeButton);
+	const void* InitialButtonBrush = View->GetPresentationBrushIdentityForTesting(*RuntimeButton);
+	FWebToUEPerformanceSnapshot HoverSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->SetHoveredNodeForTesting(RuntimeButton);
+		HoverSnapshot = Capture.GetSnapshot();
+	}
 	TestEqual(TEXT("The paint-only pseudo updates computed opacity"),
 		View->GetComputedStyleForTesting(*RuntimeButton).Opacity, 0.25f);
 	TestEqual(TEXT("Paint-only pseudo does not re-enter synchronous image loading"),
 		View->GetPresentationResourceLoadAttemptsForTesting(), uint64(1));
 	TestEqual(TEXT("Paint-only pseudo preserves the unrelated image brush identity"),
 		View->GetPresentationBrushIdentityForTesting(*RuntimeImage), InitialImageBrush);
+	TestEqual(TEXT("Opacity-only pseudo preserves the affected element brush identity"),
+		View->GetPresentationBrushIdentityForTesting(*RuntimeButton), InitialButtonBrush);
+	TestFalse(TEXT("Opacity-only pseudo keeps the warm layout clean"),
+		View->IsPresentationLayoutDirtyForTesting());
+	TestEqual(TEXT("Opacity-only pseudo does not rebuild Yoga"),
+		HoverSnapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(0));
+	TestEqual(TEXT("Opacity-only pseudo does not invalidate text caches"),
+		HoverSnapshot.GetCounter(EWebToUEPerformanceCounter::TextCacheInvalidations), uint64(0));
+	TestEqual(TEXT("Opacity-only pseudo does not rebuild paint order"),
+		HoverSnapshot.GetCounter(EWebToUEPerformanceCounter::PaintOrderCacheBuilds), uint64(0));
+	TestEqual(TEXT("Opacity-only pseudo does not rebuild a brush"),
+		HoverSnapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(0));
 
 	const TArray<FLinearColor> HoverTints = PaintViewAndGetRoundedBoxTints(View);
 	TestTrue(TEXT("Final Slate output carries the hovered opacity into a draw element"),

@@ -189,13 +189,17 @@ bool FWebToUERuntimeHoverBenchmarkTest::RunTest(const FString& Parameters)
 			Sample.Snapshot.Get(EWebToUEPerformancePhase::HitTest).CallCount, uint64(1));
 		TestEqual(*(Prefix + TEXT("performs one style update")),
 			Sample.Snapshot.Get(EWebToUEPerformancePhase::Style).CallCount, uint64(1));
-		TestEqual(*(Prefix + TEXT("performs one full layout")),
-			Sample.Snapshot.Get(EWebToUEPerformancePhase::Layout).CallCount, uint64(1));
+		TestEqual(*(Prefix + TEXT("does not perform layout")),
+			Sample.Snapshot.Get(EWebToUEPerformancePhase::Layout).CallCount, uint64(0));
 		TestEqual(*(Prefix + TEXT("performs one paint build")),
 			Sample.Snapshot.Get(EWebToUEPerformancePhase::PaintBuild).CallCount, uint64(1));
-		TestEqual(*(Prefix + TEXT("visits all 500 style nodes")),
+		TestEqual(*(Prefix + TEXT("visits only the changed style target")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits),
-			static_cast<uint64>(Scenario.Definition.NodeCount));
+			uint64(1));
+		TestEqual(*(Prefix + TEXT("marks only one dirty style target")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleDirtyTargets), uint64(1));
+		TestEqual(*(Prefix + TEXT("changes one paint property")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::StylePropertyChanges), uint64(1));
 		const uint64 FullScanWork = static_cast<uint64>(Scenario.Definition.NodeCount) *
 			static_cast<uint64>(Scenario.Definition.RuleCount);
 		const uint64 CandidateCount =
@@ -204,9 +208,13 @@ bool FWebToUERuntimeHoverBenchmarkTest::RunTest(const FString& Parameters)
 			CandidateCount < FullScanWork);
 		TestEqual(*(Prefix + TEXT("evaluates every selector candidate exactly once")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), CandidateCount);
-		TestEqual(*(Prefix + TEXT("rebuilds one Yoga node per runtime node")),
+		TestEqual(*(Prefix + TEXT("does not rebuild Yoga")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt),
-			static_cast<uint64>(Scenario.Definition.NodeCount));
+			uint64(0));
+		TestEqual(*(Prefix + TEXT("does not invalidate text caches")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TextCacheInvalidations), uint64(0));
+		TestEqual(*(Prefix + TEXT("does not rebuild paint order")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::PaintOrderCacheBuilds), uint64(0));
 		TestTrue(*(Prefix + TEXT("records a positive end-to-end duration")),
 			Sample.InclusiveMilliseconds > 0.0);
 
@@ -252,6 +260,10 @@ bool FWebToUERuntimeHoverBenchmarkTest::RunTest(const FString& Parameters)
 		FWebToUEBenchmarkStatistics::TryCalculate(InclusiveSamples, InclusiveDistribution));
 	const bool bMeetsTarget = InclusiveDistribution.P95 <
 		FWebToUEBenchmarkBudgetPolicy::MediumSingleNodeHoverP95Milliseconds;
+	if (FWebToUEBenchmarkBudgetPolicy::bEnforceMediumSingleNodeHoverBudget)
+	{
+		TestTrue(TEXT("The runtime hover P95 stays below the enforced budget"), bMeetsTarget);
+	}
 	const FString SummaryContext = MakeRuntimeTelemetryContext(Environment,
 		Scenario.Definition, TEXT("runtime_hover_summary"));
 	AddTelemetryData(TEXT("benchmark.schema_version"), FWebToUEBenchmarkSamplingPolicy::SchemaVersion,

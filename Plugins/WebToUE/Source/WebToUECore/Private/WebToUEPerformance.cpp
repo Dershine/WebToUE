@@ -47,7 +47,9 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.pseudo_state_nodes_changed"),
 		TEXT("workload.pseudo_target_candidates"),
 		TEXT("workload.style_dirty_targets"),
-		TEXT("workload.style_property_changes")
+		TEXT("workload.style_property_changes"),
+		TEXT("workload.text_cache_invalidations"),
+		TEXT("workload.paint_order_cache_builds")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -243,6 +245,8 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::PseudoTargetCandidates: return TEXT("pseudo_target_candidates");
 	case EWebToUEPerformanceCounter::StyleDirtyTargets: return TEXT("style_dirty_targets");
 	case EWebToUEPerformanceCounter::StylePropertyChanges: return TEXT("style_property_changes");
+	case EWebToUEPerformanceCounter::TextCacheInvalidations: return TEXT("text_cache_invalidations");
+	case EWebToUEPerformanceCounter::PaintOrderCacheBuilds: return TEXT("paint_order_cache_builds");
 	default: return TEXT("unknown");
 	}
 }

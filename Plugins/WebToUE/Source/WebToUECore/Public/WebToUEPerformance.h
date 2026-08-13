@@ -50,6 +50,8 @@ enum class EWebToUEPerformanceCounter : uint8
 	PseudoTargetCandidates,
 	StyleDirtyTargets,
 	StylePropertyChanges,
+	TextCacheInvalidations,
+	PaintOrderCacheBuilds,
 	Count
 };
 

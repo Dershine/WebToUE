@@ -187,6 +187,60 @@ void FWebToUERuntimePresentation::RebuildCaches(bool bReloadResources)
 	bLayoutDirty = true;
 }
 
+void FWebToUERuntimePresentation::ApplyStyleUpdates(
+	TConstArrayView<FWebToUEStyleUpdate> Updates)
+{
+	bool bRebuildPaintOrder = false;
+	for (const FWebToUEStyleUpdate& Update : Updates)
+	{
+		FWebToUENode* Node = RuntimeInstance.ResolveNode(Update.Target);
+		if (!Node) continue;
+		if (EnumHasAnyFlags(Update.Changes.Impacts, EWebToUEStyleImpact::Resource))
+		{
+			RebuildCaches(true);
+			return;
+		}
+		if (EnumHasAnyFlags(Update.Changes.Impacts,
+			EWebToUEStyleImpact::Measure | EWebToUEStyleImpact::Layout))
+		{
+			bLayoutDirty = true;
+		}
+		if (Update.Changes.ChangedProperties.Contains(EWebToUECssProperty::ZIndex))
+		{
+			bRebuildPaintOrder = true;
+		}
+		const bool bBrushChanged = Update.Changes.ChangedProperties.ContainsByPredicate(
+			[](EWebToUECssProperty Property)
+			{
+				return Property == EWebToUECssProperty::BackgroundColor ||
+					Property == EWebToUECssProperty::BorderColor ||
+					Property == EWebToUECssProperty::BorderWidth ||
+					Property == EWebToUECssProperty::BorderRadius;
+			});
+		if (bBrushChanged && Node->Type == EWebToUENodeType::Element)
+		{
+			RebuildBrush(*Node, false);
+		}
+		const bool bTextCacheChanged = Node->Type == EWebToUENodeType::Text &&
+			Update.Changes.ChangedProperties.ContainsByPredicate(
+			[](EWebToUECssProperty Property)
+			{
+				return Property == EWebToUECssProperty::Color ||
+					EnumHasAnyFlags(WebToUE::Private::GetCssPropertyMetadata(Property).Impacts,
+						EWebToUEStyleImpact::Measure | EWebToUEStyleImpact::Resource);
+			});
+		if (bTextCacheChanged && TextLayouts.Remove(Update.Target) > 0)
+		{
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::TextCacheInvalidations);
+		}
+	}
+	if (bRebuildPaintOrder)
+	{
+		RebuildPaintOrderCache();
+	}
+}
+
 FText FWebToUERuntimePresentation::GetDisplayText(const FWebToUENode& Node) const
 {
 	if (const FWebToUERuntimeNodeState* State = FindState(Node); State && State->bHasBoundText)
@@ -413,36 +467,42 @@ void FWebToUERuntimePresentation::RebuildBrushes(bool bReloadResources) const
 	if (!RuntimeDocument) return;
 	RuntimeDocument->ForEachNode([this, bReloadResources](FWebToUENode& Node)
 	{
-		const FWebToUEComputedStyle& Style = GetStyle(Node);
-		if (Node.Tag == TEXT("img"))
-		{
-			if (!bReloadResources) return;
-			const FString Source = Node.GetAttribute(TEXT("src"));
+		RebuildBrush(Node, bReloadResources);
+	});
+}
+
+void FWebToUERuntimePresentation::RebuildBrush(FWebToUENode& Node,
+	bool bReloadResource) const
+{
+	const FWebToUEComputedStyle& Style = GetStyle(Node);
+	if (Node.Tag == TEXT("img"))
+	{
+		if (!bReloadResource) return;
+		const FString Source = Node.GetAttribute(TEXT("src"));
 #if WITH_DEV_AUTOMATION_TESTS
-			++ResourceLoadAttemptsForTesting;
+		++ResourceLoadAttemptsForTesting;
 #endif
-			if (UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Source))
-			{
-				LoadedResources.Emplace(Texture);
-				FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
-				FWebToUEPerformanceCapture::RecordCounter(
-					EWebToUEPerformanceCounter::TrackedAllocations);
-				TSharedPtr<FSlateBrush> Brush = MakeShared<FSlateBrush>();
-				Brush->DrawAs = ESlateBrushDrawType::Image;
-				Brush->SetResourceObject(Texture);
-				Brush->ImageSize = FVector2f(Texture->GetSizeX(), Texture->GetSizeY());
-				Brushes.Add(RuntimeInstance.GetHandle(&Node), MoveTemp(Brush));
-			}
-		}
-		else if (Node.Type == EWebToUENodeType::Element)
+		if (UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Source))
 		{
+			LoadedResources.Emplace(Texture);
 			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
 			FWebToUEPerformanceCapture::RecordCounter(
 				EWebToUEPerformanceCounter::TrackedAllocations);
-			Brushes.Add(RuntimeInstance.GetHandle(&Node), MakeShared<FSlateRoundedBoxBrush>(Style.BackgroundColor,
-				Style.BorderRadius, Style.BorderColor, Style.BorderWidth, FVector2f(32.0f, 32.0f)));
+			TSharedPtr<FSlateBrush> Brush = MakeShared<FSlateBrush>();
+			Brush->DrawAs = ESlateBrushDrawType::Image;
+			Brush->SetResourceObject(Texture);
+			Brush->ImageSize = FVector2f(Texture->GetSizeX(), Texture->GetSizeY());
+			Brushes.Add(RuntimeInstance.GetHandle(&Node), MoveTemp(Brush));
 		}
-	});
+	}
+	else if (Node.Type == EWebToUENodeType::Element)
+	{
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::TrackedAllocations);
+		Brushes.Add(RuntimeInstance.GetHandle(&Node), MakeShared<FSlateRoundedBoxBrush>(Style.BackgroundColor,
+			Style.BorderRadius, Style.BorderColor, Style.BorderWidth, FVector2f(32.0f, 32.0f)));
+	}
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -456,6 +516,8 @@ const void* FWebToUERuntimePresentation::GetBrushIdentityForTesting(
 
 void FWebToUERuntimePresentation::RebuildPaintOrderCache()
 {
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::PaintOrderCacheBuilds);
 	PaintOrderNodes.Reset();
 	PaintOrderRanges.Reset();
 	FWebToUEDocument* RuntimeDocument = GetDocument();

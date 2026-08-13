@@ -177,7 +177,9 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		TEXT("workload.pseudo_state_nodes_changed"),
 		TEXT("workload.pseudo_target_candidates"),
 		TEXT("workload.style_dirty_targets"),
-		TEXT("workload.style_property_changes")
+		TEXT("workload.style_property_changes"),
+		TEXT("workload.text_cache_invalidations"),
+		TEXT("workload.paint_order_cache_builds")
 	};
 	static_assert(UE_ARRAY_COUNT(ExpectedTelemetryNames) ==
 		FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);
