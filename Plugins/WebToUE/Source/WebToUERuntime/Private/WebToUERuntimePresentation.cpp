@@ -129,8 +129,25 @@ namespace WebToUE::Runtime::Presentation::Private
 		{
 			return GetTypeHash(FSoftObjectPath(Node.GetAttribute(TEXT("src"))));
 		}
-		uint32 Hash = GetTypeHash(Style.BackgroundColor);
-		Hash = HashCombineFast(Hash, GetTypeHash(Style.BorderColor));
+		// Rounded boxes use the shared white resource. Fill and outline colors are
+		// vertex data and must not split otherwise compatible Slate batches.
+		return 0;
+	}
+
+	static uint32 MakeBatchShaderKey(const FWebToUENode& Node,
+		const FWebToUEComputedStyle& Style, const FVector2f& Size)
+	{
+		if (Node.Type == EWebToUENodeType::Text)
+		{
+			return 0;
+		}
+		if (Node.Tag == TEXT("img"))
+		{
+			uint32 Hash = GetTypeHash(Size.X);
+			return HashCombineFast(Hash, GetTypeHash(Size.Y));
+		}
+		uint32 Hash = GetTypeHash(Size.X);
+		Hash = HashCombineFast(Hash, GetTypeHash(Size.Y));
 		Hash = HashCombineFast(Hash, GetTypeHash(Style.BorderWidth));
 		return HashCombineFast(Hash, GetTypeHash(Style.BorderRadius));
 	}
@@ -762,13 +779,41 @@ int32 FWebToUERuntimePresentation::Paint(const FPaintArgs& Args, const FGeometry
 	FWebToUEPerformanceCapture::RecordCounter(
 		EWebToUEPerformanceCounter::PaintCommandsCulled,
 		FMath::Max(0, DisplayCommands.Num() - DisplayQueryScratch.Num()));
+	const FWebToUEPaintCommand* PreviousBatchableCommand = nullptr;
+	int32 PreviousBatchLayer = INDEX_NONE;
 	for (const int32 CommandIndex : DisplayQueryScratch)
 	{
 		if (!DisplayCommands.IsValidIndex(CommandIndex)) continue;
+		const FWebToUEPaintCommand& Command = DisplayCommands[CommandIndex];
 		FWebToUEPerformanceCapture::RecordCounter(
 			EWebToUEPerformanceCounter::PaintCommandsVisited);
-		LayerId = PaintCommand(DisplayCommands[CommandIndex], Args, Geometry, CullingRect,
-			Out, LayerId, WidgetStyle, bParentEnabled);
+		const bool bCanReusePreviousLayer =
+			PreviousBatchableCommand && Command.Type == EWebToUEPaintCommandType::Box &&
+			PreviousBatchableCommand->BatchKey == Command.BatchKey;
+		const int32 CommandLayer = bCanReusePreviousLayer ? PreviousBatchLayer : LayerId;
+		const int32 NextLayer = PaintCommand(Command, Args, Geometry, CullingRect,
+			Out, CommandLayer, WidgetStyle, bParentEnabled);
+		if (bCanReusePreviousLayer)
+		{
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::PaintCommandsLayerMerged);
+		}
+		else
+		{
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::PaintBatchRuns);
+		}
+		LayerId = FMath::Max(LayerId, NextLayer);
+		if (Command.Type == EWebToUEPaintCommandType::Box)
+		{
+			PreviousBatchableCommand = &Command;
+			PreviousBatchLayer = CommandLayer;
+		}
+		else
+		{
+			PreviousBatchableCommand = nullptr;
+			PreviousBatchLayer = INDEX_NONE;
+		}
 	}
 	PaintDebugOverlay(Geometry, Out, LayerId);
 	DirtyRects.Reset();
@@ -860,8 +905,11 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 	Command.BatchKey.Type = Command.Type;
 	Command.BatchKey.ResourceKey =
 		WebToUE::Runtime::Presentation::Private::MakeBatchResourceKey(Node, Style);
+	Command.BatchKey.ShaderKey =
+		WebToUE::Runtime::Presentation::Private::MakeBatchShaderKey(Node, Style, Size);
 	Command.BatchKey.ClipKey = Command.bHasClip
 		? WebToUE::Runtime::Presentation::Private::HashRect(Command.ClipBounds) : 0;
+	Command.BatchKey.bClipped = Command.bHasClip;
 	Command.BatchKey.DrawEffects = static_cast<uint8>(Command.bEnabled
 		? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect);
 }

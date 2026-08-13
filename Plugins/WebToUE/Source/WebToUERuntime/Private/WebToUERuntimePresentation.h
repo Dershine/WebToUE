@@ -65,13 +65,16 @@ struct FWebToUEPaintBatchKey
 {
 	EWebToUEPaintCommandType Type = EWebToUEPaintCommandType::Box;
 	uint32 ResourceKey = 0;
+	uint32 ShaderKey = 0;
 	uint32 ClipKey = 0;
 	uint8 DrawEffects = 0;
+	bool bClipped = false;
 
 	bool operator==(const FWebToUEPaintBatchKey& Other) const
 	{
 		return Type == Other.Type && ResourceKey == Other.ResourceKey &&
-			ClipKey == Other.ClipKey && DrawEffects == Other.DrawEffects;
+			ShaderKey == Other.ShaderKey && ClipKey == Other.ClipKey &&
+			DrawEffects == Other.DrawEffects && bClipped == Other.bClipped;
 	}
 };
 

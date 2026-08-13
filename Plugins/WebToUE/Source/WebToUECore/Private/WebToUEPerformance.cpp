@@ -74,7 +74,9 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.dirty_rects_added"),
 		TEXT("workload.paint_commands_culled"),
 		TEXT("workload.hit_test_candidates"),
-		TEXT("workload.hit_test_commands_visited")
+		TEXT("workload.hit_test_commands_visited"),
+		TEXT("workload.paint_batch_runs"),
+		TEXT("workload.paint_commands_layer_merged")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -297,6 +299,8 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::PaintCommandsCulled: return TEXT("paint_commands_culled");
 	case EWebToUEPerformanceCounter::HitTestCandidates: return TEXT("hit_test_candidates");
 	case EWebToUEPerformanceCounter::HitTestCommandsVisited: return TEXT("hit_test_commands_visited");
+	case EWebToUEPerformanceCounter::PaintBatchRuns: return TEXT("paint_batch_runs");
+	case EWebToUEPerformanceCounter::PaintCommandsLayerMerged: return TEXT("paint_commands_layer_merged");
 	default: return TEXT("unknown");
 	}
 }

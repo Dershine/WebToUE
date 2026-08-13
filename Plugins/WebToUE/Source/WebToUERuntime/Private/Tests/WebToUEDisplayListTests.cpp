@@ -34,6 +34,62 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEDisplayListDebugImageTest,
 	"WebToUE.Runtime.DisplayListDebugImage",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUESlateBatchCompatibilityTest,
+	"WebToUE.Runtime.SlateBatchCompatibility",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FWebToUESlateBatchCompatibilityTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body><div id='a' class='batch'></div><div id='b' class='batch'></div>"
+			"<div id='clip'><div id='c' class='batch'></div></div></body>"),
+		TEXT("body { width: 320px; height: 180px; gap: 4px; } "
+			".batch { width: 80px; height: 30px; border-width: 1px; "
+			"border-radius: 4px; border-color: #90a0b0; } "
+			"#a { background-color: #203040; } "
+			"#b { background-color: #604020; } "
+			"#clip { width: 100px; height: 30px; overflow: hidden; } "
+			"#c { background-color: #204060; }"));
+	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
+	View->SetRuntimeDocumentForTesting(Document);
+	View->LayoutForTesting(FVector2f(320.0f, 180.0f));
+
+	FHittestGrid HittestGrid;
+	FSlateWindowElementList DrawElements(nullptr);
+	const FGeometry Geometry = FGeometry::MakeRoot(
+		FVector2D(320.0, 180.0), FSlateLayoutTransform());
+	const FPaintArgs PaintArgs(&View.Get(), HittestGrid,
+		FVector2D::ZeroVector, 0.0, 0.0f);
+	FWebToUEPerformanceSnapshot Snapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->OnPaint(PaintArgs, Geometry,
+			FSlateRect(0.0f, 0.0f, 320.0f, 180.0f), DrawElements,
+			0, FWidgetStyle(), true);
+		Snapshot = Capture.GetSnapshot();
+	}
+
+	const auto& RoundedBoxes = DrawElements.GetUncachedDrawElements()
+		.Get<(uint8)EElementType::ET_RoundedBox>();
+	TestEqual(TEXT("The corpus produces three real Slate rounded-box elements"),
+		RoundedBoxes.Num(), 3);
+	if (RoundedBoxes.Num() != 3) return false;
+	TestEqual(TEXT("Different vertex colors retain the same compatible Slate layer"),
+		RoundedBoxes[0].GetLayer(), RoundedBoxes[1].GetLayer());
+	TestTrue(TEXT("Equal un-clipped boxes retain the same clip state"),
+		RoundedBoxes[0].GetClippingHandle() == RoundedBoxes[1].GetClippingHandle());
+	TestTrue(TEXT("A different hierarchical clip receives a different Slate layer"),
+		RoundedBoxes[2].GetLayer() > RoundedBoxes[1].GetLayer());
+	TestFalse(TEXT("A different hierarchical clip receives a different clip state"),
+		RoundedBoxes[1].GetClippingHandle() == RoundedBoxes[2].GetClippingHandle());
+	TestEqual(TEXT("The two compatible commands form one source batch run"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::PaintCommandsLayerMerged),
+		uint64(1));
+	TestEqual(TEXT("The clip boundary splits the source commands into two runs"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::PaintBatchRuns), uint64(2));
+	return true;
+}
+
 bool FWebToUEDisplayListOwnershipTest::RunTest(const FString& Parameters)
 {
 	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
@@ -155,7 +211,7 @@ bool FWebToUEDisplayListOwnershipTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("The patched command remains in its stable slot"), PatchCommand);
 	if (PatchCommand)
 	{
-		TestFalse(TEXT("The changed paint command receives a new batch key"),
+		TestTrue(TEXT("A vertex-color-only paint change preserves the compatible batch key"),
 			PatchCommand->BatchKey == InitialPatchKey);
 		const FSlateRect* DirtyRect = View->GetDirtyRectForTesting(0);
 		TestNotNull(TEXT("The local patch exposes a dirty rectangle"), DirtyRect);
