@@ -81,7 +81,7 @@ Flex：
 
 输入：鼠标移动/点击/滚轮、Tab/Shift+Tab、Enter/Space。尚无触摸、手柄、IME 和可访问性导航。
 
-图片：`src` 使用 Unreal 软对象路径，例如 `/Game/UI/T_Logo.T_Logo`；不支持磁盘图片和 HTTP 下载。仅影响 Paint 的 Pseudo State 变化会保留已加载图片资源和对应 Brush，不重新同步加载或重建无关图片；Resource 影响、绑定或完整文档刷新仍可能同步加载，编译依赖与完整 Resource Cache 属于 M2.6。
+图片：`src` 使用 Unreal 软对象路径，例如 `/Game/UI/T_Logo.T_Logo`；不支持磁盘图片和 HTTP 下载。仅影响 Paint 的 Pseudo State 变化按 old/new 属性差异只更新受影响目标：保留已加载图片、无关 Brush、Text Cache 与 Paint Order，且不进入 Measure/Yoga；背景变化可重建该目标 Brush。Resource 影响、绑定或完整文档刷新仍可能同步加载，Resource Manifest 与完整 Resource Cache 属于 M2.6。
 
 ## 4. 诊断与资产行为
 
