@@ -129,6 +129,10 @@ namespace WebToUE::Private
 	{
 		FWebToUERuntimeNodeState& RuntimeState = Document.GetRuntimeNodeState(Node);
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::StyleNodeVisits);
+		const bool bEnabled = !Node.Attributes.Contains(TEXT("disabled")) &&
+			RuntimeState.bRuntimeEnabled;
+		if (bEnabled) RuntimeState.PseudoStates &= ~EWebToUEPseudoState::Disabled;
+		else RuntimeState.PseudoStates |= EWebToUEPseudoState::Disabled;
 		FWebToUEComputedStyle Style;
 		if (Node.Type == EWebToUENodeType::Text)
 		{
@@ -176,9 +180,7 @@ namespace WebToUE::Private
 		}
 		Cascade.Apply(Style);
 		Style.bVisible = Style.bVisible && RuntimeState.bRuntimeVisible;
-		Style.bEnabled = !Node.Attributes.Contains(TEXT("disabled")) && RuntimeState.bRuntimeEnabled;
-		if (!Style.bEnabled) RuntimeState.PseudoStates |= EWebToUEPseudoState::Disabled;
-		else RuntimeState.PseudoStates &= ~EWebToUEPseudoState::Disabled;
+		Style.bEnabled = bEnabled;
 		return Style;
 	}
 

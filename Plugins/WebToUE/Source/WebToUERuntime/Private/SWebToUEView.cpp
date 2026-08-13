@@ -446,7 +446,21 @@ void SWebToUEView::RefreshBindings(UObject* DataContext, FName ChangedField)
 				bool& Current = Op.Kind == EWebToUEBindingKind::Visible
 					? State.bRuntimeVisible : State.bRuntimeEnabled;
 				if (Current == bBoolValue) continue;
+				if (Op.Kind == EWebToUEBindingKind::Enabled)
+				{
+					CollectPseudoDependencyTargets(*Node,
+						EWebToUEPseudoState::Disabled, StyleTargets);
+				}
 				Current = bBoolValue;
+				if (Op.Kind == EWebToUEBindingKind::Enabled)
+				{
+					const bool bDisabled = Node->Attributes.Contains(TEXT("disabled")) ||
+						!State.bRuntimeEnabled;
+					if (bDisabled) State.PseudoStates |= EWebToUEPseudoState::Disabled;
+					else State.PseudoStates &= ~EWebToUEPseudoState::Disabled;
+					CollectPseudoDependencyTargets(*Node,
+						EWebToUEPseudoState::Disabled, StyleTargets);
+				}
 				UpdatedNodes.Add(Node->InstanceHandle);
 				StyleTargets.AddUnique(Node->InstanceHandle);
 				bPaintChanged = true;
@@ -642,6 +656,44 @@ namespace WebToUE::Runtime::PseudoInvalidation::Private
 		if (EnumHasAnyFlags(Impacts, EWebToUEStyleImpact::HitTest)) Names.Add(TEXT("HitTest"));
 		if (EnumHasAnyFlags(Impacts, EWebToUEStyleImpact::Resource)) Names.Add(TEXT("Resource"));
 		return FString::Join(Names, TEXT("|"));
+	}
+}
+
+void SWebToUEView::CollectPseudoDependencyTargets(FWebToUENode& ReasonNode,
+	EWebToUEPseudoState Flag, TArray<FWebToUEInstanceHandle>& OutTargets) const
+{
+	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
+	if (!RuntimeDocument) return;
+	const TArray<FWebToUEStyleRule>& Rules = RuntimeDocument->GetRules();
+	for (const FWebToUEPseudoInvalidationDependency& Dependency :
+		RuntimeDocument->GetPseudoInvalidationDependencies())
+	{
+		if (Dependency.ReasonState != Flag || !Rules.IsValidIndex(Dependency.RuleIndex))
+		{
+			continue;
+		}
+		const FWebToUEStyleRule& Rule = Rules[Dependency.RuleIndex];
+		if (!Rule.Selector.IsValidIndex(Dependency.ReasonSegmentIndex)) continue;
+		const auto TestTarget = [&](FWebToUEInstanceHandle TargetHandle)
+		{
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::PseudoTargetCandidates);
+			const FWebToUENode* Target = RuntimeDocument->ResolveNode(TargetHandle);
+			if (Target && FWebToUEStyleResolver::MatchesWithReason(
+				Rule, *Target, *RuntimeDocument,
+				Dependency.ReasonSegmentIndex, ReasonNode))
+			{
+				OutTargets.AddUnique(TargetHandle);
+			}
+		};
+		if (Dependency.ReasonSegmentIndex == Rule.Selector.Num() - 1)
+		{
+			TestTarget(ReasonNode.InstanceHandle);
+		}
+		else
+		{
+			RuntimeDocument->ForEachPotentialSelectorTarget(Rule.Selector.Last(), TestTarget);
+		}
 	}
 }
 

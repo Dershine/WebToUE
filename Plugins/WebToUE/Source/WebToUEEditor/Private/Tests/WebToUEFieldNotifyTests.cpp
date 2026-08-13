@@ -26,8 +26,10 @@ bool FWebToUEFieldNotifyInvalidationTest::RunTest(const FString& Parameters)
 		IFileManager::Get().Delete(*TestFilename, false, true);
 	};
 	const FString Html = TEXT(
-		"<body><span id='first' data-ue-bind-text='BenchmarkLabel' "
-		"data-ue-bind-visible='BenchmarkVisible'>First</span>"
+		"<style>#first { opacity: 1; } #first:disabled { opacity: 0.25; }</style>"
+		"<body><button id='first' data-ue-bind-text='BenchmarkLabel' "
+		"data-ue-bind-visible='BenchmarkVisible' "
+		"data-ue-bind-enabled='BenchmarkEnabled'>First</button>"
 		"<span id='second' data-ue-bind-text='BenchmarkLabel'>Second</span></body>");
 	TestTrue(TEXT("The FieldNotify source is written"),
 		FFileHelper::SaveStringToFile(Html, *TestFilename));
@@ -99,6 +101,43 @@ bool FWebToUEFieldNotifyInvalidationTest::RunTest(const FString& Parameters)
 		VisibleSnapshot.GetCounter(EWebToUEPerformanceCounter::BindingNodesUpdated), uint64(1));
 	TestFalse(TEXT("The directly bound runtime visibility changes"),
 		View->GetRuntimeVisibleForTesting(*First));
+	TestEqual(TEXT("Visibility updates only its direct Style target"),
+		VisibleSnapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(1));
+	TestEqual(TEXT("Visibility has no Measure/Layout Yoga impact"),
+		VisibleSnapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(0));
+
+	FWebToUEPerformanceSnapshot DisabledSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		TestTrue(TEXT("Disabling the target broadcasts FieldNotify"),
+			ViewModel->SetBenchmarkEnabled(false));
+		DisabledSnapshot = Capture.GetSnapshot();
+	}
+	TestFalse(TEXT("The runtime enabled state changes in the same refresh"),
+		View->GetRuntimeEnabledForTesting(*First));
+	TestTrue(TEXT("The disabled pseudo state is active in the same refresh"),
+		EnumHasAnyFlags(View->GetRuntimePseudoStatesForTesting(*First),
+			EWebToUEPseudoState::Disabled));
+	TestEqual(TEXT(":disabled matches using the new pseudo state in the same refresh"),
+		View->GetComputedStyleForTesting(*First).Opacity, 0.25f);
+	TestEqual(TEXT("Enabled FieldNotify reads one root property"),
+		DisabledSnapshot.GetCounter(EWebToUEPerformanceCounter::BindingFieldsRead), uint64(1));
+	TestEqual(TEXT("Enabled FieldNotify executes one direct op"),
+		DisabledSnapshot.GetCounter(EWebToUEPerformanceCounter::BindingOpsExecuted), uint64(1));
+	TestEqual(TEXT("Enabled FieldNotify updates one direct node"),
+		DisabledSnapshot.GetCounter(EWebToUEPerformanceCounter::BindingNodesUpdated), uint64(1));
+	TestEqual(TEXT("Paint-only :disabled has no Yoga impact"),
+		DisabledSnapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(0));
+
+	TestTrue(TEXT("Re-enabling the target broadcasts FieldNotify"),
+		ViewModel->SetBenchmarkEnabled(true));
+	TestTrue(TEXT("The runtime enabled state is restored"),
+		View->GetRuntimeEnabledForTesting(*First));
+	TestFalse(TEXT("The disabled pseudo state clears in the same refresh"),
+		EnumHasAnyFlags(View->GetRuntimePseudoStatesForTesting(*First),
+			EWebToUEPseudoState::Disabled));
+	TestEqual(TEXT("The base style rematches in the same refresh"),
+		View->GetComputedStyleForTesting(*First).Opacity, 1.0f);
 
 	FWebToUEPerformanceSnapshot UnrelatedSnapshot;
 	{

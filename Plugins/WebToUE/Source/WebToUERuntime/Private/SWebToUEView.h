@@ -109,6 +109,8 @@ private:
 	void SetFocusedNode(FWebToUENode* Node);
 	void UpdatePseudoState(FWebToUENode* OldNode, FWebToUENode* NewNode,
 		EWebToUEPseudoState Flag, bool bIncludeAncestors);
+	void CollectPseudoDependencyTargets(FWebToUENode& ReasonNode,
+		EWebToUEPseudoState Flag, TArray<FWebToUEInstanceHandle>& OutTargets) const;
 	void MoveFocus(int32 Direction);
 	void ActivateFocusedNode();
 	void DispatchClick(FWebToUENode& Node) const;

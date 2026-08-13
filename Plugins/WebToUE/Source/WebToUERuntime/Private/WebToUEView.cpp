@@ -103,6 +103,25 @@ bool UWebToUEView::GetRuntimeVisibleForTesting(const FWebToUENode& Node) const
 	return SlateView && SlateView->GetRuntimeStateForTesting(Node).bRuntimeVisible;
 }
 
+bool UWebToUEView::GetRuntimeEnabledForTesting(const FWebToUENode& Node) const
+{
+	return SlateView && SlateView->GetRuntimeStateForTesting(Node).bRuntimeEnabled;
+}
+
+EWebToUEPseudoState UWebToUEView::GetRuntimePseudoStatesForTesting(
+	const FWebToUENode& Node) const
+{
+	return SlateView ? SlateView->GetRuntimeStateForTesting(Node).PseudoStates
+		: EWebToUEPseudoState::None;
+}
+
+const FWebToUEComputedStyle& UWebToUEView::GetComputedStyleForTesting(
+	const FWebToUENode& Node) const
+{
+	check(SlateView);
+	return SlateView->GetComputedStyleForTesting(Node);
+}
+
 FWebToUEInstanceHandle UWebToUEView::GetInstanceHandleForTesting(
 	const FWebToUENode& Node) const
 {

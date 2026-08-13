@@ -8,6 +8,8 @@
 
 class SWebToUEView;
 class UWebToUEDocument;
+enum class EWebToUEPseudoState : uint8;
+struct FWebToUEComputedStyle;
 struct FWebToUENode;
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -65,6 +67,9 @@ public:
 	FWebToUENode* FindRuntimeNodeByIdForTesting(const FString& Id) const;
 	FText GetDisplayTextForTesting(const FWebToUENode& Node) const;
 	bool GetRuntimeVisibleForTesting(const FWebToUENode& Node) const;
+	bool GetRuntimeEnabledForTesting(const FWebToUENode& Node) const;
+	EWebToUEPseudoState GetRuntimePseudoStatesForTesting(const FWebToUENode& Node) const;
+	const FWebToUEComputedStyle& GetComputedStyleForTesting(const FWebToUENode& Node) const;
 	FWebToUEInstanceHandle GetInstanceHandleForTesting(const FWebToUENode& Node) const;
 	FWebToUENode* ResolveInstanceHandleForTesting(FWebToUEInstanceHandle Handle) const;
 #endif
