@@ -196,10 +196,14 @@ bool FWebToUERuntimeHoverBenchmarkTest::RunTest(const FString& Parameters)
 		TestEqual(*(Prefix + TEXT("visits all 500 style nodes")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits),
 			static_cast<uint64>(Scenario.Definition.NodeCount));
-		TestEqual(*(Prefix + TEXT("evaluates all 200 rules for all 500 nodes")),
-			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations),
-			static_cast<uint64>(Scenario.Definition.NodeCount) *
-			static_cast<uint64>(Scenario.Definition.RuleCount));
+		const uint64 FullScanWork = static_cast<uint64>(Scenario.Definition.NodeCount) *
+			static_cast<uint64>(Scenario.Definition.RuleCount);
+		const uint64 CandidateCount =
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorCandidates);
+		TestTrue(*(Prefix + TEXT("selects fewer candidates than the 100,000-rule full scan")),
+			CandidateCount < FullScanWork);
+		TestEqual(*(Prefix + TEXT("evaluates every selector candidate exactly once")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), CandidateCount);
 		TestEqual(*(Prefix + TEXT("rebuilds one Yoga node per runtime node")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt),
 			static_cast<uint64>(Scenario.Definition.NodeCount));
@@ -423,10 +427,14 @@ bool FWebToUERuntimeFieldNotifyBenchmarkTest::RunTest(const FString& Parameters)
 		TestEqual(*(Prefix + TEXT("visits all 500 style nodes")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits),
 			static_cast<uint64>(Scenario.Definition.NodeCount));
-		TestEqual(*(Prefix + TEXT("evaluates all 200 rules for all 500 nodes")),
-			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations),
-			static_cast<uint64>(Scenario.Definition.NodeCount) *
-			static_cast<uint64>(Scenario.Definition.RuleCount));
+		const uint64 FullScanWork = static_cast<uint64>(Scenario.Definition.NodeCount) *
+			static_cast<uint64>(Scenario.Definition.RuleCount);
+		const uint64 CandidateCount =
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorCandidates);
+		TestTrue(*(Prefix + TEXT("selects fewer candidates than the 100,000-rule full scan")),
+			CandidateCount < FullScanWork);
+		TestEqual(*(Prefix + TEXT("evaluates every selector candidate exactly once")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), CandidateCount);
 		TestEqual(*(Prefix + TEXT("rebuilds one Yoga node per runtime node")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt),
 			static_cast<uint64>(Scenario.Definition.NodeCount));

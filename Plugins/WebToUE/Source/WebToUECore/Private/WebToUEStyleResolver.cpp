@@ -12,7 +12,7 @@ namespace WebToUE::Private
 	{
 		if (Node.Type != EWebToUENodeType::Element) return false;
 		if (!Segment.Type.IsEmpty() && Node.Tag != Segment.Type) return false;
-		if (!Segment.Id.IsEmpty() && !Node.GetAttribute(TEXT("id")).Equals(Segment.Id, ESearchCase::IgnoreCase)) return false;
+		if (!Segment.Id.IsEmpty() && !Node.GetSelectorId().Equals(Segment.Id, ESearchCase::IgnoreCase)) return false;
 		for (const FString& Class : Segment.Classes)
 		{
 			if (!Node.HasClass(Class)) return false;
@@ -47,10 +47,10 @@ namespace WebToUE::Private
 		}
 
 		TArray<const FWebToUEStyleRule*> Matches;
-		FWebToUEPerformanceCapture::RecordCounter(
-			EWebToUEPerformanceCounter::SelectorEvaluations, Document.Rules.Num());
-		for (const FWebToUEStyleRule& Rule : Document.Rules)
+		const int32 CandidateCount = Document.ForEachSelectorCandidate(Node,
+			[&](const FWebToUEStyleRule& Rule)
 		{
+			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::SelectorEvaluations);
 			if (FWebToUEStyleResolver::Matches(Rule, Node, Document))
 			{
 				FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::SelectorMatches);
@@ -60,7 +60,9 @@ namespace WebToUE::Private
 				}
 				Matches.Add(&Rule);
 			}
-		}
+		});
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::SelectorCandidates, CandidateCount);
 		Matches.Sort([](const FWebToUEStyleRule& A, const FWebToUEStyleRule& B)
 		{
 			return A.Specificity == B.Specificity

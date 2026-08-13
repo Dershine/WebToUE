@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "WebToUECompiler.h"
+#include "WebToUEPerformance.h"
 #include "WebToUEStyleProperties.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEHtmlCssTest, "WebToUE.Core.HtmlCss",
@@ -14,6 +15,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETypedPropertiesTest, "WebToUE.Core.Type
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPropertyMetadataTest, "WebToUE.Core.PropertyMetadata",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUESelectorIndexTest, "WebToUE.Core.SelectorIndex",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebToUEHtmlCssTest::RunTest(const FString& Parameters)
@@ -40,6 +44,59 @@ bool FWebToUEHtmlCssTest::RunTest(const FString& Parameters)
 			Document->GetComputedStyle(*Button).Color, FLinearColor(0, 1, 0, 1));
 		TestTrue(TEXT("Entity decoded"), Button->Children.Num() > 0 && Button->Children[0]->Text == TEXT("Start & Play"));
 	}
+	return true;
+}
+
+bool FWebToUESelectorIndexTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body><button id='target' class='item primary item'>Label</button></body>"),
+		TEXT("#target { color: #ff0000; } .item { background-color: #00ff00; } ")
+		TEXT("button { width: 120px; } :hover { opacity: 0.5; } ")
+		TEXT("body > .item { height: 40px; } * { z-index: 2; } ")
+		TEXT(".missing { margin-left: 99px; }"),
+		TEXT("SelectorIndex.html"));
+	TestFalse(TEXT("The selector-index document compiles without errors"), Document->HasErrors());
+
+	FWebToUENode* Target = nullptr;
+	Document->ForEachNode([&Target](FWebToUENode& Node)
+	{
+		if (Node.GetAttribute(TEXT("id")) == TEXT("target"))
+		{
+			Target = &Node;
+		}
+	});
+	TestNotNull(TEXT("The selector-index target exists"), Target);
+	if (!Target)
+	{
+		return false;
+	}
+
+	Document->GetRuntimeNodeState(*Target).PseudoStates |= EWebToUEPseudoState::Hover;
+	FWebToUEPerformanceSnapshot Snapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		FWebToUEStyleResolver::Resolve(*Document);
+		Snapshot = Capture.GetSnapshot();
+	}
+
+	const FWebToUEComputedStyle& Style = Document->GetComputedStyle(*Target);
+	TestEqual(TEXT("The ID candidate applies"), Style.Color, FLinearColor::Red);
+	TestEqual(TEXT("The class candidate applies"), Style.BackgroundColor, FLinearColor::Green);
+	TestEqual(TEXT("The tag candidate applies"), Style.Width.Value, 120.0f);
+	TestEqual(TEXT("The pseudo candidate applies"), Style.Opacity, 0.5f);
+	TestEqual(TEXT("The combinator candidate still performs full matching"), Style.Height.Value, 40.0f);
+	TestEqual(TEXT("The universal candidate applies"), Style.ZIndex, 2);
+	TestEqual(TEXT("A non-candidate rule does not apply"), Style.Margin.Left.Value, 0.0f);
+
+	const uint64 FullScanWork = static_cast<uint64>(Document->Rules.Num()) *
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits);
+	const uint64 CandidateCount = Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorCandidates);
+	TestTrue(TEXT("The selector index produces candidates"), CandidateCount > 0);
+	TestTrue(TEXT("The selector index prunes the full node-by-rule scan"), CandidateCount < FullScanWork);
+	TestEqual(TEXT("Duplicate class tokens do not revisit the same class bucket"), CandidateCount, uint64(7));
+	TestEqual(TEXT("Every candidate is evaluated exactly once"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), CandidateCount);
 	return true;
 }
 

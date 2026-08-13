@@ -34,6 +34,7 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.hydrated_nodes"),
 		TEXT("workload.hydrated_rules"),
 		TEXT("workload.style_node_visits"),
+		TEXT("workload.selector_candidates"),
 		TEXT("workload.selector_evaluations"),
 		TEXT("workload.selector_matches"),
 		TEXT("workload.yoga_nodes_built"),
@@ -224,6 +225,7 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::HydratedNodes: return TEXT("hydrated_nodes");
 	case EWebToUEPerformanceCounter::HydratedRules: return TEXT("hydrated_rules");
 	case EWebToUEPerformanceCounter::StyleNodeVisits: return TEXT("style_node_visits");
+	case EWebToUEPerformanceCounter::SelectorCandidates: return TEXT("selector_candidates");
 	case EWebToUEPerformanceCounter::SelectorEvaluations: return TEXT("selector_evaluations");
 	case EWebToUEPerformanceCounter::SelectorMatches: return TEXT("selector_matches");
 	case EWebToUEPerformanceCounter::YogaNodesBuilt: return TEXT("yoga_nodes_built");

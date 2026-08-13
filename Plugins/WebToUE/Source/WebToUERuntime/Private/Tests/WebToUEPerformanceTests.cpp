@@ -110,8 +110,10 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::HydratedRules), uint64(1));
 	TestEqual(TEXT("Three style passes visit all three nodes"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(9));
-	TestEqual(TEXT("Three style passes evaluate the rule for every node"),
-		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), uint64(9));
+	TestEqual(TEXT("Three style passes select only the button rule candidate"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorCandidates), uint64(3));
+	TestEqual(TEXT("Three style passes evaluate only the selected candidate"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), uint64(3));
 	TestEqual(TEXT("The button selector matches once per style pass"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorMatches), uint64(3));
 	TestEqual(TEXT("Layout builds one Yoga node per runtime node"),
@@ -141,7 +143,7 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 			TelemetryMeasurements.Add(Name, Value);
 		});
 	TestEqual(TEXT("The telemetry schema has the expected version"),
-		FWebToUEPerformanceSnapshot::TelemetrySchemaVersion, 2);
+		FWebToUEPerformanceSnapshot::TelemetrySchemaVersion, 3);
 	TestEqual(TEXT("The telemetry schema exposes every phase field and workload counter"),
 		TelemetryMeasurements.Num(), FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);
 	static constexpr const TCHAR* ExpectedTelemetryNames[] = {
@@ -162,6 +164,7 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		TEXT("workload.hydrated_nodes"),
 		TEXT("workload.hydrated_rules"),
 		TEXT("workload.style_node_visits"),
+		TEXT("workload.selector_candidates"),
 		TEXT("workload.selector_evaluations"),
 		TEXT("workload.selector_matches"),
 		TEXT("workload.yoga_nodes_built"),
@@ -183,8 +186,10 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		TelemetryMeasurements.FindRef(TEXT("phase.hydrate.calls")), 1.0);
 	TestTrue(TEXT("Telemetry exposes hydrate inclusive time"),
 		TelemetryMeasurements.FindRef(TEXT("phase.hydrate.inclusive_ms")) > 0.0);
+	TestEqual(TEXT("Telemetry exposes selector candidates"),
+		TelemetryMeasurements.FindRef(TEXT("workload.selector_candidates")), 3.0);
 	TestEqual(TEXT("Telemetry exposes selector evaluations"),
-		TelemetryMeasurements.FindRef(TEXT("workload.selector_evaluations")), 9.0);
+		TelemetryMeasurements.FindRef(TEXT("workload.selector_evaluations")), 3.0);
 	TestEqual(TEXT("Telemetry exposes tracked allocation events"),
 		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocations")), 20.0);
 	TestEqual(TEXT("Telemetry exposes tracked allocation payload events"),

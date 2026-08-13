@@ -338,8 +338,13 @@ struct WEBTOUECORE_API FWebToUENode : public TSharedFromThis<FWebToUENode>
 	TArray<TSharedPtr<FWebToUENode>> Children;
 	FWebToUENode* Parent = nullptr;
 	int32 RuntimeDataIndex = INDEX_NONE;
+	FString SelectorId;
+	TArray<FString> SelectorClasses;
+	bool bSelectorIdentityInitialized = false;
 
 	FString GetAttribute(const FString& Name) const;
+	void InitializeSelectorIdentity();
+	const FString& GetSelectorId() const;
 	bool HasClass(const FString& ClassName) const;
 	bool IsInteractive() const;
 };
@@ -368,6 +373,20 @@ struct WEBTOUECORE_API FWebToUEStyleRule
 	int32 SourceOrder = 0;
 };
 
+struct WEBTOUECORE_API FWebToUESelectorIndex
+{
+	TMap<FString, TArray<int32>> IdRules;
+	TMap<FString, TArray<int32>> ClassRules;
+	TMap<FString, TArray<int32>> TagRules;
+	TArray<int32> HoverRules;
+	TArray<int32> ActiveRules;
+	TArray<int32> FocusRules;
+	TArray<int32> DisabledRules;
+	TArray<int32> UniversalRules;
+
+	void Reset();
+};
+
 struct WEBTOUECORE_API FWebToUEDocument
 {
 	TSharedPtr<FWebToUENode> Root;
@@ -376,10 +395,14 @@ struct WEBTOUECORE_API FWebToUEDocument
 	TArray<FWebToUEDiagnostic> Diagnostics;
 	TArray<FWebToUERuntimeNodeState> RuntimeNodeStates;
 	TArray<FWebToUERuntimeRenderData> RuntimeRenderData;
+	FWebToUESelectorIndex SelectorIndex;
 
 	bool HasErrors() const;
 	void InitializeRuntimeData();
+	void InitializeSelectorIndex();
 	void AddRuntimeNodeData(FWebToUENode& Node);
+	int32 ForEachSelectorCandidate(const FWebToUENode& Node,
+		TFunctionRef<void(const FWebToUEStyleRule&)> Visitor) const;
 	FORCEINLINE bool IsValidRuntimeNodeStateIndex(const FWebToUENode& Node) const
 	{
 		return RuntimeNodeStates.IsValidIndex(Node.RuntimeDataIndex);

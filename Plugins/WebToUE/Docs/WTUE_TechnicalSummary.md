@@ -63,9 +63,9 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 自动化测试 | 29 / 29 通过（2026-08-12） |
-| 当前编译 | UE 5.8 Win64 Game + Editor Development 通过（2026-08-12） |
-| 当前发布 | Win64 Development BuildCookRun 通过：Cook 0 errors、Stage/Pak/IoStore 成功，569 包写入 2,226 个 IoStore chunks |
+| 自动化测试 | 30 / 30 通过（2026-08-13） |
+| 当前编译 | UE 5.8 Win64 Game + Editor Development 通过（2026-08-13） |
+| 当前发布 | 当前 HEAD + working tree 的 Win64 Development BuildCookRun 通过：Cook 0 errors、Stage/Pak/IoStore 成功，569 包写入 2,226 个 IoStore chunks |
 | 历史发布 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 曾通过；发布前须在当前提交重跑 |
 | Git 基线 | 当前 HEAD + working tree；未提交，不生成伪哈希 |
 | 发布级别 | Developer Preview |
@@ -133,15 +133,15 @@ flowchart LR
 
 | 层 | 当前实现 | M2 目标 |
 | --- | --- | --- |
-| Compiler | Parser/CSS 前端、RichText lowering、Property ID/Typed Value、Property Metadata、Style Resolver、Property 应用和 Yoga Adapter 已拆分 | Selector Index、Typed Cascade |
+| Compiler | Parser/CSS 前端、RichText lowering、Property ID/Typed Value、Property Metadata、Style Resolver、Property 应用和 Yoga Adapter 已拆分 | Typed Cascade |
 | Asset/IR | 私有扁平 CompiledNodes/Rules、类型化样式声明、自定义版本、原子提交 | 不可变、依赖完备、可迁移 |
-| Runtime Instance | 每视图 Hydration、连续 NodeState、连续 Computed Style/Layout | Dirty Graph 和依赖图 |
+| Runtime Instance | 每视图 Hydration、Selector Index、连续 NodeState、连续 Computed Style/Layout | Dirty Graph 和依赖图 |
 | Presentation | 每视图 Layout Dirty、Text、Paint Order、Brush、Resource Cache | 持久缓存与局部失效 |
 | Layout/Text | 脏布局重建 Yoga Tree；节点级 Text Layout Cache | Persistent Yoga、约束感知 Text Cache、局部 Measure/Layout |
 | Paint/Input | 递归 Paint/Hit Test；Paint Order 已缓存 | Display List、局部重绘、分层命中 |
 | Tooling | 导入诊断、热重载、Automation、Stat/Trace/Telemetry | Inspector、Profiler、Source Map、可选 MCP |
 
-`UWebToUEDocument` 保存共享 Compiled payload；`FWebToUERuntimeInstance` 独占 Hydration、NodeState 和 Render Data；`FWebToUERuntimePresentation` 独占 Layout/Text/Paint/Resource Cache。双 View 专项已验证状态、Style/Layout 和 Presentation Cache 互不污染。下一阶段不再调整所有权，而是让 Typed Cascade、Selector Index 和 Dirty Graph 利用这些边界。
+`UWebToUEDocument` 保存共享 Compiled payload；`FWebToUERuntimeInstance` 独占 Hydration、Selector Index、NodeState 和 Render Data；`FWebToUERuntimePresentation` 独占 Layout/Text/Paint/Resource Cache。双 View 专项已验证状态、Style/Layout 和 Presentation Cache 互不污染。Selector Index 已作为每视图 Runtime Document 的一次性派生缓存建立；下一阶段不再调整所有权，而是让 Typed Cascade 和 Dirty Graph 利用这些边界。
 
 ### 4.1 模块边界
 
@@ -184,23 +184,23 @@ Cooked 游戏保留 Compiled Nodes/Rules、Root、纹理/String Table 引用、�
 
 ### 6.1 测量政策
 
-正式可比较环境指纹 `79E20297`：UE 5.8.1、WindowsEditor Development、i7-12700KF、32 GB、RTX 5050。Sampling policy schema `1` 为 1 次 warmup、20 样本、median P50、nearest-rank P95；Snapshot Telemetry schema `2` 记录七阶段时间和可归因工作量；budget policy schema `6` 区分 Observe/Enforce。
+正式可比较环境指纹 `79E20297`：UE 5.8.1、WindowsEditor Development、i7-12700KF、32 GB、RTX 5050。Sampling policy schema `1` 为 1 次 warmup、20 样本、median P50、nearest-rank P95；Snapshot Telemetry schema `3` 记录七阶段时间、Selector 候选数和其他可归因工作量；budget policy schema `6` 区分 Observe/Enforce。
 
 | 场景 | 当前 P95 | 目标 | 状态 |
 | --- | ---: | ---: | --- |
-| Compile Style 100/50 | 2.624300 ms | 比较基线 | Observe |
-| Compile Style 500/200 | 51.806100 ms | 比较基线 | Observe |
-| Compile Style 2,000/500 | 518.105700 ms | 比较基线 | Observe |
-| 500/200 单节点 Hover | 56.000602 ms | < 0.5 ms | Observe / 未达标 |
-| 500/200 单 FieldNotify | 57.067800 ms | < 0.5 ms | Observe / 未达标 |
-| 500 节点暖布局 | 0.701901 ms | < 2.0 ms | Enforced / 通过 |
-| 未变化 Paint | 0.291500 ms；0 次/0 B | 0 Tick、0 WTUE 临时分配 | 分配 Enforced / 通过 |
+| Compile Style 100/50 | 0.117600 ms | 比较基线 | Observe |
+| Compile Style 500/200 | 0.959600 ms | 比较基线 | Observe |
+| Compile Style 2,000/500 | 7.316700 ms | 比较基线 | Observe |
+| 500/200 单节点 Hover | 6.182000 ms | < 0.5 ms | Observe / 未达标 |
+| 500/200 单 FieldNotify | 5.429000 ms | < 0.5 ms | Observe / 未达标 |
+| 500 节点暖布局 | 0.747699 ms | < 2.0 ms | Enforced / 通过 |
+| 未变化 Paint | 0.283401 ms；0 次/0 B | 0 Tick、0 WTUE 临时分配 | 分配 Enforced / 通过 |
 
-500/200 的 Hover 与 FieldNotify 目前均访问 500 个 Style 节点、求值 100,000 次 Selector 并重建 500 个 Yoga 节点。暖布局虽重建完整 Yoga Tree，仍低于 2 ms；因此当前主瓶颈是全树 Cascade、缓存失效和后续刷新，而不是单独的暖 Yoga 计算。
+500/200 的 Hover 与 FieldNotify 目前均访问 500 个 Style 节点、访问并求值 10,694 个 Selector 候选、重建 500 个 Yoga 节点；Selector 工作量门已低于原 100,000 次全扫描。暖布局虽重建完整 Yoga Tree，仍低于 2 ms；因此当前主瓶颈已转为全树节点访问、Cascade 临时结果、缓存失效和后续刷新，而不是 Selector 全规则扫描或单独的暖 Yoga 计算。
 
-已知放大路径：Pseudo/Binding 仍调用全局 Style 与 Presentation 重建；Cascade 近似 `O(N × R × selector-depth)`；全局 Style 刷新清空全部 Text Layout；Layout 重建完整 Yoga Tree；Paint-only Pseudo 已跳过纹理重载并保留无关图片 Brush，但 Resource 影响或完整刷新仍可能同步加载纹理；Paint/Hit Test 仍全树递归。
+已知放大路径：Pseudo/Binding 仍调用全局 Style 与 Presentation 重建；Selector Index 构建为 `O(R)`，Style Resolve 近似 `O(N + candidates × selector-depth)`，每条规则仅归入右端 ID/Class/Tag/Pseudo/Universal 的一个主桶，命中候选仍由完整组合选择器匹配器校验；全局 Style 刷新清空全部 Text Layout；Layout 重建完整 Yoga Tree；Paint-only Pseudo 已跳过纹理重载并保留无关图片 Brush，但 Resource 影响或完整刷新仍可能同步加载纹理；Paint/Hit Test 仍全树递归。
 
-Property ID/Typed Value 已消除版本 4 正常 Runtime 路径的属性名和值字符串解析；52 项 Property Metadata 现在统一提供稳定名称、继承性和 Style/Measure/Layout/Paint/HitTest/Resource 影响分类，Style Resolver 的显式继承也从该表驱动。当前 Style Resolve 仍为每节点构造临时 `TMap<Property, TypedValue>` 并复制类型化 payload；Selector 工作量、Dirty 粒度和 payload 紧凑度尚未由本工作包改变。
+Property ID/Typed Value 已消除版本 4 正常 Runtime 路径的属性名和值字符串解析；52 项 Property Metadata 现在统一提供稳定名称、继承性和 Style/Measure/Layout/Paint/HitTest/Resource 影响分类，Style Resolver 的显式继承也从该表驱动。Selector ID/Class identity 与候选桶在每视图 Runtime Document 初始化时一次性派生，热路径不组装或去重候选数组。当前 Style Resolve 仍为每节点构造临时 `TMap<Property, TypedValue>` 并复制类型化 payload；Dirty 粒度和 payload 紧凑度尚未由本工作包改变。
 
 `tracked_allocations` 和已知 payload 字节只覆盖 WebToUE 标注点，不代表进程 allocator、完整常驻内存或 Slate/Yoga 内部分配。完整采样历史、阶段数据和 schema 演进见 [WTUE_EvidenceLedger.md](WTUE_EvidenceLedger.md)。
 
@@ -223,13 +223,13 @@ Property ID/Typed Value 已消除版本 4 正常 Runtime 路径的属性名和�
 
 | ID | 风险 | 等级 | 当前证据 | 缓解路线 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| R-01 | Pseudo/Binding 导致全树刷新 | Critical | 500 Style 节点、100,000 Selector、500 Yoga | Selector Index、Property Metadata、Dirty Graph | 🚧 M2 |
-| R-02 | Yoga Tree 每次布局重建 | High | 暖布局重建 500 Yoga；P95 0.701901 ms | Persistent Yoga、局部 Dirty | ⬜ M2 |
+| R-01 | Pseudo/Binding 导致全树刷新 | Critical | Selector 已降至 10,694 候选/求值，但仍有 500 Style 节点、500 Yoga | Property Metadata、Dirty Graph | 🚧 M2 |
+| R-02 | Yoga Tree 每次布局重建 | High | 暖布局重建 500 Yoga；P95 0.747699 ms | Persistent Yoga、局部 Dirty | ⬜ M2 |
 | R-03 | Compiled 数据与 Runtime 生命周期混合 | Medium | 四项边界/双实例专项通过 | 后续 IR/Dirty/Cache 保持边界 | ✅ Mitigated |
 | R-04 | 状态变化可能同步加载纹理 | High | Paint-only Pseudo 不再加载纹理或重建无关图片；Resource/完整刷新仍可进入 `LoadObject` | 编译依赖、Resource Cache、异步策略 | 🚧 M2 |
-| R-05 | Compiler/View 职责集中 | Low | Core 服务和 Presentation 已拆分，29/29 通过 | 后续能力进入对应服务 | ✅ Mitigated |
-| R-06 | 性能证据和硬门仍不完整 | Critical | 两项硬门已建立；Hover/FieldNotify 未达标，常驻内存缺失 | Benchmark、Telemetry、预算门禁 | 🚧 M2 |
-| R-07 | Map 声明丢失重复属性顺序 | Medium | Core、Compiled IR 与 Hydration 已使用有序声明；29/29 和 Win64 Development BuildCookRun 通过 | 保持 Ordered Declaration 专项与资产版本门 | ✅ Mitigated |
+| R-05 | Compiler/View 职责集中 | Low | Core 服务和 Presentation 已拆分，30/30 通过 | 后续能力进入对应服务 | ✅ Mitigated |
+| R-06 | 性能证据和硬门仍不完整 | Critical | 两项硬门继续通过，Selector 工作量门通过；Hover/FieldNotify 未达标，常驻内存缺失 | Benchmark、Telemetry、预算门禁 | 🚧 M2 |
+| R-07 | Map 声明丢失重复属性顺序 | Medium | Core、Compiled IR 与 Hydration 已使用有序声明；30/30 和 Win64 Development BuildCookRun 通过 | 保持 Ordered Declaration 专项与资产版本门 | ✅ Mitigated |
 | R-08 | 仅 Win64 | Medium | `.uplugin` 平台限制 | 平台审计与构建矩阵 | ⬜ M6 |
 | R-09 | MCP Experimental 且通用 Python 权限高 | Medium | 本地 Editor 环境已验证 | 回环/受信任/Editor-only/最小权限 | ⬜ M5 |
 | R-10 | Sandbox 可使 UBT 关 Editor 后失败 | High | 曾复现；Preflight、互斥和持久状态已验证 | 生命周期 Skill 与 [ADR-0001](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md) | ✅ Mitigated |
@@ -246,7 +246,7 @@ M0/M1 已完成，详细验收项保存在 [Evidence Ledger](WTUE_EvidenceLedger
 
 - [x] 可重复 Benchmark、Trace/Stat 和预算门禁。
 - [x] Compiled IR、Runtime State、Layout/Paint Cache 完全分离。
-- [ ] Typed Property、Selector Index、Ordered Declaration。（M2.2 当前 3 / 5，尚未满足本退出门）
+- [ ] Typed Property、Selector Index、Ordered Declaration。（M2.2 当前 4 / 5，尚未满足本退出门）
 - [ ] Style/Measure/Layout/Paint/HitTest Dirty Graph。
 - [ ] Yoga、Text、Resource Cache 持久化且局部失效。
 - [ ] Paint 顺序、Display List、Hit Test 可扩展。
@@ -305,7 +305,7 @@ M2.0 只验收可观测性闭环；全部预算属于 M2.7，Hover/FieldNotify�
 - [x] 固定 100/500/2,000 节点与 50/200/500 规则语料。
 - [x] 七阶段时间统计。
 - [x] 节点、Selector、Yoga、Text、Brush、分配工作量。
-- [x] Insights/Stat 与 schema `2` Telemetry CSV。
+- [x] Insights/Stat 与 schema `3` Telemetry CSV。
 - [x] 固定环境和 P50/P95 规则。
 - [x] Schema `6` Observe/Enforce；暖布局和未变化 Paint 分配硬门。
 
@@ -318,14 +318,14 @@ M2.0 只验收可观测性闭环；全部预算属于 M2.7，Hover/FieldNotify�
 - [x] 同一 Document 双实例互不污染。
 - [x] Compiler/View 按职责拆分并通过回归。
 
-### M2.2——类型化样式与选择器索引 🚧 3 / 5
+### M2.2——类型化样式与选择器索引 🚧 4 / 5
 
 依赖顺序也是交付顺序；每项必须独立验收：
 
 - [x] Ordered Declaration：保持源顺序，专项覆盖重复声明、有效/无效交错和最后有效声明获胜；资产版本 3、旧示例重编译、26/26 Automation 及 Win64 Development BuildCookRun 均通过。
 - [x] CSS Property ID + Typed Value：52 个受支持属性在编译期解析为稳定 ID 与类型化联合值；规则和 inline style 的正常热路径不再解析属性名和值。资产版本 4、v3 一次性 Hydration 回退、两个示例重编译、27/27 Automation 及 Win64 Development BuildCookRun 均通过。
 - [x] Property Metadata：52 项受支持属性统一声明稳定名称、Inherited 及 Style/Measure/Layout/Paint/HitTest/Resource 影响范围；显式继承由元数据驱动。`PaintOnlyPseudoResourceSafety` 以真实 Slate Paint 证明 opacity hover 生效，同时不增加纹理加载次数且保留无关图片 Brush；29/29 Automation、Game + Editor Development 及 Win64 Development BuildCookRun 通过。
-- [ ] Selector Index：按 ID/Class/Tag/Pseudo 建候选索引；立即在 500/200 记录候选数和 Selector 求值，必须低于当前 100,000 次。
+- [x] Selector Index：每视图 Runtime Document 初始化时按右端 ID/Class/Tag/Pseudo/Universal 将每条规则归入一个主桶；节点缓存规范化 ID/Class 并在初始化阶段去重 class token，热路径直接遍历匹配桶后执行完整组合选择器校验。100/50、500/200、2,000/500 的候选/求值分别为 `638/638`、`10,694/10,694`、`102,794/102,794`，均低于原全扫描 `5,000`、`100,000`、`1,000,000`；专项覆盖 ID/Class/Tag/Pseudo/child combinator/universal/miss/重复 class，聚焦 6/6、完整 30/30、Game + Editor Development 及 Win64 Development BuildCookRun 通过。资产 payload/schema 不变。
 - [ ] Typed Cascade：覆盖 specificity、source order、inline style、重复属性和无效声明。
 
 中途门：先锁定正确性；资产 payload 改变时先完成迁移闭环；索引完成后立即验证工作量。`<0.5 ms` 仍属 M2.3，因为没有 Dirty Graph 时仍可能访问全树节点。Property Metadata 已证明 Paint-only Pseudo 变化不会同步加载纹理或重建无关图片；完整 Resource Cache 仍属 M2.4。
@@ -387,11 +387,11 @@ M2 先建设与传输协议无关的 Compiler、Diagnostics、Inspection 和 Ben
 
 ## 11. 测试与发布门禁
 
-### 11.1 当前 Automation（29 / 29）
+### 11.1 当前 Automation（30 / 30）
 
 | 层 | 测试 |
 | --- | --- |
-| Core | `HtmlCss`、`OrderedDeclarations`、`TypedProperties`、`PropertyMetadata`、`FlexLayout`、`ConstrainedMeasure`、`RichTextCompile`、`ScrollLayout`、`CssDiagnostics` |
+| Core | `HtmlCss`、`OrderedDeclarations`、`TypedProperties`、`PropertyMetadata`、`SelectorIndex`、`FlexLayout`、`ConstrainedMeasure`、`RichTextCompile`、`ScrollLayout`、`CssDiagnostics` |
 | Runtime | `AssetVersion`、`CompiledDocumentBoundary`、`OrderedDeclarationHydration`、`RuntimeInstanceIsolation`、`RuntimeCacheSeparation`、`RuntimePresentationIsolation`、`PaintOnlyPseudoResourceSafety`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`PerformanceInstrumentation`、`PaintOrderCache` |
 | Editor | `BenchmarkScenarios`、`BenchmarkStatistics`、`RuntimeHoverBenchmark`、`RuntimeFieldNotifyBenchmark`、`RuntimeWarmLayoutBenchmark`、`RuntimeUnchangedPaintBenchmark`、`LocalizationImport`、`OrderedDeclarationImport` |
 

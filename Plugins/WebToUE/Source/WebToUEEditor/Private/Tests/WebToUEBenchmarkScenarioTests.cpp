@@ -166,9 +166,14 @@ bool FWebToUEBenchmarkScenarioTest::RunTest(const FString& Parameters)
 			TestEqual(*(SamplePrefix + TEXT("visits every style node exactly once")),
 				PerformanceSnapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits),
 				static_cast<uint64>(First.Definition.NodeCount));
-			TestEqual(*(SamplePrefix + TEXT("evaluates every rule for every node")),
-				PerformanceSnapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations),
-				static_cast<uint64>(First.Definition.NodeCount) * static_cast<uint64>(First.Definition.RuleCount));
+			const uint64 FullScanWork = static_cast<uint64>(First.Definition.NodeCount) *
+				static_cast<uint64>(First.Definition.RuleCount);
+			const uint64 CandidateCount =
+				PerformanceSnapshot.GetCounter(EWebToUEPerformanceCounter::SelectorCandidates);
+			TestTrue(*(SamplePrefix + TEXT("selects fewer candidates than a full node-by-rule scan")),
+				CandidateCount < FullScanWork);
+			TestEqual(*(SamplePrefix + TEXT("evaluates every candidate exactly once")),
+				PerformanceSnapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), CandidateCount);
 			TestTrue(*(SamplePrefix + TEXT("records successful selector matches")),
 				PerformanceSnapshot.GetCounter(EWebToUEPerformanceCounter::SelectorMatches) > 0);
 
