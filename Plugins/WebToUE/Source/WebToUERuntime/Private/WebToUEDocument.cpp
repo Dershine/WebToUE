@@ -60,6 +60,7 @@ UWebToUEDocument::GetOrCreateRuntimeStyleTemplate() const
 		NewTemplate->Rules.Add(MoveTemp(Rule));
 	}
 	NewTemplate->SelectorIndex.Initialize(NewTemplate->Rules);
+	NewTemplate->CompilePseudoInvalidationDependencies();
 	RuntimeStyleTemplate = NewTemplate;
 	return RuntimeStyleTemplate;
 }

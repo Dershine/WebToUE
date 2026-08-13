@@ -20,6 +20,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPropertyMetadataTest, "WebToUE.Core.Pro
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUESelectorIndexTest, "WebToUE.Core.SelectorIndex",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPseudoInvalidationDependencyTest,
+	"WebToUE.Core.PseudoInvalidationDependencies",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETypedCascadeTest, "WebToUE.Core.TypedCascade",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
@@ -100,6 +104,52 @@ bool FWebToUESelectorIndexTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Duplicate class tokens do not revisit the same class bucket"), CandidateCount, uint64(7));
 	TestEqual(TEXT("Every candidate is evaluated exactly once"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), CandidateCount);
+	return true;
+}
+
+bool FWebToUEPseudoInvalidationDependencyTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body><section id='menu' class='menu'><button id='item' class='item'>Item</button></section></body>"),
+		TEXT(".menu:hover .item { color: red; } .item:active { opacity: 0.5; } ")
+		TEXT(".menu:focus button { border-color: blue; }"),
+		TEXT("PseudoInvalidationDependencies.html"));
+	TestFalse(TEXT("Pseudo invalidation dependencies compile without errors"), Document->HasErrors());
+	const FWebToUEDiagnostic* BroadDiagnostic = Document->Diagnostics.FindByPredicate(
+		[](const FWebToUEDiagnostic& Diagnostic)
+		{
+			return Diagnostic.Severity == EWebToUEDiagnosticSeverity::Warning &&
+				Diagnostic.Message.Contains(TEXT("broad invalidation target"));
+		});
+	TestNotNull(TEXT("A broad ancestor-pseudo target is diagnosed"), BroadDiagnostic);
+
+	FWebToUERuntimeStyleTemplate StyleTemplate;
+	StyleTemplate.Rules = Document->Rules;
+	StyleTemplate.SelectorIndex.Initialize(StyleTemplate.Rules);
+	StyleTemplate.CompilePseudoInvalidationDependencies();
+	TestEqual(TEXT("Every pseudo reason segment compiles one dependency"),
+		StyleTemplate.PseudoInvalidationDependencies.Num(), 3);
+	TestTrue(TEXT("The ancestor hover dependency retains its reason segment"),
+		StyleTemplate.PseudoInvalidationDependencies.ContainsByPredicate(
+			[](const FWebToUEPseudoInvalidationDependency& Dependency)
+			{
+				return Dependency.ReasonState == EWebToUEPseudoState::Hover &&
+					Dependency.RuleIndex == 0 && Dependency.ReasonSegmentIndex == 0;
+			}));
+
+	const FWebToUESelectorSegment& ItemTarget = StyleTemplate.Rules[0].Selector.Last();
+	TArray<FWebToUEInstanceHandle> Targets;
+	const int32 CandidateCount = Document->ForEachPotentialSelectorTarget(ItemTarget,
+		[&Targets](FWebToUEInstanceHandle Handle)
+		{
+			Targets.Add(Handle);
+		});
+	TestEqual(TEXT("The per-instance target index visits only the matching class bucket"),
+		CandidateCount, 1);
+	TestEqual(TEXT("The indexed target resolves to the intended node id"),
+		Targets.Num() == 1 && Document->ResolveNode(Targets[0])
+			? Document->ResolveNode(Targets[0])->GetAttribute(TEXT("id")) : FString(),
+		FString(TEXT("item")));
 	return true;
 }
 

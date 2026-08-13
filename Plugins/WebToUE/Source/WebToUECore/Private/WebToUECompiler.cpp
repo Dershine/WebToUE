@@ -716,6 +716,24 @@ namespace WebToUE::Private
 				Rule.Declarations = Declarations;
 				if (ParseSelector(Selector, Rule))
 				{
+					const int32 PseudoSegmentIndex = Rule.Selector.IndexOfByPredicate(
+						[](const FWebToUESelectorSegment& Segment)
+						{
+							return Segment.RequiredState != EWebToUEPseudoState::None;
+						});
+					const FWebToUESelectorSegment& Target = Rule.Selector.Last();
+					if (PseudoSegmentIndex != INDEX_NONE &&
+						PseudoSegmentIndex < Rule.Selector.Num() - 1 &&
+						Target.Id.IsEmpty() && Target.Classes.IsEmpty())
+					{
+						int32 Line;
+						int32 Column;
+						GetSourceLocation(Css, SelectorStart + LocalStart,
+							StyleSheet.StartLine, StyleSheet.StartColumn, Line, Column);
+						Document.Diagnostics.Add({ EWebToUEDiagnosticSeverity::Warning,
+							StyleSheet.SourceName, Line, Column,
+							FString::Printf(TEXT("Pseudo-state selector '%s' has a broad invalidation target; add a target id or class when possible."), *Selector) });
+					}
 					Document.Rules.Add(MoveTemp(Rule));
 				}
 				else

@@ -390,10 +390,33 @@ struct WEBTOUECORE_API FWebToUESelectorIndex
 	void Initialize(const TArray<FWebToUEStyleRule>& Rules);
 };
 
+struct WEBTOUECORE_API FWebToUEPseudoInvalidationDependency
+{
+	EWebToUEPseudoState ReasonState = EWebToUEPseudoState::None;
+	int32 RuleIndex = INDEX_NONE;
+	int32 ReasonSegmentIndex = INDEX_NONE;
+};
+
+struct WEBTOUECORE_API FWebToUERuntimeSelectorTargetIndex
+{
+	TMap<FString, TArray<FWebToUEInstanceHandle>> IdTargets;
+	TMap<FString, TArray<FWebToUEInstanceHandle>> ClassTargets;
+	TMap<FString, TArray<FWebToUEInstanceHandle>> TagTargets;
+	TArray<FWebToUEInstanceHandle> UniversalTargets;
+
+	void Reset();
+	void Add(const FWebToUENode& Node);
+	int32 ForEachPotentialTarget(const FWebToUESelectorSegment& Target,
+		TFunctionRef<void(FWebToUEInstanceHandle)> Visitor) const;
+};
+
 struct WEBTOUECORE_API FWebToUERuntimeStyleTemplate
 {
 	TArray<FWebToUEStyleRule> Rules;
 	FWebToUESelectorIndex SelectorIndex;
+	TArray<FWebToUEPseudoInvalidationDependency> PseudoInvalidationDependencies;
+
+	void CompilePseudoInvalidationDependencies();
 };
 
 struct WEBTOUECORE_API FWebToUEDocument
@@ -405,6 +428,7 @@ struct WEBTOUECORE_API FWebToUEDocument
 	TArray<FWebToUERuntimeNodeState> RuntimeNodeStates;
 	TArray<FWebToUERuntimeRenderData> RuntimeRenderData;
 	TArray<FWebToUENode*> RuntimeNodesBySlot;
+	FWebToUERuntimeSelectorTargetIndex RuntimeSelectorTargets;
 	FWebToUESelectorIndex SelectorIndex;
 	TSharedPtr<const FWebToUERuntimeStyleTemplate> SharedStyleTemplate;
 
@@ -417,6 +441,8 @@ struct WEBTOUECORE_API FWebToUEDocument
 	void AddRuntimeNodeData(FWebToUENode& Node);
 	int32 ForEachSelectorCandidate(const FWebToUENode& Node,
 		TFunctionRef<void(const FWebToUEStyleRule&)> Visitor) const;
+	int32 ForEachPotentialSelectorTarget(const FWebToUESelectorSegment& Target,
+		TFunctionRef<void(FWebToUEInstanceHandle)> Visitor) const;
 	FORCEINLINE bool IsValidRuntimeNodeStateIndex(const FWebToUENode& Node) const
 	{
 		return ResolveNode(Node.InstanceHandle) == &Node;

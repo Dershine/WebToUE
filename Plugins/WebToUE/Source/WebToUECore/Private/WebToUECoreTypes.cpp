@@ -75,6 +75,7 @@ void FWebToUEDocument::InitializeRuntimeData(uint64 InOwnerId, uint32 InGenerati
 	RuntimeNodeStates.Reset();
 	RuntimeRenderData.Reset();
 	RuntimeNodesBySlot.Reset();
+	RuntimeSelectorTargets.Reset();
 	int32 NodeCount = 0;
 	ForEachNode([&NodeCount](FWebToUENode&) { ++NodeCount; });
 	if (NodeCount > 0)
@@ -157,6 +158,92 @@ void FWebToUESelectorIndex::Initialize(const TArray<FWebToUEStyleRule>& Rules)
 	}
 }
 
+void FWebToUERuntimeSelectorTargetIndex::Reset()
+{
+	IdTargets.Reset();
+	ClassTargets.Reset();
+	TagTargets.Reset();
+	UniversalTargets.Reset();
+}
+
+void FWebToUERuntimeSelectorTargetIndex::Add(const FWebToUENode& Node)
+{
+	if (Node.Type != EWebToUENodeType::Element || !Node.InstanceHandle.IsValid())
+	{
+		return;
+	}
+	UniversalTargets.Add(Node.InstanceHandle);
+	if (!Node.GetSelectorId().IsEmpty())
+	{
+		IdTargets.FindOrAdd(Node.GetSelectorId()).Add(Node.InstanceHandle);
+	}
+	for (const FString& ClassName : Node.SelectorClasses)
+	{
+		ClassTargets.FindOrAdd(ClassName).Add(Node.InstanceHandle);
+	}
+	if (!Node.Tag.IsEmpty())
+	{
+		TagTargets.FindOrAdd(Node.Tag).Add(Node.InstanceHandle);
+	}
+}
+
+int32 FWebToUERuntimeSelectorTargetIndex::ForEachPotentialTarget(
+	const FWebToUESelectorSegment& Target,
+	TFunctionRef<void(FWebToUEInstanceHandle)> Visitor) const
+{
+	const TArray<FWebToUEInstanceHandle>* Targets = nullptr;
+	if (!Target.Id.IsEmpty())
+	{
+		Targets = IdTargets.Find(Target.Id.ToLower());
+	}
+	else if (!Target.Classes.IsEmpty())
+	{
+		Targets = ClassTargets.Find(Target.Classes[0].ToLower());
+	}
+	else if (!Target.Type.IsEmpty())
+	{
+		Targets = TagTargets.Find(Target.Type.ToLower());
+	}
+	else
+	{
+		Targets = &UniversalTargets;
+	}
+	if (!Targets)
+	{
+		return 0;
+	}
+	for (const FWebToUEInstanceHandle Handle : *Targets)
+	{
+		Visitor(Handle);
+	}
+	return Targets->Num();
+}
+
+void FWebToUERuntimeStyleTemplate::CompilePseudoInvalidationDependencies()
+{
+	PseudoInvalidationDependencies.Reset();
+	constexpr EWebToUEPseudoState States[] = {
+		EWebToUEPseudoState::Hover,
+		EWebToUEPseudoState::Active,
+		EWebToUEPseudoState::Focus,
+		EWebToUEPseudoState::Disabled
+	};
+	for (int32 RuleIndex = 0; RuleIndex < Rules.Num(); ++RuleIndex)
+	{
+		const FWebToUEStyleRule& Rule = Rules[RuleIndex];
+		for (int32 SegmentIndex = 0; SegmentIndex < Rule.Selector.Num(); ++SegmentIndex)
+		{
+			for (const EWebToUEPseudoState State : States)
+			{
+				if (EnumHasAnyFlags(Rule.Selector[SegmentIndex].RequiredState, State))
+				{
+					PseudoInvalidationDependencies.Add({ State, RuleIndex, SegmentIndex });
+				}
+			}
+		}
+	}
+}
+
 void FWebToUEDocument::InitializeSelectorIndex()
 {
 	SelectorIndex.Initialize(Rules);
@@ -221,6 +308,13 @@ int32 FWebToUEDocument::ForEachSelectorCandidate(const FWebToUENode& Node,
 	return CandidateCount;
 }
 
+int32 FWebToUEDocument::ForEachPotentialSelectorTarget(
+	const FWebToUESelectorSegment& Target,
+	TFunctionRef<void(FWebToUEInstanceHandle)> Visitor) const
+{
+	return RuntimeSelectorTargets.ForEachPotentialTarget(Target, Visitor);
+}
+
 void FWebToUEDocument::AddRuntimeNodeData(FWebToUENode& Node)
 {
 	const int32 RuntimeDataIndex = RuntimeNodeStates.AddDefaulted();
@@ -229,6 +323,7 @@ void FWebToUEDocument::AddRuntimeNodeData(FWebToUENode& Node)
 	check(RuntimeDataIndex == RenderDataIndex && RuntimeDataIndex == NodeSlot);
 	Node.InstanceHandle = FWebToUEInstanceHandle::Create(
 		RuntimeInstanceOwnerId, RuntimeInstanceGeneration, RuntimeDataIndex);
+	RuntimeSelectorTargets.Add(Node);
 }
 
 FWebToUENode* FWebToUEDocument::ResolveNode(FWebToUEInstanceHandle Handle)
