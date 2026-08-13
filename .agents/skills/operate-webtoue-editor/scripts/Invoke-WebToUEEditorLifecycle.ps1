@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("Status", "Preflight", "SafeBuildAndLaunch")]
+    [ValidateSet("Status", "Preflight", "SafeBuildAndLaunch", "SafeBuildCookAndLaunch")]
     [string]$Action = "Status",
     [string]$ProjectRoot,
     [string]$EngineRoot,
@@ -14,7 +14,15 @@ param(
     [ValidateRange(10, 600)]
     [int]$ReadyTimeoutSec = 180,
     [ValidateRange(1, 30)]
-    [int]$McpTimeoutSec = 10
+    [int]$McpTimeoutSec = 10,
+    [ValidateRange(0, 30)]
+    [int]$McpRetryDelaySec = 2,
+    [ValidateSet("Win64")]
+    [string]$TargetPlatform = "Win64",
+    [ValidateSet("Development", "Shipping")]
+    [string]$ClientConfig = "Development",
+    [ValidateRange(1024, 65535)]
+    [int]$CookerMcpPort = 8001
 )
 
 Set-StrictMode -Version Latest
@@ -69,7 +77,7 @@ function Set-OperationPhase {
     }
     $script:OperationState.Phase = $Phase
     $script:OperationState.Error = $ErrorMessage
-    if ($Phase -in @("Healthy", "Failed")) {
+    if ($Phase -in @("Healthy", "EditorReadyMcpPending", "Failed")) {
         $script:OperationState.CompletedUtc = [DateTime]::UtcNow.ToString("o")
     }
     Write-OperationState -State $script:OperationState -Path $script:OperationStatePath
@@ -200,17 +208,45 @@ function Get-PreflightResult {
 function Get-ActiveOperationPids {
     param([object]$Operation)
 
-    if (-not $Operation -or $Operation.Phase -in @("Healthy", "Failed", "Invalid")) {
+    if (-not $Operation -or $Operation.Phase -in @("Healthy", "EditorReadyMcpPending", "Failed", "Invalid")) {
         return @()
     }
     $activePids = @()
-    foreach ($propertyName in @("OwnerPid", "VibeProcessPid", "NewEditorPid")) {
+    foreach ($propertyName in @("OwnerPid", "ReleaseHostPid", "VibeProcessPid", "NewEditorPid")) {
         $property = $Operation.PSObject.Properties[$propertyName]
         if ($property -and $property.Value -and (Get-Process -Id ([int]$property.Value) -ErrorAction SilentlyContinue)) {
             $activePids += [int]$property.Value
         }
     }
+    $releaseProcessProperty = $Operation.PSObject.Properties["ReleaseProcessPids"]
+    if ($releaseProcessProperty) {
+        foreach ($processId in @($releaseProcessProperty.Value)) {
+            if ($processId -and (Get-Process -Id ([int]$processId) -ErrorAction SilentlyContinue)) {
+                $activePids += [int]$processId
+            }
+        }
+    }
     return @($activePids | Select-Object -Unique)
+}
+
+function Get-DescendantProcessIds {
+    param([int]$RootPid)
+
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Select-Object ProcessId, ParentProcessId)
+    $knownParents = [System.Collections.Generic.HashSet[int]]::new()
+    $descendants = [System.Collections.Generic.HashSet[int]]::new()
+    $null = $knownParents.Add($RootPid)
+    do {
+        $added = $false
+        foreach ($process in $processes) {
+            $processId = [int]$process.ProcessId
+            if ($knownParents.Contains([int]$process.ParentProcessId) -and $processId -ne $RootPid -and $descendants.Add($processId)) {
+                $null = $knownParents.Add($processId)
+                $added = $true
+            }
+        }
+    } while ($added)
+    return @($descendants)
 }
 
 function Remove-StaleLifecycleScripts {
@@ -313,6 +349,47 @@ function Test-McpEndpoint {
         }
     }
     return [pscustomobject]$result
+}
+
+function Test-McpEndpointWithRetry {
+    param([string]$Uri, [int]$TimeoutSec, [int]$RetryDelaySec)
+
+    $first = Test-McpEndpoint -Uri $Uri -TimeoutSec $TimeoutSec
+    if ($first.Ready -or $RetryDelaySec -le 0) {
+        $first | Add-Member -NotePropertyName AttemptCount -NotePropertyValue 1 -Force
+        return $first
+    }
+
+    Start-Sleep -Seconds $RetryDelaySec
+    $second = Test-McpEndpoint -Uri $Uri -TimeoutSec $TimeoutSec
+    $second | Add-Member -NotePropertyName AttemptCount -NotePropertyValue 2 -Force
+    return $second
+}
+
+function Get-BuildCookRunArguments {
+    param([string]$ProjectFile, [string]$Platform, [string]$Configuration, [int]$McpPort)
+
+    return @(
+        "BuildCookRun",
+        "-Project=$ProjectFile",
+        "-NoP4",
+        "-Platform=$Platform",
+        "-ClientConfig=$Configuration",
+        "-Build",
+        "-Cook",
+        "-Stage",
+        "-Pak",
+        "-IoStore",
+        "-UTF8Output",
+        "-Unattended",
+        "-AdditionalCookerOptions=-ModelContextProtocolPort=$McpPort"
+    )
+}
+
+function ConvertTo-PowerShellSingleQuotedLiteral {
+    param([string]$Value)
+
+    return "'" + $Value.Replace("'", "''") + "'"
 }
 
 function Get-StatusResult {
@@ -447,6 +524,15 @@ if (-not $preflight.Passed) {
     Stop-Lifecycle -Code 5 -Message "Lifecycle write-access preflight failed before Editor shutdown. Run this exact lifecycle command outside the workspace-only sandbox."
 }
 
+$isReleaseAction = ($Action -eq "SafeBuildCookAndLaunch")
+$runUatScript = Join-Path $resolvedEngineRoot "Engine\Build\BatchFiles\RunUAT.bat"
+if ($isReleaseAction -and -not (Test-Path -LiteralPath $runUatScript -PathType Leaf)) {
+    Stop-Lifecycle -Code 6 -Message "RunUAT is missing: $runUatScript"
+}
+if ($isReleaseAction -and ($StrictRebuild -or $Clean -or $SkipBuild)) {
+    Stop-Lifecycle -Code 7 -Message "SafeBuildCookAndLaunch owns its BuildCookRun and relaunch phases; do not combine it with -StrictRebuild, -Clean, or -SkipBuild."
+}
+
 $mutexName = "Local\WebToUE.EditorLifecycle.$($uprojects[0].BaseName)"
 $lifecycleMutex = [System.Threading.Mutex]::new($false, $mutexName)
 $mutexAcquired = $false
@@ -482,6 +568,7 @@ $operationDirectory = Join-Path $resolvedRoot "Saved\VibeUE\Lifecycle\Operations
 $script:OperationStatePath = $operationStatePath
 $script:OperationState = [ordered]@{
     OperationId = $operationId
+    Action = $Action
     OwnerPid = $PID
     Phase = "PreflightPassed"
     Project = $projectFile
@@ -490,8 +577,16 @@ $script:OperationState = [ordered]@{
     UpdatedUtc = $null
     CompletedUtc = $null
     PreviousEditorPid = $null
+    ReleaseHostPid = $null
+    ReleaseProcessPids = @()
+    AutomationToolExitCode = $null
     VibeProcessPid = $null
     NewEditorPid = $null
+    EditorReady = $false
+    McpReady = $false
+    ReleaseInvocationPath = $null
+    ReleaseOutputPath = (Join-Path $operationDirectory "uat-stdout.log")
+    ReleaseErrorPath = (Join-Path $operationDirectory "uat-stderr.log")
     OutputPath = (Join-Path $operationDirectory "vibe-stdout.log")
     ErrorPath = (Join-Path $operationDirectory "vibe-stderr.log")
     TemporaryVibeScript = $null
@@ -539,6 +634,71 @@ if (@(Get-UnrealEditors).Count -ne 0) {
     Stop-Lifecycle -Code 35 -Message "An Unreal Editor appeared or remained after the safety gate; VibeUE was not invoked."
 }
 
+$releaseResult = $null
+if ($isReleaseAction) {
+    New-Item -ItemType Directory -Path $operationDirectory -Force | Out-Null
+    $releaseArguments = Get-BuildCookRunArguments `
+        -ProjectFile $projectFile `
+        -Platform $TargetPlatform `
+        -Configuration $ClientConfig `
+        -McpPort $CookerMcpPort
+    $releaseInvocationPath = Join-Path $operationDirectory "Invoke-BuildCookRun.ps1"
+    $argumentLiterals = @($releaseArguments | ForEach-Object { "    " + (ConvertTo-PowerShellSingleQuotedLiteral -Value $_) })
+    $releaseInvocation = @(
+        '$ErrorActionPreference = "Stop"',
+        '$arguments = @(',
+        ($argumentLiterals -join ",`r`n"),
+        ')',
+        "& $(ConvertTo-PowerShellSingleQuotedLiteral -Value $runUatScript) @arguments",
+        'exit $LASTEXITCODE'
+    ) -join "`r`n"
+    [System.IO.File]::WriteAllText($releaseInvocationPath, $releaseInvocation, [System.Text.UTF8Encoding]::new($false))
+    $script:OperationState.ReleaseInvocationPath = $releaseInvocationPath
+    Set-OperationPhase -Phase "RunningBuildCookRun"
+
+    Write-Host "Running tracked BuildCookRun ($TargetPlatform $ClientConfig, Cook/Stage/Pak/IoStore)..." -ForegroundColor Cyan
+    $releaseProcess = Start-Process `
+        -FilePath (Join-Path $PSHOME "powershell.exe") `
+        -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $releaseInvocationPath) `
+        -NoNewWindow `
+        -PassThru `
+        -RedirectStandardOutput $script:OperationState.ReleaseOutputPath `
+        -RedirectStandardError $script:OperationState.ReleaseErrorPath
+    $script:OperationState.ReleaseHostPid = $releaseProcess.Id
+    Write-OperationState -State $script:OperationState -Path $script:OperationStatePath
+    while (-not $releaseProcess.WaitForExit(2000)) {
+        $script:OperationState.ReleaseProcessPids = @(
+            @($releaseProcess.Id) + @(Get-DescendantProcessIds -RootPid $releaseProcess.Id) |
+                Select-Object -Unique)
+        Write-OperationState -State $script:OperationState -Path $script:OperationStatePath
+    }
+    $releaseProcess.Refresh()
+    $releaseExitCode = [int]$releaseProcess.ExitCode
+    $script:OperationState.AutomationToolExitCode = $releaseExitCode
+    Write-OperationState -State $script:OperationState -Path $script:OperationStatePath
+
+    $releaseOutput = @(Get-Content -LiteralPath $script:OperationState.ReleaseOutputPath -ErrorAction SilentlyContinue)
+    $releaseErrors = @(Get-Content -LiteralPath $script:OperationState.ReleaseErrorPath -ErrorAction SilentlyContinue)
+    Write-Host "BuildCookRun output: $($script:OperationState.ReleaseOutputPath)" -ForegroundColor Cyan
+    $releaseOutput | Select-Object -Last 80 | ForEach-Object { Write-Host $_ }
+    $releaseErrors | Select-Object -Last 80 | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+    if ($releaseExitCode -ne 0) {
+        Stop-Lifecycle -Code 38 -Message "BuildCookRun failed with exit code $releaseExitCode. Inspect the persisted UAT logs before retrying."
+    }
+
+    $releaseResult = [ordered]@{
+        Platform = $TargetPlatform
+        ClientConfig = $ClientConfig
+        CookerMcpPort = $CookerMcpPort
+        ReleaseHostPid = $releaseProcess.Id
+        ReleaseProcessPids = @($script:OperationState.ReleaseProcessPids)
+        ExitCode = $releaseExitCode
+        OutputPath = $script:OperationState.ReleaseOutputPath
+        ErrorPath = $script:OperationState.ReleaseErrorPath
+    }
+    Set-OperationPhase -Phase "BuildCookRunSucceeded"
+}
+
 $vibeScriptToRun = $vibeScript
 $temporaryVibeScript = $null
 if ($resolvedEngineRoot) {
@@ -561,7 +721,7 @@ if ($resolvedEngineRoot) {
 $vibeArguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $vibeScriptToRun)
 if ($StrictRebuild) { $vibeArguments += "-StrictRebuild" }
 if ($Clean) { $vibeArguments += "-Clean" }
-if ($SkipBuild) { $vibeArguments += "-SkipBuild" }
+if ($SkipBuild -or $isReleaseAction) { $vibeArguments += "-SkipBuild" }
 
 Write-Host "Invoking VibeUE's supported build-and-launch script..." -ForegroundColor Cyan
 $vibeOutput = @()
@@ -602,12 +762,21 @@ $newPid = [int]([regex]::Match($pidLines[0], '^Editor-PID=(\d+)$').Groups[1].Val
 $script:OperationState.NewEditorPid = $newPid
 Set-OperationPhase -Phase "WaitingReadiness"
 $ready = Wait-VibeReadySignal -Root $resolvedRoot -EditorPid $newPid -TimeoutSec $ReadyTimeoutSec
+$script:OperationState.EditorReady = [bool]$ready.Valid
 Set-OperationPhase -Phase "CheckingMcp"
-$mcp = Test-McpEndpoint -Uri $McpUri -TimeoutSec $McpTimeoutSec
+$mcp = Test-McpEndpointWithRetry -Uri $McpUri -TimeoutSec $McpTimeoutSec -RetryDelaySec $McpRetryDelaySec
+$script:OperationState.McpReady = [bool]$mcp.Ready
 $healthy = ($ready.Valid -and $mcp.Ready)
+$script:OperationState.TemporaryVibeScript = $null
+if ($healthy) {
+    Set-OperationPhase -Phase "Healthy"
+}
+else {
+    Set-OperationPhase -Phase "EditorReadyMcpPending" -ErrorMessage "Editor readiness is valid, but MCP initialization did not succeed after the bounded recheck."
+}
 
 [pscustomobject][ordered]@{
-    Action = "SafeBuildAndLaunch"
+    Action = $Action
     Project = $projectFile
     PreviousEditorPid = $previousPid
     NewEditorPid = $newPid
@@ -616,18 +785,18 @@ $healthy = ($ready.Valid -and $mcp.Ready)
         EngineRoot = $resolvedEngineRoot
         StrictRebuild = [bool]$StrictRebuild
         Clean = [bool]$Clean
-        SkipBuild = [bool]$SkipBuild
+        SkipBuild = [bool]($SkipBuild -or $isReleaseAction)
     }
+    Release = $releaseResult
     ReadySignal = $ready
     Mcp = $mcp
     Healthy = $healthy
 } | ConvertTo-Json -Depth 10
 
-if (-not $healthy) {
-    Stop-Lifecycle -Code 44 -Message "The new Editor signaled readiness, but MCP initialization did not succeed."
-}
-$script:OperationState.TemporaryVibeScript = $null
-Set-OperationPhase -Phase "Healthy"
 $lifecycleMutex.ReleaseMutex()
 $lifecycleMutex.Dispose()
+if (-not $healthy) {
+    Write-Host "ERROR: The new Editor signaled readiness, but MCP initialization did not succeed after $($mcp.AttemptCount) attempt(s)." -ForegroundColor Red
+    exit 44
+}
 exit 0

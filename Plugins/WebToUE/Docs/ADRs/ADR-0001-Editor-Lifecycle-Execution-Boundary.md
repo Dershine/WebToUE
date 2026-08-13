@@ -2,6 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-08-11
+- 最近修订：2026-08-13
 - 范围：WebToUE 开发、构建与 Editor Automation；不进入 Core、Runtime、Cooked 游戏或产品协议
 
 ## 背景
@@ -13,12 +14,14 @@ WebToUE 的 C++ 重编译需要关闭当前 Editor，再通过 VibeUE 的受支�
 ## 决策
 
 1. 继续使用唯一的 `$operate-webtoue-editor` Skill；不创建第二个 Editor 生命周期 Skill。
-2. UBT、VibeUE build/launch 和 UnrealEditor 必须从同一个、仅授权项目生命周期脚本的非沙箱边界启动。不得为此关闭全局沙箱或授权任意 PowerShell。
+2. UBT、AutomationTool/BuildCookRun、VibeUE build/launch 和 UnrealEditor 必须从同一个、仅授权项目生命周期脚本的非沙箱边界启动。不得为此关闭全局沙箱或授权任意 PowerShell。
 3. 生命周期包装器在归档日志或关闭健康 Editor 之前，必须真实创建并删除写入探针，验证项目 `Saved/Intermediate`、Engine `Intermediate`、UnrealBuildTool LocalAppData 和 UnrealEngine LocalAppData。
-4. 每个项目同时只允许一个生命周期操作。包装器使用项目级命名互斥锁，并将 OperationId、阶段、所有者 PID、VibeUE PID、Editor PID、输出路径和终态原子写入 `Saved/VibeUE/Lifecycle/operation.json`。
-5. 调用方遇到长时间无输出或执行单元 yield 时，只能等待同一个执行单元或读取操作状态；不得重新发起 build/launch。包装器还会拒绝仍有存活 owner、VibeUE 或 Editor PID 的旧操作。
+4. 每个项目同时只允许一个生命周期操作。包装器使用项目级命名互斥锁，并将 OperationId、阶段、所有者/发布宿主/已观察 RunUAT-UBT-Commandlet 进程树/VibeUE/Editor PID、退出码、输出路径、readiness/MCP 标志和终态原子写入 `Saved/VibeUE/Lifecycle/operation.json`。
+5. 调用方遇到长时间无输出或执行单元 yield 时，只能等待同一个执行单元或读取操作状态；不得重新发起 build/launch。包装器还会拒绝仍有存活 owner、发布宿主/进程树、VibeUE 或 Editor PID 的旧操作。
 6. Editor 关闭仍只允许 MCP 保存门和正常窗口关闭；不因构建、readiness 或 MCP 失败而自动强杀 Editor。
 7. 非标准 Engine Root 由项目包装器显式验证。当前兼容层通过可清理的临时同目录副本向 vendored VibeUE 脚本注入路径；正常路径使用 `finally` 清理，后续操作还会在确认没有存活生命周期 PID 后清理精确前缀的中断残留。长期应由 VibeUE 上游提供正式 `-EngineRoot` 参数，随后更新项目锁定版本并移除兼容层。
+8. `SafeBuildCookAndLaunch` 只在候选源码、测试、资产和必要文档冻结后运行。它复用同一安全关停门，在受跟踪子进程中完成 Win64 Build/Cook/Stage/Pak/IoStore，持久化完整日志，成功后才通过 VibeUE `-SkipBuild` 恢复 Editor；失败时不得无状态重跑。
+9. Editor readiness 与 MCP readiness 是独立状态。readiness 有效但一次有界 MCP 延迟复查仍失败时，记录终态 `EditorReadyMcpPending`，不得把它伪装成 Editor 未启动或以重建代替 MCP 诊断。
 
 ## 被否决的替代方案
 
@@ -34,11 +37,12 @@ WebToUE 的 C++ 重编译需要关闭当前 Editor，再通过 VibeUE 的受支�
 - 受限环境中的 Preflight 会在 Editor 仍开启时失败，并给出具体不可写目录。
 - 生命周期命令需要一次精确的非沙箱批准，但其他源码、Git 和文档工作继续留在 workspace sandbox。
 - 操作状态属于 `Saved` 下的瞬态证据，不进入产品协议或 Runtime。
-- build、readiness、MCP、Python、World 和 Automation Test 仍是独立验收门。
-- 外部调用方若主动终止生命周期所有者进程，包装器只能阻止仍存活子进程期间的重复启动；调用方仍应优先续接原执行单元。
+- build、BuildCookRun、readiness、MCP、Python、World 和 Automation Test 仍是独立验收门。
+- 外部调用方若主动终止生命周期所有者进程，`RunUAT`、UBT 或 `UnrealEditor-Cmd` 子进程可能继续存活；包装器通过持久发布宿主/已观察进程树 PID 与日志阻止活跃期重复启动，调用方仍应优先续接原执行单元并检查子进程状态。
 
 ## 验收
 
-- Pester：可写隔离环境 Preflight 通过；缺失探针目录时在创建 operation state 前失败；持久状态可识别存活所有者且中断残留只按精确临时前缀清理。
+- Pester 5/5：可写隔离环境 Preflight 通过；缺失探针目录时在创建 operation state 前失败；持久状态可识别存活所有者与发布进程树；中断残留只按精确临时前缀清理；BuildCookRun 固定参数和 MCP 单次延迟复查成立。
 - 受限 workspace 实测：Engine `Intermediate` 和两个 LocalAppData 探针失败，Editor 未启动或关闭，且无探针残留。
 - 真实集成门：在精确批准的非沙箱边界完成 UE 5.8 Win64 Development build/launch，并分别验证 readiness、MCP、Python、World 和相关 Automation Test。
+- `SafeBuildCookAndLaunch` 的真实 UAT→重启集成本轮未执行；在首次作为发布门使用时必须保留退出码、UAT 日志与重启健康证据。

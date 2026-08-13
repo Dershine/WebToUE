@@ -13,6 +13,7 @@ Load this reference for a rebuild/relaunch acceptance pass or when a lifecycle g
 7. Use `AutomationTestToolset.DiscoverTests`, followed by `RunTests` or `RunTestsByFilter`. Record discovered, executed, passed, failed, skipped, and duration values. Any failed test fails acceptance.
 8. Use `StartsWith:WebToUE` for the project suite and `StartsWith:VibeUE` for the integration suite when both are relevant. Counts may grow over time; require zero failures instead of hard-coding a count.
 9. Capture and inspect a viewport image for visible changes.
+10. For `SafeBuildCookAndLaunch`, also require `Release.ExitCode = 0`, persisted UAT stdout/stderr paths, and a healthy relaunched Editor. Treat BuildCookRun success and Editor health as separate gates.
 
 ## Gate diagnosis
 
@@ -23,8 +24,9 @@ Load this reference for a rebuild/relaunch acceptance pass or when a lifecycle g
 | Invalid signal | Missing, stale, PID-mismatched, or malformed JSON | Treat the Editor as not VibeUE-ready; inspect startup logs without forcing a restart. |
 | Graceful close timeout | Old PID remains alive after 60 seconds | Bring the Editor forward and resolve save/modal UI; never force-kill it. |
 | Build failure | VibeUE script returns nonzero | Inspect build output and the archived previous logs; fix source before retrying. |
+| BuildCookRun failure | `AutomationToolExitCode` is nonzero | Inspect the persisted UAT stdout/stderr paths and surviving release-host/process-tree PIDs before any retry. Repeat affected cheap gates after a fix. |
 | Readiness timeout | New PID alive but no valid signal within 180 seconds | Inspect the new `Saved/Logs` startup log and plugin load errors. |
-| MCP failure | Readiness valid but initialize request fails | Confirm `.codex/config.toml`, MCP Auto Start, port `8000`, and firewall/port ownership. Do not repeatedly poll. |
+| MCP failure | Readiness valid but the bounded initialize recheck fails | Treat `EditorReadyMcpPending` as an Editor-ready/MCP-not-ready terminal result. Confirm `.codex/config.toml`, MCP Auto Start, port `8000`, and firewall/port ownership; do not rebuild or repeatedly poll. |
 | Python/world failure | MCP works but probe/world is unavailable | Wait for the specific subsystem only when there is a bounded event/readiness signal; otherwise report it separately. |
 | Tests stay queued | Interactive automation command does not start | Use `AutomationTestToolset.DiscoverTests` and `RunTests`/`RunTestsByFilter`. |
 
@@ -32,6 +34,7 @@ Load this reference for a rebuild/relaunch acceptance pass or when a lifecycle g
 
 - Previous and new Editor PID.
 - Exact build mode and optional switches.
+- BuildCookRun configuration, release-host/process-tree PIDs, AutomationTool exit code, and persisted UAT log paths when applicable.
 - Readiness file path, `pluginVersion`, and session start time.
 - MCP HTTP status and server identity when returned.
 - Python/world probe output.

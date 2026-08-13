@@ -16,6 +16,7 @@ function New-FakeLifecycleEnvironment {
     Set-Content -LiteralPath (Join-Path $projectRoot "TestProject.uproject") -Value '{"EngineAssociation":"5.8"}' -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $projectRoot "Plugins\VibeUE\BuildAndLaunchGame.ps1") -Value '$enginePath = $null' -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $engineRoot "Engine\Build\BatchFiles\Build.bat") -Value '@exit /b 0' -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $engineRoot "Engine\Build\BatchFiles\RunUAT.bat") -Value '@exit /b 0' -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $engineRoot "Engine\Binaries\Win64\UnrealEditor.exe") -Value '' -Encoding ASCII
 
     return [pscustomobject]@{
@@ -91,10 +92,63 @@ Describe "WebToUE Editor lifecycle preflight" {
             Invoke-Expression $functionAst.Extent.Text
         }
 
-        $operation = [pscustomobject]@{ Phase = "InvokingVibeUE"; OwnerPid = $PID; VibeProcessPid = $null; NewEditorPid = $null }
+        $operation = [pscustomobject]@{ Phase = "InvokingVibeUE"; OwnerPid = $PID; ReleaseHostPid = $null; ReleaseProcessPids = @(); VibeProcessPid = $null; NewEditorPid = $null }
         @(Get-ActiveOperationPids -Operation $operation) | Should Be @($PID)
+
+        $releaseOperation = [pscustomobject]@{ Phase = "RunningBuildCookRun"; OwnerPid = $null; ReleaseHostPid = $null; ReleaseProcessPids = @($PID); VibeProcessPid = $null; NewEditorPid = $null }
+        @(Get-ActiveOperationPids -Operation $releaseOperation) | Should Be @($PID)
         @(Remove-StaleLifecycleScripts -VibeScriptPath $vibeScript).Count | Should Be 1
         (Test-Path -LiteralPath $staleScript) | Should Be $false
         (Test-Path -LiteralPath $vibeScript) | Should Be $true
+    }
+
+    It "constructs the fixed tracked BuildCookRun contract" {
+        $scriptAst = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path $ScriptUnderTest), [ref]$null, [ref]$null)
+        foreach ($functionName in @("Get-BuildCookRunArguments", "ConvertTo-PowerShellSingleQuotedLiteral")) {
+            $functionAst = $scriptAst.Find({
+                param($node)
+                $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName
+            }, $true)
+            Invoke-Expression $functionAst.Extent.Text
+        }
+
+        $arguments = @(Get-BuildCookRunArguments `
+            -ProjectFile "E:\Projects\Example Project\Example.uproject" `
+            -Platform "Win64" `
+            -Configuration "Development" `
+            -McpPort 8001)
+
+        ($arguments -contains "BuildCookRun") | Should Be $true
+        ($arguments -contains "-Build") | Should Be $true
+        ($arguments -contains "-Cook") | Should Be $true
+        ($arguments -contains "-Stage") | Should Be $true
+        ($arguments -contains "-Pak") | Should Be $true
+        ($arguments -contains "-IoStore") | Should Be $true
+        ($arguments -contains "-AdditionalCookerOptions=-ModelContextProtocolPort=8001") | Should Be $true
+        ($arguments -join " ") | Should Not Match "ModelContextProtocolPort=8000"
+        (ConvertTo-PowerShellSingleQuotedLiteral -Value "C:\It's Here") | Should Be "'C:\It''s Here'"
+    }
+
+    It "limits MCP startup recovery to one delayed recheck" {
+        $scriptAst = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path $ScriptUnderTest), [ref]$null, [ref]$null)
+        $functionAst = $scriptAst.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Test-McpEndpointWithRetry"
+        }, $true)
+        Invoke-Expression $functionAst.Extent.Text
+
+        $script:mcpAttempts = 0
+        function Test-McpEndpoint {
+            $script:mcpAttempts++
+            return [pscustomobject]@{ Ready = ($script:mcpAttempts -eq 2); Error = $null }
+        }
+        function Start-Sleep { param([int]$Seconds) }
+
+        $result = Test-McpEndpointWithRetry -Uri "http://127.0.0.1:8000/mcp" -TimeoutSec 1 -RetryDelaySec 1
+        $result.Ready | Should Be $true
+        $result.AttemptCount | Should Be 2
+        $script:mcpAttempts | Should Be 2
     }
 }

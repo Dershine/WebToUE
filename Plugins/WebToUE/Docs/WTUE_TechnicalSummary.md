@@ -232,7 +232,7 @@ Property ID/Typed Value 已消除版本 4 正常 Runtime 路径的属性名和�
 | R-07 | Map 声明丢失重复属性顺序 | Medium | Core、Compiled IR 与 Hydration 已使用有序声明；30/30 和 Win64 Development BuildCookRun 通过 | 保持 Ordered Declaration 专项与资产版本门 | ✅ Mitigated |
 | R-08 | 仅 Win64 | Medium | `.uplugin` 平台限制 | 平台审计与构建矩阵 | ⬜ M6 |
 | R-09 | MCP Experimental 且通用 Python 权限高 | Medium | 本地 Editor 环境已验证 | 回环/受信任/Editor-only/最小权限 | ⬜ M5 |
-| R-10 | Sandbox 可使 UBT 关 Editor 后失败 | High | 曾复现；Preflight、互斥和持久状态已验证 | 生命周期 Skill 与 [ADR-0001](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md) | ✅ Mitigated |
+| R-10 | Sandbox 或宿主超时可使 UE 子进程脱离观察 | High | 曾复现；Preflight、互斥、发布进程树 PID/日志和持久状态已有 Pester 5/5 | 生命周期 Skill 与 [ADR-0001](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md) | ✅ Mitigated |
 
 风险关闭必须有测试、Benchmark、构建或代码证据，不能只修改状态文字。
 
@@ -379,7 +379,7 @@ M2.0 只验收可观测性闭环；全部预算属于 M2.7，Hover/FieldNotify�
 
 ## 10. MCP 与 Editor Automation 边界
 
-UE 原生 MCP 和 VibeUE 仅用于受信任开发机上的日志、截图、PIE、测试、性能采样和资产操作。当前 Editor-only VibeUE 5.0 固定于 `24ac69d750c1c558a1b78ed5b60644ce000198d3`，与原生工具共用 `http://127.0.0.1:8000/mcp`；版本与归档校验见项目根 `Plugins/VibeUE.version.json`。Editor 生命周期统一使用 `$operate-webtoue-editor`；非沙箱执行边界、Preflight、互斥和持久状态见 [ADR-0001](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md)。
+UE 原生 MCP 和 VibeUE 仅用于受信任开发机上的日志、截图、PIE、测试、性能采样和资产操作。当前 Editor-only VibeUE 5.0 固定于 `24ac69d750c1c558a1b78ed5b60644ce000198d3`，与原生工具共用 `http://127.0.0.1:8000/mcp`；版本与归档校验见项目根 `Plugins/VibeUE.version.json`。Editor 生命周期统一使用 `$operate-webtoue-editor`；非沙箱执行边界、Preflight、互斥、受跟踪 BuildCookRun 和持久状态见 [ADR-0001](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md)。昂贵发布门只在候选源码、测试、资产和必要文档冻结后运行；任一修复会重新打开候选并要求先重跑受影响的廉价门。
 
 M2 先建设与传输协议无关的 Compiler、Diagnostics、Inspection 和 Benchmark 服务；M5 才增加可选、默认关闭的 `WebToUEMCP` 适配器。首批候选面仅包含：文档/Compiled UI IR/诊断/支持矩阵/性能快照 Resources；文档、Computed Style、布局、依赖和测试结果的只读检查；以及具备参数校验、UE Transaction/Undo 和明确权限的编译/重导入/样例生成。它不得暴露任意文件系统、Shell、UObject/Blueprint 调用或远程无认证访问，不参与 Cook、Runtime 消息或产品协议。历史 VibeUE/MCP 验证见 [Evidence Ledger](WTUE_EvidenceLedger.md#5-工程变更记录)。
 
@@ -395,7 +395,7 @@ M2 先建设与传输协议无关的 Compiler、Diagnostics、Inspection 和 Ben
 | Runtime | `AssetVersion`、`CompiledDocumentBoundary`、`OrderedDeclarationHydration`、`RuntimeInstanceIsolation`、`RuntimeCacheSeparation`、`RuntimePresentationIsolation`、`PaintOnlyPseudoResourceSafety`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`PerformanceInstrumentation`、`PaintOrderCache` |
 | Editor | `BenchmarkScenarios`、`BenchmarkStatistics`、`RuntimeHoverBenchmark`、`RuntimeFieldNotifyBenchmark`、`RuntimeWarmLayoutBenchmark`、`RuntimeUnchangedPaintBenchmark`、`LocalizationImport`、`OrderedDeclarationImport` |
 
-Editor 生命周期另有 Pester 3 / 3，不计入 UE Automation。
+Editor 生命周期另有 Pester 5 / 5，不计入 UE Automation；`SafeBuildCookAndLaunch` 的首次真实 UAT→Editor 重启集成证据仍待实际发布门生成。
 
 ### 11.2 仍需建立
 

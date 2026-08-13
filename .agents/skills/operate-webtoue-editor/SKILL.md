@@ -1,6 +1,6 @@
 ---
 name: operate-webtoue-editor
-description: Safely operate the WebToUE Unreal Engine 5.8 Editor with VibeUE and MCP. Use for editor health checks, PIE control, saving assets, rebuilding, closing or relaunching the Editor, waiting for VibeUE readiness, validating MCP, capturing in-editor evidence, or running Unreal automation tests in this repository. Do not use for source-only edits that require no Editor interaction.
+description: Safely operate the WebToUE Unreal Engine 5.8 Editor with VibeUE and MCP. Use for editor health checks, PIE control, saving assets, rebuilding, tracked BuildCookRun release gates, closing or relaunching the Editor, waiting for VibeUE readiness, validating MCP, capturing in-editor evidence, or running Unreal automation tests in this repository. Do not use for source-only edits that require no Editor interaction.
 ---
 
 # Operate the WebToUE Editor
@@ -17,13 +17,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\.agents\skills\operate-web
 
 Read the JSON result. Trust an Editor process only when its PID matches a valid readiness file under `Saved/VibeUE/Signals`. Do not close an unrelated or ambiguous Editor process.
 
-`Status` also returns the latest operation record from `Saved/VibeUE/Lifecycle/operation.json`. If it names a live owner, VibeUE, or Editor PID, observe that operation; never start a second lifecycle command.
+`Status` also returns the latest operation record from `Saved/VibeUE/Lifecycle/operation.json`. If it names a live owner, release host/process-tree, VibeUE, or Editor PID in a nonterminal phase, observe that operation; never start a second lifecycle command.
 
 ## Choose the workflow
 
 - For an Editor-only inspection or asset task, keep the current Editor open and use MCP.
 - For PIE, viewport, asset, Blueprint, material, Python, log, or automation-test work, discover the relevant VibeUE/Epic toolset before calling it.
 - For C++ or plugin changes that require a fresh process, follow the safe rebuild workflow below.
+- For a final Win64 Cook/Stage/Pak/IoStore gate after source freeze, use the tracked release workflow below.
 - For a stopped Editor, run the safe rebuild workflow without `-AssetsSaved`; no close step is needed.
 - Never force-kill `UnrealEditor.exe`. Stop and report a save dialog or shutdown timeout.
 
@@ -61,12 +62,12 @@ The script performs these guarded steps:
 1. Resolve and validate the engine install.
 2. Probe all required project, engine, and user-local write locations before Editor shutdown.
 3. Acquire a project-scoped mutex and reject a duplicate operation or surviving owner/VibeUE/Editor PID.
-4. Persist the operation id, phase, PIDs, output paths, and terminal status under `Saved/VibeUE/Lifecycle`.
+4. Persist the operation id, phase, owner/release-host/release-process-tree/VibeUE/Editor PIDs, output paths, readiness flags, and terminal status under `Saved/VibeUE/Lifecycle`.
 5. Require exactly one running Unreal Editor at most and prove its readiness belongs to this project.
 6. Require `-AssetsSaved` when an Editor is running.
 7. Archive `Saved/Logs`, request a normal window close, and stop if it does not exit within 60 seconds.
 8. Invoke `Plugins/VibeUE/BuildAndLaunchGame.ps1` in an isolated child PowerShell process and capture its output without modifying the vendored file.
-9. Parse the new `Editor-PID`, wait on filesystem events for its readiness file, validate PID/session time, then make one MCP initialization request.
+9. Parse the new `Editor-PID`, wait on filesystem events for its readiness file, validate PID/session time, then make one MCP initialization request and at most one delayed recheck.
 
 Pass optional build switches only when the request calls for them:
 
@@ -77,6 +78,26 @@ Pass optional build switches only when the request calls for them:
 Do not run VibeUE's build script directly while an Editor is open; it force-terminates processes after its own timeout.
 
 Builds are long-running. If the command yields an execution cell, call `wait` on that same cell until it completes. Do not impose a short shell timeout and do not rerun the lifecycle command because output is temporarily quiet. A second invocation is a diagnostic error, not a continuation mechanism.
+
+## Run the final BuildCookRun gate
+
+Do not start an expensive release gate while source, tests, assets, or required documentation are still changing. First freeze the candidate: finish the scoped edits, pass the nearest focused tests, complete the required Editor compile/reload acceptance, and review the diff. A release-gate failure may reopen the candidate; after any corrective edit, repeat the affected cheap gates before rerunning the release action.
+
+When Cook/Stage/Pak/IoStore evidence is required for the current change, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\.agents\skills\operate-webtoue-editor\scripts\Invoke-WebToUEEditorLifecycle.ps1 -Action SafeBuildCookAndLaunch -AssetsSaved -EngineRoot D:\UE\UE_5.8
+```
+
+`SafeBuildCookAndLaunch` reuses the same preflight, mutex, project-ownership, asset-save, log-archive, and graceful-close safety gates. It then:
+
+1. Starts `RunUAT.bat BuildCookRun` for Win64 with Build, Cook, Stage, Pak, and IoStore enabled.
+2. Passes cooker MCP port `8001` so stale or separately managed port `8000` ownership cannot poison Cook.
+3. Persists the BuildCookRun host and observed RunUAT/UBT/Commandlet process-tree PIDs, exit code, invocation file, and complete stdout/stderr log paths while waiting.
+4. On success, invokes VibeUE with `-SkipBuild` to restore the Editor and runs the normal readiness/MCP gates.
+5. On failure, leaves the UAT evidence intact and does not launch a second BuildCookRun. The Editor may remain closed; report that explicitly.
+
+Use `-ClientConfig Shipping` only when Shipping is part of the requested release boundary. Do not combine this action with `-StrictRebuild`, `-Clean`, or `-SkipBuild`; the release action owns its build and relaunch phases. `BuildPlugin` remains a separate distribution gate and is required only when the task changes plugin packaging/distribution or explicitly requests it.
 
 ## Verify the new session
 
@@ -96,7 +117,8 @@ Read [references/verification.md](references/verification.md) when running the f
 - Stop when more than one Editor process exists or the project/PID cannot be proven.
 - Stop when a save or modal dialog prevents graceful shutdown.
 - Stop when any preflight probe is not writable; the healthy Editor must remain open in this case.
-- Stop when the operation mutex or persisted state identifies a live lifecycle PID; observe the existing operation instead of retrying.
-- Stop when the new Editor exits, readiness exceeds 180 seconds, the signal is stale/invalid, or MCP initialization fails.
+- Stop when the operation mutex or persisted state identifies a live lifecycle PID, including the release host/process tree; observe the existing operation and its log paths instead of retrying.
+- Stop when the new Editor exits, readiness exceeds 180 seconds, or the signal is stale/invalid.
+- If readiness is valid but the bounded MCP recheck fails, preserve the terminal `EditorReadyMcpPending` state and diagnose MCP separately. Do not rebuild merely to repeat MCP initialization.
 - Retry an unchanged failing operation at most twice, then report the evidence and blocker.
 - Keep the Editor open at handoff unless the user explicitly asks to close it.
