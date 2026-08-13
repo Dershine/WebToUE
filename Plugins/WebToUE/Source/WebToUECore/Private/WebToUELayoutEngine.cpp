@@ -15,8 +15,8 @@ namespace WebToUE::Private
 		{
 		case EWebToUEUnit::Pixels: SetPoint(Node, Length.Value); break;
 		case EWebToUEUnit::Percent: SetPercent(Node, Length.Value); break;
-		case EWebToUEUnit::Auto: if (SetAuto) SetAuto(Node); break;
-		default: break;
+		case EWebToUEUnit::Auto: if (SetAuto) SetAuto(Node); else SetPoint(Node, YGUndefined); break;
+		default: if (SetAuto) SetAuto(Node); else SetPoint(Node, YGUndefined); break;
 		}
 	}
 
@@ -29,8 +29,8 @@ namespace WebToUE::Private
 		{
 		case EWebToUEUnit::Pixels: SetPoint(Node, Edge, Length.Value); break;
 		case EWebToUEUnit::Percent: SetPercent(Node, Edge, Length.Value); break;
-		case EWebToUEUnit::Auto: if (SetAuto) SetAuto(Node, Edge); break;
-		default: break;
+		case EWebToUEUnit::Auto: if (SetAuto) SetAuto(Node, Edge); else SetPoint(Node, Edge, YGUndefined); break;
+		default: SetPoint(Node, Edge, YGUndefined); break;
 		}
 	}
 
@@ -54,22 +54,38 @@ namespace WebToUE::Private
 		if (Value == TEXT("space-evenly")) return YGJustifySpaceEvenly;
 		return YGJustifyFlexStart;
 	}
+}
 
-	struct FYogaMeasureContext
+struct FWebToUELayoutEngine::FImpl
+{
+	struct FMeasureContext
 	{
-		const FWebToUEDocument* Document = nullptr;
+		FImpl* Owner = nullptr;
 		FWebToUEInstanceHandle NodeHandle;
-		const FWebToUELayoutEngine::FMeasureNode* MeasureNode = nullptr;
 	};
 
-	static FWebToUELayoutEngine::EMeasureMode ToMeasureMode(YGMeasureMode Mode)
+	YGNodeRef Root = nullptr;
+	FWebToUEDocument* Document = nullptr;
+	const FMeasureNode* ActiveMeasureNode = nullptr;
+	TMap<FWebToUEInstanceHandle, YGNodeRef> Nodes;
+	TArray<TUniquePtr<FMeasureContext>> MeasureContexts;
+
+	~FImpl()
 	{
-		switch (Mode)
+		Reset();
+	}
+
+	void Reset()
+	{
+		if (Root)
 		{
-		case YGMeasureModeExactly: return FWebToUELayoutEngine::EMeasureMode::Exactly;
-		case YGMeasureModeAtMost: return FWebToUELayoutEngine::EMeasureMode::AtMost;
-		default: return FWebToUELayoutEngine::EMeasureMode::Undefined;
+			YGNodeFreeRecursive(Root);
 		}
+		Root = nullptr;
+		Document = nullptr;
+		ActiveMeasureNode = nullptr;
+		Nodes.Reset();
+		MeasureContexts.Reset();
 	}
 
 	static YGSize MeasureYogaNode(YGNodeConstRef Node, float Width, YGMeasureMode WidthMode,
@@ -78,14 +94,27 @@ namespace WebToUE::Private
 		SCOPE_CYCLE_COUNTER(STAT_WebToUE_Measure);
 		TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Measure);
 		FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Measure);
-		const FYogaMeasureContext* Context = static_cast<const FYogaMeasureContext*>(YGNodeGetContext(Node));
-		if (!Context || !Context->Document || !Context->MeasureNode) return { 0.0f, 0.0f };
-		const FWebToUENode* WebNode = Context->Document->ResolveNode(Context->NodeHandle);
+		const FMeasureContext* Context = static_cast<const FMeasureContext*>(YGNodeGetContext(Node));
+		if (!Context || !Context->Owner || !Context->Owner->Document ||
+			!Context->Owner->ActiveMeasureNode)
+		{
+			return { 0.0f, 0.0f };
+		}
+		const FWebToUENode* WebNode = Context->Owner->Document->ResolveNode(Context->NodeHandle);
 		if (!WebNode) return { 0.0f, 0.0f };
-		const FWebToUELayoutEngine::FMeasureConstraints Constraints = {
+		const auto ToMeasureMode = [](YGMeasureMode Mode)
+		{
+			switch (Mode)
+			{
+			case YGMeasureModeExactly: return EMeasureMode::Exactly;
+			case YGMeasureModeAtMost: return EMeasureMode::AtMost;
+			default: return EMeasureMode::Undefined;
+			}
+		};
+		const FMeasureConstraints Constraints = {
 			Width, Height, ToMeasureMode(WidthMode), ToMeasureMode(HeightMode)
 		};
-		FVector2f Measured = (*Context->MeasureNode)(*WebNode, Constraints);
+		FVector2f Measured = (*Context->Owner->ActiveMeasureNode)(*WebNode, Constraints);
 		if (WidthMode == YGMeasureModeExactly) Measured.X = Width;
 		else if (WidthMode == YGMeasureModeAtMost) Measured.X = FMath::Min(Measured.X, Width);
 		if (HeightMode == YGMeasureModeExactly) Measured.Y = Height;
@@ -93,14 +122,9 @@ namespace WebToUE::Private
 		return { FMath::Max(0.0f, Measured.X), FMath::Max(0.0f, Measured.Y) };
 	}
 
-	static YGNodeRef BuildYogaTree(FWebToUEDocument& Document, FWebToUENode& WebNode,
-		const FWebToUELayoutEngine::FMeasureNode& MeasureNode,
-		TArray<TUniquePtr<FYogaMeasureContext>>& MeasureContexts)
+	static void ApplyAllStyle(YGNodeRef Node, const FWebToUEComputedStyle& S)
 	{
-		YGNodeRef Node = YGNodeNew();
-		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::YogaNodesBuilt);
-		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
-		const FWebToUEComputedStyle& S = Document.GetComputedStyle(WebNode);
+		using namespace WebToUE::Private;
 		YGNodeStyleSetDisplay(Node, S.Display == EWebToUEDisplay::None ? YGDisplayNone : YGDisplayFlex);
 		YGNodeStyleSetPositionType(Node,
 			S.Position == EWebToUEPosition::Absolute ? YGPositionTypeAbsolute : YGPositionTypeRelative);
@@ -143,99 +167,216 @@ namespace WebToUE::Private
 		YGNodeStyleSetGap(Node, YGGutterRow, S.RowGap);
 		YGNodeStyleSetGap(Node, YGGutterColumn, S.ColumnGap);
 		YGNodeStyleSetBorder(Node, YGEdgeAll, S.BorderWidth);
+	}
 
+	static bool ApplyStyleProperty(YGNodeRef Node, const FWebToUEComputedStyle& S,
+		EWebToUECssProperty Property)
+	{
+		using namespace WebToUE::Private;
+		switch (Property)
+		{
+		case EWebToUECssProperty::Display: YGNodeStyleSetDisplay(Node, S.Display == EWebToUEDisplay::None ? YGDisplayNone : YGDisplayFlex); break;
+		case EWebToUECssProperty::Position: YGNodeStyleSetPositionType(Node, S.Position == EWebToUEPosition::Absolute ? YGPositionTypeAbsolute : YGPositionTypeRelative); break;
+		case EWebToUECssProperty::Overflow: YGNodeStyleSetOverflow(Node, S.Overflow == EWebToUEOverflow::Hidden ? YGOverflowHidden : S.Overflow == EWebToUEOverflow::Visible ? YGOverflowVisible : YGOverflowScroll); break;
+		case EWebToUECssProperty::FlexDirection: YGNodeStyleSetFlexDirection(Node, S.FlexDirection == EWebToUEFlexDirection::Row ? YGFlexDirectionRow : S.FlexDirection == EWebToUEFlexDirection::RowReverse ? YGFlexDirectionRowReverse : S.FlexDirection == EWebToUEFlexDirection::ColumnReverse ? YGFlexDirectionColumnReverse : YGFlexDirectionColumn); break;
+		case EWebToUECssProperty::FlexWrap: YGNodeStyleSetFlexWrap(Node, S.FlexWrap == TEXT("wrap") ? YGWrapWrap : S.FlexWrap == TEXT("wrap-reverse") ? YGWrapWrapReverse : YGWrapNoWrap); break;
+		case EWebToUECssProperty::JustifyContent: YGNodeStyleSetJustifyContent(Node, ToJustify(S.JustifyContent)); break;
+		case EWebToUECssProperty::AlignItems: YGNodeStyleSetAlignItems(Node, ToAlign(S.AlignItems, YGAlignStretch)); break;
+		case EWebToUECssProperty::AlignSelf: YGNodeStyleSetAlignSelf(Node, ToAlign(S.AlignSelf, YGAlignAuto)); break;
+		case EWebToUECssProperty::FlexGrow: YGNodeStyleSetFlexGrow(Node, S.FlexGrow); break;
+		case EWebToUECssProperty::FlexShrink: YGNodeStyleSetFlexShrink(Node, S.FlexShrink); break;
+		case EWebToUECssProperty::FlexBasis: SetDimension(Node, S.FlexBasis, YGNodeStyleSetFlexBasis, YGNodeStyleSetFlexBasisPercent, YGNodeStyleSetFlexBasisAuto); break;
+		case EWebToUECssProperty::Width: SetDimension(Node, S.Width, YGNodeStyleSetWidth, YGNodeStyleSetWidthPercent, YGNodeStyleSetWidthAuto); break;
+		case EWebToUECssProperty::Height: SetDimension(Node, S.Height, YGNodeStyleSetHeight, YGNodeStyleSetHeightPercent, YGNodeStyleSetHeightAuto); break;
+		case EWebToUECssProperty::MinWidth: SetDimension(Node, S.MinWidth, YGNodeStyleSetMinWidth, YGNodeStyleSetMinWidthPercent, nullptr); break;
+		case EWebToUECssProperty::MinHeight: SetDimension(Node, S.MinHeight, YGNodeStyleSetMinHeight, YGNodeStyleSetMinHeightPercent, nullptr); break;
+		case EWebToUECssProperty::MaxWidth: SetDimension(Node, S.MaxWidth, YGNodeStyleSetMaxWidth, YGNodeStyleSetMaxWidthPercent, nullptr); break;
+		case EWebToUECssProperty::MaxHeight: SetDimension(Node, S.MaxHeight, YGNodeStyleSetMaxHeight, YGNodeStyleSetMaxHeightPercent, nullptr); break;
+		case EWebToUECssProperty::MarginLeft: SetEdge(Node, YGEdgeLeft, S.Margin.Left, YGNodeStyleSetMargin, YGNodeStyleSetMarginPercent, YGNodeStyleSetMarginAuto); break;
+		case EWebToUECssProperty::MarginTop: SetEdge(Node, YGEdgeTop, S.Margin.Top, YGNodeStyleSetMargin, YGNodeStyleSetMarginPercent, YGNodeStyleSetMarginAuto); break;
+		case EWebToUECssProperty::MarginRight: SetEdge(Node, YGEdgeRight, S.Margin.Right, YGNodeStyleSetMargin, YGNodeStyleSetMarginPercent, YGNodeStyleSetMarginAuto); break;
+		case EWebToUECssProperty::MarginBottom: SetEdge(Node, YGEdgeBottom, S.Margin.Bottom, YGNodeStyleSetMargin, YGNodeStyleSetMarginPercent, YGNodeStyleSetMarginAuto); break;
+		case EWebToUECssProperty::PaddingLeft: SetEdge(Node, YGEdgeLeft, S.Padding.Left, YGNodeStyleSetPadding, YGNodeStyleSetPaddingPercent, nullptr); break;
+		case EWebToUECssProperty::PaddingTop: SetEdge(Node, YGEdgeTop, S.Padding.Top, YGNodeStyleSetPadding, YGNodeStyleSetPaddingPercent, nullptr); break;
+		case EWebToUECssProperty::PaddingRight: SetEdge(Node, YGEdgeRight, S.Padding.Right, YGNodeStyleSetPadding, YGNodeStyleSetPaddingPercent, nullptr); break;
+		case EWebToUECssProperty::PaddingBottom: SetEdge(Node, YGEdgeBottom, S.Padding.Bottom, YGNodeStyleSetPadding, YGNodeStyleSetPaddingPercent, nullptr); break;
+		case EWebToUECssProperty::Left: SetEdge(Node, YGEdgeLeft, S.Inset.Left, YGNodeStyleSetPosition, YGNodeStyleSetPositionPercent, nullptr); break;
+		case EWebToUECssProperty::Top: SetEdge(Node, YGEdgeTop, S.Inset.Top, YGNodeStyleSetPosition, YGNodeStyleSetPositionPercent, nullptr); break;
+		case EWebToUECssProperty::Right: SetEdge(Node, YGEdgeRight, S.Inset.Right, YGNodeStyleSetPosition, YGNodeStyleSetPositionPercent, nullptr); break;
+		case EWebToUECssProperty::Bottom: SetEdge(Node, YGEdgeBottom, S.Inset.Bottom, YGNodeStyleSetPosition, YGNodeStyleSetPositionPercent, nullptr); break;
+		case EWebToUECssProperty::RowGap: YGNodeStyleSetGap(Node, YGGutterRow, S.RowGap); break;
+		case EWebToUECssProperty::ColumnGap: YGNodeStyleSetGap(Node, YGGutterColumn, S.ColumnGap); break;
+		case EWebToUECssProperty::BorderWidth: YGNodeStyleSetBorder(Node, YGEdgeAll, S.BorderWidth); break;
+		default: return false;
+		}
+		return true;
+	}
+
+	YGNodeRef BuildTree(FWebToUEDocument& InDocument, FWebToUENode& WebNode)
+	{
+		YGNodeRef Node = YGNodeNew();
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::YogaNodesBuilt);
+		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
+		Nodes.Add(WebNode.InstanceHandle, Node);
+		ApplyAllStyle(Node, InDocument.GetComputedStyle(WebNode));
 		if ((WebNode.Type == EWebToUENodeType::Text || WebNode.Tag == TEXT("img")) &&
 			WebNode.Children.IsEmpty())
 		{
 			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
-			TUniquePtr<FYogaMeasureContext>& Context =
-				MeasureContexts.Add_GetRef(MakeUnique<FYogaMeasureContext>());
-			Context->Document = &Document;
+			TUniquePtr<FMeasureContext>& Context =
+				MeasureContexts.Add_GetRef(MakeUnique<FMeasureContext>());
+			Context->Owner = this;
 			Context->NodeHandle = WebNode.InstanceHandle;
-			Context->MeasureNode = &MeasureNode;
 			YGNodeSetContext(Node, Context.Get());
 			YGNodeSetMeasureFunc(Node, MeasureYogaNode);
 		}
 		for (int32 Index = 0; Index < WebNode.Children.Num(); ++Index)
 		{
-			YGNodeInsertChild(Node,
-				BuildYogaTree(Document, *WebNode.Children[Index], MeasureNode, MeasureContexts), Index);
+			YGNodeInsertChild(Node, BuildTree(InDocument, *WebNode.Children[Index]), Index);
 		}
 		return Node;
 	}
 
-	static void CopyYogaLayout(FWebToUEDocument& Document, FWebToUENode& WebNode,
+	void EnsureTree(FWebToUEDocument& InDocument)
+	{
+		if (Document == &InDocument && Root) return;
+		Reset();
+		Document = &InDocument;
+		if (InDocument.Root) Root = BuildTree(InDocument, *InDocument.Root);
+	}
+
+	static void CopyYogaLayout(FWebToUEDocument& InDocument, FWebToUENode& WebNode,
 		YGNodeConstRef Node, const FVector2f ParentPosition, int32& PaintOrder)
 	{
-		FWebToUERuntimeLayoutResult& LayoutResult = Document.GetLayoutResult(WebNode);
-		LayoutResult.Position = ParentPosition +
+		FWebToUERuntimeLayoutResult& LayoutResult = InDocument.GetLayoutResult(WebNode);
+		const FVector2f NewPosition = ParentPosition +
 			FVector2f(YGNodeLayoutGetLeft(Node), YGNodeLayoutGetTop(Node));
-		LayoutResult.Size = FVector2f(YGNodeLayoutGetWidth(Node), YGNodeLayoutGetHeight(Node));
+		const FVector2f NewSize(YGNodeLayoutGetWidth(Node), YGNodeLayoutGetHeight(Node));
+		if (!LayoutResult.Position.Equals(NewPosition) || !LayoutResult.Size.Equals(NewSize))
+		{
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::YogaLayoutResultsChanged);
+		}
+		LayoutResult.Position = NewPosition;
+		LayoutResult.Size = NewSize;
 		LayoutResult.PaintOrder = PaintOrder++;
 		for (int32 Index = 0; Index < WebNode.Children.Num(); ++Index)
 		{
-			CopyYogaLayout(Document, *WebNode.Children[Index],
+			CopyYogaLayout(InDocument, *WebNode.Children[Index],
 				YGNodeGetChild(const_cast<YGNodeRef>(Node), Index), LayoutResult.Position, PaintOrder);
 		}
 	}
 
-	static FVector2f UpdateScrollExtents(FWebToUEDocument& Document, FWebToUENode& Node)
+	static FVector2f UpdateScrollExtents(FWebToUEDocument& InDocument, FWebToUENode& Node)
 	{
-		FWebToUERuntimeNodeState& RuntimeState = Document.GetRuntimeNodeState(Node);
-		const FWebToUERuntimeLayoutResult& LayoutResult = Document.GetLayoutResult(Node);
+		FWebToUERuntimeNodeState& RuntimeState = InDocument.GetRuntimeNodeState(Node);
+		const FWebToUERuntimeLayoutResult& LayoutResult = InDocument.GetLayoutResult(Node);
 		FVector2f ContentMax = LayoutResult.Position + LayoutResult.Size;
 		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
 		{
-			const FVector2f ChildContentMax = UpdateScrollExtents(Document, *Child);
-			const FWebToUERuntimeLayoutResult& ChildLayout = Document.GetLayoutResult(*Child);
-			ContentMax.X = FMath::Max(ContentMax.X,
-				Document.ClipsOverflow(*Child)
-					? ChildLayout.Position.X + ChildLayout.Size.X
-					: ChildContentMax.X);
-			ContentMax.Y = FMath::Max(ContentMax.Y,
-				Document.ClipsOverflow(*Child)
-					? ChildLayout.Position.Y + ChildLayout.Size.Y
-					: ChildContentMax.Y);
+			const FVector2f ChildContentMax = UpdateScrollExtents(InDocument, *Child);
+			const FWebToUERuntimeLayoutResult& ChildLayout = InDocument.GetLayoutResult(*Child);
+			ContentMax.X = FMath::Max(ContentMax.X, InDocument.ClipsOverflow(*Child)
+				? ChildLayout.Position.X + ChildLayout.Size.X : ChildContentMax.X);
+			ContentMax.Y = FMath::Max(ContentMax.Y, InDocument.ClipsOverflow(*Child)
+				? ChildLayout.Position.Y + ChildLayout.Size.Y : ChildContentMax.Y);
 		}
-
-		if (Document.IsScrollable(Node))
+		if (InDocument.IsScrollable(Node))
 		{
 			RuntimeState.MaxScrollOffset = FVector2f(
 				FMath::Max(0.0f, ContentMax.X - (LayoutResult.Position.X + LayoutResult.Size.X)),
 				FMath::Max(0.0f, ContentMax.Y - (LayoutResult.Position.Y + LayoutResult.Size.Y)));
-			RuntimeState.ScrollOffset.X = FMath::Clamp(
-				RuntimeState.ScrollOffset.X, 0.0f, RuntimeState.MaxScrollOffset.X);
-			RuntimeState.ScrollOffset.Y = FMath::Clamp(
-				RuntimeState.ScrollOffset.Y, 0.0f, RuntimeState.MaxScrollOffset.Y);
+			RuntimeState.ScrollOffset.X = FMath::Clamp(RuntimeState.ScrollOffset.X, 0.0f, RuntimeState.MaxScrollOffset.X);
+			RuntimeState.ScrollOffset.Y = FMath::Clamp(RuntimeState.ScrollOffset.Y, 0.0f, RuntimeState.MaxScrollOffset.Y);
 		}
 		else
 		{
 			RuntimeState.ScrollOffset = FVector2f::ZeroVector;
 			RuntimeState.MaxScrollOffset = FVector2f::ZeroVector;
 		}
+		return InDocument.ClipsOverflow(Node) ? LayoutResult.Position + LayoutResult.Size : ContentMax;
+	}
+};
 
-		return Document.ClipsOverflow(Node)
-			? LayoutResult.Position + LayoutResult.Size
-			: ContentMax;
+FWebToUELayoutEngine::FWebToUELayoutEngine()
+	: Impl(MakeUnique<FImpl>())
+{
+}
+
+FWebToUELayoutEngine::~FWebToUELayoutEngine() = default;
+
+void FWebToUELayoutEngine::Reset()
+{
+	Impl->Reset();
+}
+
+void FWebToUELayoutEngine::ApplyStyleUpdates(FWebToUEDocument& Document,
+	TConstArrayView<FWebToUEStyleUpdate> Updates)
+{
+	if (Impl->Document != &Document || !Impl->Root) return;
+	for (const FWebToUEStyleUpdate& Update : Updates)
+	{
+		FWebToUENode* WebNode = Document.ResolveNode(Update.Target);
+		YGNodeRef* YogaNode = Impl->Nodes.Find(Update.Target);
+		if (!WebNode || !YogaNode) continue;
+		const FWebToUEComputedStyle& Style = Document.GetComputedStyle(*WebNode);
+		bool bMeasureDirty = false;
+		for (const EWebToUECssProperty Property : Update.Changes.ChangedProperties)
+		{
+			if (FImpl::ApplyStyleProperty(*YogaNode, Style, Property))
+			{
+				FWebToUEPerformanceCapture::RecordCounter(
+					EWebToUEPerformanceCounter::YogaStyleWrites);
+			}
+			bMeasureDirty |= EnumHasAnyFlags(
+				WebToUE::Private::GetCssPropertyMetadata(Property).Impacts,
+				EWebToUEStyleImpact::Measure);
+		}
+		if (bMeasureDirty && WebNode->Children.IsEmpty() &&
+			(WebNode->Type == EWebToUENodeType::Text || WebNode->Tag == TEXT("img")))
+		{
+			YGNodeMarkDirty(*YogaNode);
+			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::YogaNodesDirtied);
+		}
 	}
 }
 
-void FWebToUELayoutEngine::Layout(FWebToUEDocument& Document, const FVector2f& ViewportSize,
-	const FMeasureNode& MeasureNode)
+void FWebToUELayoutEngine::MarkMeasureDirty(FWebToUEDocument& Document,
+	FWebToUEInstanceHandle Target)
+{
+	if (Impl->Document != &Document || !Impl->Root) return;
+	FWebToUENode* WebNode = Document.ResolveNode(Target);
+	YGNodeRef* YogaNode = Impl->Nodes.Find(Target);
+	if (!WebNode || !YogaNode || !WebNode->Children.IsEmpty() ||
+		(WebNode->Type != EWebToUENodeType::Text && WebNode->Tag != TEXT("img")))
+	{
+		return;
+	}
+	YGNodeMarkDirty(*YogaNode);
+	FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::YogaNodesDirtied);
+}
+
+void FWebToUELayoutEngine::LayoutPersistent(FWebToUEDocument& Document,
+	const FVector2f& ViewportSize, const FMeasureNode& MeasureNode)
 {
 	SCOPE_CYCLE_COUNTER(STAT_WebToUE_Layout);
 	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Layout);
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Layout);
 	if (!Document.Root) return;
-	TArray<TUniquePtr<WebToUE::Private::FYogaMeasureContext>> MeasureContexts;
-	YGNodeRef Root = WebToUE::Private::BuildYogaTree(
-		Document, *Document.Root, MeasureNode, MeasureContexts);
-	YGNodeStyleSetWidth(Root, ViewportSize.X);
-	YGNodeStyleSetHeight(Root, ViewportSize.Y);
-	YGNodeCalculateLayout(Root, ViewportSize.X, ViewportSize.Y, YGDirectionLTR);
+	Impl->EnsureTree(Document);
+	Impl->ActiveMeasureNode = &MeasureNode;
+	YGNodeStyleSetWidth(Impl->Root, ViewportSize.X);
+	YGNodeStyleSetHeight(Impl->Root, ViewportSize.Y);
+	YGNodeCalculateLayout(Impl->Root, ViewportSize.X, ViewportSize.Y, YGDirectionLTR);
 	int32 PaintOrder = 0;
-	WebToUE::Private::CopyYogaLayout(
-		Document, *Document.Root, Root, FVector2f::ZeroVector, PaintOrder);
-	WebToUE::Private::UpdateScrollExtents(Document, *Document.Root);
-	YGNodeFreeRecursive(Root);
+	FImpl::CopyYogaLayout(Document, *Document.Root, Impl->Root, FVector2f::ZeroVector, PaintOrder);
+	FImpl::UpdateScrollExtents(Document, *Document.Root);
+	Impl->ActiveMeasureNode = nullptr;
+}
+
+void FWebToUELayoutEngine::Layout(FWebToUEDocument& Document,
+	const FVector2f& ViewportSize, const FMeasureNode& MeasureNode)
+{
+	FWebToUELayoutEngine TransientEngine;
+	TransientEngine.LayoutPersistent(Document, ViewportSize, MeasureNode);
 }

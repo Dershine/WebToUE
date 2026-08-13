@@ -225,8 +225,11 @@ int32 FWebToUERuntimeInstance::GetRuntimeRuleCountForTesting() const
 
 FWebToUERuntimeInstance::FWebToUERuntimeInstance()
 	: OwnerId(AllocateWebToUEInstanceOwnerId())
+	, LayoutEngine(MakeUnique<FWebToUELayoutEngine>())
 {
 }
+
+FWebToUERuntimeInstance::~FWebToUERuntimeInstance() = default;
 
 void FWebToUERuntimeInstance::AdoptDocumentForTesting(TSharedRef<FWebToUEDocument> InDocument)
 {
@@ -266,6 +269,7 @@ TConstArrayView<FWebToUERuntimeBindingOp> FWebToUERuntimeInstance::GetBindingOps
 
 void FWebToUERuntimeInstance::Reset()
 {
+	LayoutEngine->Reset();
 	++Generation;
 	if (Generation == 0)
 	{

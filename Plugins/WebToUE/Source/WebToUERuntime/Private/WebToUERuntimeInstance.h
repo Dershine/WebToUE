@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "WebToUEDocument.h"
 
+class FWebToUELayoutEngine;
+
 struct FWebToUERuntimeBindingOp
 {
 	EWebToUEBindingKind Kind = EWebToUEBindingKind::Text;
@@ -14,6 +16,7 @@ class FWebToUERuntimeInstance
 {
 public:
 	FWebToUERuntimeInstance();
+	~FWebToUERuntimeInstance();
 	void Reset();
 	bool Hydrate(const UWebToUEDocument& CompiledDocument);
 	void AdoptDocumentForTesting(TSharedRef<FWebToUEDocument> InDocument);
@@ -34,6 +37,7 @@ public:
 		return BindingOpsByField;
 	}
 	TConstArrayView<FWebToUERuntimeBindingOp> GetBindingOps(FName RootField) const;
+	FWebToUELayoutEngine& GetLayoutEngine() { return *LayoutEngine; }
 
 	FWebToUENode* GetHoveredNode() const { return const_cast<FWebToUENode*>(ResolveNode(HoveredNode)); }
 	FWebToUENode* GetPressedNode() const { return const_cast<FWebToUENode*>(ResolveNode(PressedNode)); }
@@ -58,4 +62,5 @@ private:
 	FWebToUEInstanceHandle PressedNode;
 	FWebToUEInstanceHandle FocusedNode;
 	TMap<FName, TArray<FWebToUERuntimeBindingOp>> BindingOpsByField;
+	TUniquePtr<FWebToUELayoutEngine> LayoutEngine;
 };

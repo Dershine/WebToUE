@@ -197,6 +197,11 @@ void FWebToUERuntimePresentation::RebuildCaches(bool bReloadResources)
 void FWebToUERuntimePresentation::MarkTextLayoutDependencyPath(const FWebToUENode& Node)
 {
 	MeasureDirtyNodes.Add(RuntimeInstance.GetHandle(&Node));
+	if (FWebToUEDocument* RuntimeDocument = GetDocument())
+	{
+		RuntimeInstance.GetLayoutEngine().MarkMeasureDirty(
+			*RuntimeDocument, RuntimeInstance.GetHandle(&Node));
+	}
 	for (const FWebToUENode* Current = &Node; Current; Current = Current->Parent)
 	{
 		LayoutDirtyNodes.Add(RuntimeInstance.GetHandle(Current));
@@ -228,6 +233,10 @@ bool FWebToUERuntimePresentation::ApplyBoundTextChange(FWebToUENode& Node)
 void FWebToUERuntimePresentation::ApplyStyleUpdates(
 	TConstArrayView<FWebToUEStyleUpdate> Updates)
 {
+	if (FWebToUEDocument* RuntimeDocument = GetDocument())
+	{
+		RuntimeInstance.GetLayoutEngine().ApplyStyleUpdates(*RuntimeDocument, Updates);
+	}
 	bool bRebuildPaintOrder = false;
 	for (const FWebToUEStyleUpdate& Update : Updates)
 	{
@@ -388,7 +397,7 @@ void FWebToUERuntimePresentation::Layout(const FVector2f& ViewportSize) const
 {
 	FWebToUEDocument* RuntimeDocument = const_cast<FWebToUEDocument*>(GetDocument());
 	if (!RuntimeDocument || !RuntimeDocument->Root) return;
-	FWebToUELayoutEngine::Layout(*RuntimeDocument, ViewportSize,
+	RuntimeInstance.GetLayoutEngine().LayoutPersistent(*RuntimeDocument, ViewportSize,
 		[this](const FWebToUENode& Node,
 			const FWebToUELayoutEngine::FMeasureConstraints& Constraints)
 		{

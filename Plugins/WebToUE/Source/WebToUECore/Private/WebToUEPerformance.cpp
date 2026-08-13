@@ -53,7 +53,10 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.binding_fields_read"),
 		TEXT("workload.binding_ops_executed"),
 		TEXT("workload.binding_nodes_updated"),
-		TEXT("workload.resource_load_attempts")
+		TEXT("workload.resource_load_attempts"),
+		TEXT("workload.yoga_style_writes"),
+		TEXT("workload.yoga_nodes_dirtied"),
+		TEXT("workload.yoga_layout_results_changed")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -255,6 +258,9 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::BindingOpsExecuted: return TEXT("binding_ops_executed");
 	case EWebToUEPerformanceCounter::BindingNodesUpdated: return TEXT("binding_nodes_updated");
 	case EWebToUEPerformanceCounter::ResourceLoadAttempts: return TEXT("resource_load_attempts");
+	case EWebToUEPerformanceCounter::YogaStyleWrites: return TEXT("yoga_style_writes");
+	case EWebToUEPerformanceCounter::YogaNodesDirtied: return TEXT("yoga_nodes_dirtied");
+	case EWebToUEPerformanceCounter::YogaLayoutResultsChanged: return TEXT("yoga_layout_results_changed");
 	default: return TEXT("unknown");
 	}
 }

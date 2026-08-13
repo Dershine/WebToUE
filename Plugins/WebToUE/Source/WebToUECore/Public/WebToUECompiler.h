@@ -58,6 +58,12 @@ public:
 class WEBTOUECORE_API FWebToUELayoutEngine
 {
 public:
+	FWebToUELayoutEngine();
+	~FWebToUELayoutEngine();
+
+	FWebToUELayoutEngine(const FWebToUELayoutEngine&) = delete;
+	FWebToUELayoutEngine& operator=(const FWebToUELayoutEngine&) = delete;
+
 	enum class EMeasureMode : uint8
 	{
 		Undefined,
@@ -75,8 +81,21 @@ public:
 
 	using FMeasureNode = TFunction<FVector2f(const FWebToUENode&, const FMeasureConstraints&)>;
 
+	void Reset();
+	void ApplyStyleUpdates(FWebToUEDocument& Document,
+		TConstArrayView<FWebToUEStyleUpdate> Updates);
+	void MarkMeasureDirty(FWebToUEDocument& Document, FWebToUEInstanceHandle Target);
+	void LayoutPersistent(
+		FWebToUEDocument& Document,
+		const FVector2f& ViewportSize,
+		const FMeasureNode& MeasureNode);
+
 	static void Layout(
 		FWebToUEDocument& Document,
 		const FVector2f& ViewportSize,
 		const FMeasureNode& MeasureNode);
+
+private:
+	struct FImpl;
+	TUniquePtr<FImpl> Impl;
 };

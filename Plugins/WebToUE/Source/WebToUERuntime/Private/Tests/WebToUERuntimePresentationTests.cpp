@@ -35,6 +35,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETextCacheKeyAndDirtyPathTest,
 	"WebToUE.Runtime.TextCacheKeyAndDirtyPath",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPersistentLayoutStateTest,
+	"WebToUE.Runtime.PersistentLayoutState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace WebToUE::RuntimePresentation::Tests
 {
 	static void AddAttribute(FWebToUECompiledNode& Node, const TCHAR* Name, const TCHAR* Value)
@@ -576,6 +580,66 @@ bool FWebToUEPseudoInvalidationPathTest::RunTest(const FString& Parameters)
 		View->GetComputedStyleForTesting(*Item).BackgroundColor, FLinearColor::Blue);
 	TestEqual(TEXT("Leaving hover restores inherited label color"),
 		View->GetComputedStyleForTesting(*Label).Color, FLinearColor::White);
+	return true;
+}
+
+bool FWebToUEPersistentLayoutStateTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body><div id='row'><button id='item'>Item</button><span>Other</span></div></body>"),
+		TEXT("#row { width: 200px; flex-direction: row; flex-wrap: wrap; }")
+		TEXT("#item { width: 40px; height: 20px; } #item:hover { width: 80px; }"));
+	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
+	View->SetRuntimeDocumentForTesting(Document);
+	FWebToUENode* Item = View->FindRuntimeNodeByIdForTesting(TEXT("item"));
+	TestNotNull(TEXT("Persistent layout target exists"), Item);
+	if (!Item) return false;
+
+	FWebToUEPerformanceSnapshot ColdSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->LayoutForTesting(FVector2f(320.0f, 180.0f));
+		ColdSnapshot = Capture.GetSnapshot();
+	}
+	TestTrue(TEXT("Cold layout creates the Yoga tree once"),
+		ColdSnapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt) > 0);
+
+	FWebToUEPerformanceSnapshot WarmSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->LayoutForTesting(FVector2f(320.0f, 180.0f));
+		WarmSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("Warm layout reuses every Yoga node"),
+		WarmSnapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(0));
+	TestEqual(TEXT("Warm layout does not recompute unchanged text"),
+		WarmSnapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(0));
+
+	FWebToUEPerformanceSnapshot UpdateSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->SetHoveredNodeForTesting(Item);
+		UpdateSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("One width change writes one Yoga property"),
+		UpdateSnapshot.GetCounter(EWebToUEPerformanceCounter::YogaStyleWrites), uint64(1));
+	TestEqual(TEXT("A style change does not rebuild the Yoga tree"),
+		UpdateSnapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(0));
+	TestTrue(TEXT("The width change marks presentation layout dirty"),
+		View->IsPresentationLayoutDirtyForTesting());
+
+	FWebToUEPerformanceSnapshot RelayoutSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->LayoutForTesting(FVector2f(320.0f, 180.0f));
+		RelayoutSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("Incremental relayout retains the persistent Yoga tree"),
+		RelayoutSnapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(0));
+	TestTrue(TEXT("Incremental relayout reports changed layout results"),
+		RelayoutSnapshot.GetCounter(EWebToUEPerformanceCounter::YogaLayoutResultsChanged) > 0);
+	TestTrue(TEXT("Updated width reaches the runtime layout result"),
+		FMath::IsNearlyEqual(View->GetLayoutResultForTesting(*Item).Size.X, 80.0f));
 	return true;
 }
 
