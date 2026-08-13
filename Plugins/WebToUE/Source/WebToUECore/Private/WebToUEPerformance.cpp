@@ -68,7 +68,13 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.display_commands_patched"),
 		TEXT("workload.display_commands_reused"),
 		TEXT("workload.paint_commands_visited"),
-		TEXT("workload.paint_draw_elements")
+		TEXT("workload.paint_draw_elements"),
+		TEXT("workload.display_spatial_index_builds"),
+		TEXT("workload.display_spatial_index_patches"),
+		TEXT("workload.dirty_rects_added"),
+		TEXT("workload.paint_commands_culled"),
+		TEXT("workload.hit_test_candidates"),
+		TEXT("workload.hit_test_commands_visited")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -285,6 +291,12 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::DisplayCommandsReused: return TEXT("display_commands_reused");
 	case EWebToUEPerformanceCounter::PaintCommandsVisited: return TEXT("paint_commands_visited");
 	case EWebToUEPerformanceCounter::PaintDrawElements: return TEXT("paint_draw_elements");
+	case EWebToUEPerformanceCounter::DisplaySpatialIndexBuilds: return TEXT("display_spatial_index_builds");
+	case EWebToUEPerformanceCounter::DisplaySpatialIndexPatches: return TEXT("display_spatial_index_patches");
+	case EWebToUEPerformanceCounter::DirtyRectsAdded: return TEXT("dirty_rects_added");
+	case EWebToUEPerformanceCounter::PaintCommandsCulled: return TEXT("paint_commands_culled");
+	case EWebToUEPerformanceCounter::HitTestCandidates: return TEXT("hit_test_candidates");
+	case EWebToUEPerformanceCounter::HitTestCommandsVisited: return TEXT("hit_test_commands_visited");
 	default: return TEXT("unknown");
 	}
 }

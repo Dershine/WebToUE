@@ -93,6 +93,10 @@ public:
 	const FWebToUEPaintCommand* GetDisplayCommandForTesting(const FWebToUENode& Node) const;
 	const FWebToUEDisplayCommandRange* GetDisplayCommandRangeForTesting(
 		const FWebToUENode& Node) const;
+	int32 GetDisplaySpatialCellCountForTesting() const;
+	int32 GetDirtyRectCountForTesting() const;
+	int32 GetDirtyCommandCountForTesting() const;
+	const FSlateRect* GetDirtyRectForTesting(int32 Index) const;
 #endif
 
 private:

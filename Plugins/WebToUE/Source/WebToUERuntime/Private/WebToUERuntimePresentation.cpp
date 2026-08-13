@@ -18,6 +18,7 @@
 #include "Internationalization/Culture.h"
 #include "Internationalization/Internationalization.h"
 #include "Internationalization/StringTable.h"
+#include "HAL/IConsoleManager.h"
 #include "Layout/Clipping.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Rendering/DrawElements.h"
@@ -28,6 +29,34 @@
 
 namespace WebToUE::Runtime::Presentation::Private
 {
+	static TAutoConsoleVariable<int32> CVarDisplayListDebug(
+		TEXT("WebToUE.Debug.DisplayList"), 0,
+		TEXT("Display List diagnostics: 0=off, 1=dirty rects, 2=dirty commands, "
+			"3=all command bounds plus dirty overlays."),
+		ECVF_Default);
+
+	static constexpr float SpatialCellSize = 128.0f;
+	static constexpr int64 MaxCellsPerCommand = 256;
+
+	static uint64 MakeSpatialCellKey(int32 X, int32 Y)
+	{
+		return (uint64(static_cast<uint32>(X)) << 32) |
+			uint64(static_cast<uint32>(Y));
+	}
+
+	static bool IsUsableRect(const FSlateRect& Rect)
+	{
+		return Rect.IsValid() && !Rect.IsEmpty();
+	}
+
+	static FSlateRect UnionRects(const FSlateRect& A, const FSlateRect& B)
+	{
+		if (!IsUsableRect(A)) return B;
+		if (!IsUsableRect(B)) return A;
+		return FSlateRect(FMath::Min(A.Left, B.Left), FMath::Min(A.Top, B.Top),
+			FMath::Max(A.Right, B.Right), FMath::Max(A.Bottom, B.Bottom));
+	}
+
 	static ETextJustify::Type ToTextJustification(const FString& TextAlign)
 	{
 		if (TextAlign == TEXT("center")) return ETextJustify::Center;
@@ -183,6 +212,13 @@ void FWebToUERuntimePresentation::Reset()
 	DisplayCommands.Reset();
 	DisplayCommandIndices.Reset();
 	DisplayCommandRanges.Reset();
+	DisplaySpatialCells.Reset();
+	LargeDisplayCommands.Reset();
+	DisplayQueryMarks.Reset();
+	DisplayQueryScratch.Reset();
+	DisplayQueryGeneration = 0;
+	DirtyRects.Reset();
+	DirtyCommandIndices.Reset();
 	bDisplayListDirty = true;
 #if WITH_DEV_AUTOMATION_TESTS
 	ResourceLoadAttemptsForTesting = 0;
@@ -201,7 +237,14 @@ uint64 FWebToUERuntimePresentation::GetKnownOwnedBytesForTesting() const
 		MeasureDirtyNodes.GetAllocatedSize() + LayoutDirtyNodes.GetAllocatedSize() +
 		ResolvedResources.GetAllocatedSize() + PaintOrderNodes.GetAllocatedSize() +
 		PaintOrderRanges.GetAllocatedSize() + DisplayCommands.GetAllocatedSize() +
-		DisplayCommandIndices.GetAllocatedSize() + DisplayCommandRanges.GetAllocatedSize();
+		DisplayCommandIndices.GetAllocatedSize() + DisplayCommandRanges.GetAllocatedSize() +
+		DisplaySpatialCells.GetAllocatedSize() + LargeDisplayCommands.GetAllocatedSize() +
+		DisplayQueryMarks.GetAllocatedSize() + DisplayQueryScratch.GetAllocatedSize() +
+		DirtyRects.GetAllocatedSize() + DirtyCommandIndices.GetAllocatedSize();
+	for (const TPair<uint64, TArray<int32>>& Pair : DisplaySpatialCells)
+	{
+		Bytes += Pair.Value.GetAllocatedSize();
+	}
 	for (const TPair<FWebToUEInstanceHandle, TSharedPtr<FSlateBrush>>& Pair : Brushes)
 	{
 		if (Pair.Value)
@@ -241,6 +284,12 @@ void FWebToUERuntimePresentation::RebuildCaches(bool bReloadResources)
 		DisplayCommands.Reset();
 		DisplayCommandIndices.Reset();
 		DisplayCommandRanges.Reset();
+		DisplaySpatialCells.Reset();
+		LargeDisplayCommands.Reset();
+		DisplayQueryMarks.Reset();
+		DisplayQueryScratch.Reset();
+		DirtyRects.Reset();
+		DirtyCommandIndices.Reset();
 		bDisplayListDirty = true;
 	}
 	bLayoutDirty = true;
@@ -426,6 +475,7 @@ bool FWebToUERuntimePresentation::ApplyBoundTextChange(FWebToUENode& Node)
 	const FVector2f PreviousDesiredSize = (*CachePtr)->DesiredSize;
 	const float PreviousWrapWidth = (*CachePtr)->Key.WrapWidth;
 	PrepareTextLayoutInCache(Node, GetStyle(Node), PreviousWrapWidth, *CachePtr);
+	MarkDisplayCommandDirty(Node);
 	if (PreviousDesiredSize.Equals((*CachePtr)->DesiredSize, 0.01f))
 	{
 		return false;
@@ -477,7 +527,13 @@ void FWebToUERuntimePresentation::ApplyStyleUpdates(
 		if (!bDisplayListDirty && EnumHasAnyFlags(Update.Changes.Impacts,
 			EWebToUEStyleImpact::Paint | EWebToUEStyleImpact::HitTest))
 		{
-			PatchedCommandCount += PatchDisplaySubtree(*Node);
+			const bool bAffectsDescendants = EnumHasAnyFlags(
+				Update.Changes.Impacts, EWebToUEStyleImpact::HitTest) ||
+				Update.Changes.ChangedProperties.Contains(EWebToUECssProperty::Display) ||
+				Update.Changes.ChangedProperties.Contains(EWebToUECssProperty::Visibility) ||
+				Update.Changes.ChangedProperties.Contains(EWebToUECssProperty::Overflow) ||
+				Update.Changes.ChangedProperties.Contains(EWebToUECssProperty::Opacity);
+			PatchedCommandCount += PatchDisplaySubtree(*Node, bAffectsDescendants);
 		}
 	}
 	if (bRebuildPaintOrder)
@@ -493,6 +549,26 @@ void FWebToUERuntimePresentation::ApplyStyleUpdates(
 			EWebToUEPerformanceCounter::DisplayCommandsReused,
 			FMath::Max(0, DisplayCommands.Num() - PatchedCommandCount));
 	}
+}
+
+void FWebToUERuntimePresentation::ApplyRuntimeStateChanges(
+	TConstArrayView<FWebToUEInstanceHandle> ChangedNodes)
+{
+	if (bDisplayListDirty) return;
+	int32 PatchedCommandCount = 0;
+	for (const FWebToUEInstanceHandle Handle : ChangedNodes)
+	{
+		if (const FWebToUENode* Node = RuntimeInstance.ResolveNode(Handle))
+		{
+			PatchedCommandCount += PatchDisplaySubtree(*Node, true);
+		}
+	}
+	if (PatchedCommandCount <= 0) return;
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::DisplayCommandsPatched, PatchedCommandCount);
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::DisplayCommandsReused,
+		FMath::Max(0, DisplayCommands.Num() - PatchedCommandCount));
 }
 
 FText FWebToUERuntimePresentation::GetDisplayText(const FWebToUENode& Node) const
@@ -671,13 +747,32 @@ int32 FWebToUERuntimePresentation::Paint(const FPaintArgs& Args, const FGeometry
 	{
 		RebuildDisplayList();
 	}
-	for (const FWebToUEPaintCommand& Command : DisplayCommands)
+	const FVector2f AbsoluteTopLeft(CullingRect.Left, CullingRect.Top);
+	const FVector2f AbsoluteBottomRight(CullingRect.Right, CullingRect.Bottom);
+	const FVector2f LocalTopLeft(
+		Geometry.AbsoluteToLocal(FVector2D(AbsoluteTopLeft)));
+	const FVector2f LocalBottomRight(
+		Geometry.AbsoluteToLocal(FVector2D(AbsoluteBottomRight)));
+	const FSlateRect LocalCullingRect(
+		FMath::Min(LocalTopLeft.X, LocalBottomRight.X),
+		FMath::Min(LocalTopLeft.Y, LocalBottomRight.Y),
+		FMath::Max(LocalTopLeft.X, LocalBottomRight.X),
+		FMath::Max(LocalTopLeft.Y, LocalBottomRight.Y));
+	QueryDisplayCommands(LocalCullingRect, true, DisplayQueryScratch);
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::PaintCommandsCulled,
+		FMath::Max(0, DisplayCommands.Num() - DisplayQueryScratch.Num()));
+	for (const int32 CommandIndex : DisplayQueryScratch)
 	{
+		if (!DisplayCommands.IsValidIndex(CommandIndex)) continue;
 		FWebToUEPerformanceCapture::RecordCounter(
 			EWebToUEPerformanceCounter::PaintCommandsVisited);
-		LayerId = PaintCommand(Command, Args, Geometry, CullingRect,
+		LayerId = PaintCommand(DisplayCommands[CommandIndex], Args, Geometry, CullingRect,
 			Out, LayerId, WidgetStyle, bParentEnabled);
 	}
+	PaintDebugOverlay(Geometry, Out, LayerId);
+	DirtyRects.Reset();
+	DirtyCommandIndices.Reset();
 	return LayerId;
 }
 
@@ -686,6 +781,12 @@ void FWebToUERuntimePresentation::RebuildDisplayList() const
 	DisplayCommands.Reset();
 	DisplayCommandIndices.Reset();
 	DisplayCommandRanges.Reset();
+	DisplaySpatialCells.Reset();
+	LargeDisplayCommands.Reset();
+	DisplayQueryMarks.Reset();
+	DisplayQueryScratch.Reset();
+	DirtyRects.Reset();
+	DirtyCommandIndices.Reset();
 	const FWebToUEDocument* RuntimeDocument = GetDocument();
 	if (!RuntimeDocument || !RuntimeDocument->Root)
 	{
@@ -700,7 +801,12 @@ void FWebToUERuntimePresentation::RebuildDisplayList() const
 	DisplayCommandIndices.Reserve(RuntimeNodeCount);
 	DisplayCommandRanges.Reserve(RuntimeNodeCount);
 	BuildDisplaySubtree(*RuntimeDocument, *RuntimeDocument->Root, 1.0f, true, true,
-		FVector2f::ZeroVector, FSlateRect(), false);
+		0, FVector2f::ZeroVector, FSlateRect(), false);
+	DisplayQueryMarks.SetNumZeroed(DisplayCommands.Num());
+	DisplayQueryScratch.Reserve(DisplayCommands.Num());
+	DirtyRects.Reserve(DisplayCommands.Num());
+	DirtyCommandIndices.Reserve(DisplayCommands.Num());
+	RebuildDisplaySpatialIndex();
 	FWebToUEPerformanceCapture::RecordCounter(
 		EWebToUEPerformanceCounter::DisplayCommandsBuilt, DisplayCommands.Num());
 	bDisplayListDirty = false;
@@ -709,7 +815,7 @@ void FWebToUERuntimePresentation::RebuildDisplayList() const
 void FWebToUERuntimePresentation::UpdateDisplayCommand(
 	const FWebToUEDocument& RuntimeDocument, const FWebToUENode& Node,
 	FWebToUEPaintCommand& Command, float ParentOpacity, bool bParentDisplayed,
-	bool bParentEnabled, const FVector2f& InheritedScrollOffset,
+	bool bParentEnabled, int32 Depth, const FVector2f& InheritedScrollOffset,
 	const FSlateRect& InheritedClip, bool bHasInheritedClip) const
 {
 	const FWebToUEComputedStyle& Style = GetStyle(Node);
@@ -721,6 +827,7 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 		? EWebToUEPaintCommandType::Text : EWebToUEPaintCommandType::Box;
 	Command.Bounds = FSlateRect(Position.X, Position.Y,
 		Position.X + Size.X, Position.Y + Size.Y);
+	Command.Depth = Depth;
 	Command.Opacity = ParentOpacity * Style.Opacity;
 	Command.bDisplayed = bParentDisplayed && RuntimeDocument.IsDisplayed(Node);
 	if (bHasInheritedClip && (!InheritedClip.IsValid() || InheritedClip.IsEmpty()))
@@ -730,7 +837,19 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 	Command.bEnabled = bParentEnabled && Style.bEnabled;
 	Command.bHasClip = bHasInheritedClip;
 	Command.ClipBounds = InheritedClip;
+	Command.VisibleBounds = Command.bDisplayed ? Command.Bounds : FSlateRect();
+	if (Command.bDisplayed && Command.bHasClip)
+	{
+		Command.VisibleBounds = Command.Bounds.IntersectionWith(Command.ClipBounds);
+	}
+	Command.SubtreeBounds = Command.VisibleBounds;
 	Command.bDrawable = Node.Type == EWebToUENodeType::Text;
+	Command.bInteractive = Node.IsInteractive();
+	Command.bScrollable = RuntimeDocument.IsScrollable(Node) &&
+		GetState(Node).MaxScrollOffset.Y > 0.0f;
+	Command.bSpatiallyIndexed = false;
+	Command.bLargeSpatialEntry = false;
+	Command.SpatialCells = FWebToUESpatialCellRange();
 	if (Node.Type == EWebToUENodeType::Element)
 	{
 		const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(Command.Owner);
@@ -749,7 +868,7 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 
 void FWebToUERuntimePresentation::BuildDisplaySubtree(
 	const FWebToUEDocument& RuntimeDocument, const FWebToUENode& Node,
-	float ParentOpacity, bool bParentDisplayed, bool bParentEnabled,
+	float ParentOpacity, bool bParentDisplayed, bool bParentEnabled, int32 Depth,
 	const FVector2f& InheritedScrollOffset, const FSlateRect& InheritedClip,
 	bool bHasInheritedClip) const
 {
@@ -757,7 +876,7 @@ void FWebToUERuntimePresentation::BuildDisplaySubtree(
 	const int32 CommandIndex = DisplayCommands.AddDefaulted();
 	FWebToUEPaintCommand& Command = DisplayCommands[CommandIndex];
 	UpdateDisplayCommand(RuntimeDocument, Node, Command, ParentOpacity, bParentDisplayed,
-		bParentEnabled, InheritedScrollOffset, InheritedClip, bHasInheritedClip);
+		bParentEnabled, Depth, InheritedScrollOffset, InheritedClip, bHasInheritedClip);
 	const FWebToUEInstanceHandle OwnerHandle = Command.Owner;
 	const float ChildOpacity = Command.Opacity;
 	const bool bChildDisplayed = Command.bDisplayed;
@@ -780,13 +899,202 @@ void FWebToUERuntimePresentation::BuildDisplaySubtree(
 		const FWebToUENode* Child = RuntimeInstance.ResolveNode(ChildHandle);
 		if (!Child) continue;
 		BuildDisplaySubtree(RuntimeDocument, *Child, ChildOpacity, bChildDisplayed,
-			bChildEnabled, ChildScrollOffset, ChildClip, bHasChildClip);
+			bChildEnabled, Depth + 1, ChildScrollOffset, ChildClip, bHasChildClip);
 	}
 	DisplayCommandRanges.Add(OwnerHandle,
 		{ RangeStart, DisplayCommands.Num() - RangeStart });
+	UpdateDisplaySubtreeBounds(Node);
 }
 
-int32 FWebToUERuntimePresentation::PatchDisplaySubtree(const FWebToUENode& Node) const
+void FWebToUERuntimePresentation::UpdateDisplaySubtreeBounds(
+	const FWebToUENode& Node) const
+{
+	const int32* CommandIndex =
+		DisplayCommandIndices.Find(RuntimeInstance.GetHandle(&Node));
+	if (!CommandIndex || !DisplayCommands.IsValidIndex(*CommandIndex)) return;
+	FSlateRect SubtreeBounds = DisplayCommands[*CommandIndex].VisibleBounds;
+	for (const FWebToUEInstanceHandle ChildHandle : GetPaintOrder(Node))
+	{
+		const int32* ChildIndex = DisplayCommandIndices.Find(ChildHandle);
+		if (ChildIndex && DisplayCommands.IsValidIndex(*ChildIndex))
+		{
+			SubtreeBounds = WebToUE::Runtime::Presentation::Private::UnionRects(
+				SubtreeBounds, DisplayCommands[*ChildIndex].SubtreeBounds);
+		}
+	}
+	DisplayCommands[*CommandIndex].SubtreeBounds = SubtreeBounds;
+}
+
+void FWebToUERuntimePresentation::RebuildDisplaySpatialIndex() const
+{
+	DisplaySpatialCells.Reset();
+	LargeDisplayCommands.Reset();
+	for (int32 CommandIndex = 0; CommandIndex < DisplayCommands.Num(); ++CommandIndex)
+	{
+		AddDisplayCommandToSpatialIndex(CommandIndex);
+	}
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::DisplaySpatialIndexBuilds);
+}
+
+void FWebToUERuntimePresentation::AddDisplayCommandToSpatialIndex(
+	int32 CommandIndex) const
+{
+	using namespace WebToUE::Runtime::Presentation::Private;
+	if (!DisplayCommands.IsValidIndex(CommandIndex)) return;
+	FWebToUEPaintCommand& Command = DisplayCommands[CommandIndex];
+	Command.bSpatiallyIndexed = false;
+	Command.bLargeSpatialEntry = false;
+	Command.SpatialCells = FWebToUESpatialCellRange();
+	if (!Command.bDisplayed || !IsUsableRect(Command.VisibleBounds) ||
+		(!Command.bDrawable && !Command.bInteractive && !Command.bScrollable))
+	{
+		return;
+	}
+	Command.SpatialCells.MinX = FMath::FloorToInt(Command.VisibleBounds.Left / SpatialCellSize);
+	Command.SpatialCells.MinY = FMath::FloorToInt(Command.VisibleBounds.Top / SpatialCellSize);
+	Command.SpatialCells.MaxX = FMath::FloorToInt(Command.VisibleBounds.Right / SpatialCellSize);
+	Command.SpatialCells.MaxY = FMath::FloorToInt(Command.VisibleBounds.Bottom / SpatialCellSize);
+	Command.bSpatiallyIndexed = true;
+	if (Command.SpatialCells.GetCellCount() > MaxCellsPerCommand)
+	{
+		Command.bLargeSpatialEntry = true;
+		LargeDisplayCommands.Add(CommandIndex);
+		return;
+	}
+	for (int32 Y = Command.SpatialCells.MinY; Y <= Command.SpatialCells.MaxY; ++Y)
+	{
+		for (int32 X = Command.SpatialCells.MinX; X <= Command.SpatialCells.MaxX; ++X)
+		{
+			DisplaySpatialCells.FindOrAdd(MakeSpatialCellKey(X, Y)).Add(CommandIndex);
+		}
+	}
+}
+
+void FWebToUERuntimePresentation::RemoveDisplayCommandFromSpatialIndex(
+	int32 CommandIndex) const
+{
+	using namespace WebToUE::Runtime::Presentation::Private;
+	if (!DisplayCommands.IsValidIndex(CommandIndex)) return;
+	FWebToUEPaintCommand& Command = DisplayCommands[CommandIndex];
+	if (!Command.bSpatiallyIndexed) return;
+	if (Command.bLargeSpatialEntry)
+	{
+		LargeDisplayCommands.RemoveSingle(CommandIndex);
+	}
+	else
+	{
+		const FWebToUESpatialCellRange PreviousCells = Command.SpatialCells;
+		for (int32 Y = PreviousCells.MinY; Y <= PreviousCells.MaxY; ++Y)
+		{
+			for (int32 X = PreviousCells.MinX; X <= PreviousCells.MaxX; ++X)
+			{
+				const uint64 CellKey = MakeSpatialCellKey(X, Y);
+				if (TArray<int32>* Cell = DisplaySpatialCells.Find(CellKey))
+				{
+					Cell->RemoveSingle(CommandIndex);
+				}
+			}
+		}
+	}
+	Command.bSpatiallyIndexed = false;
+	Command.bLargeSpatialEntry = false;
+	Command.SpatialCells = FWebToUESpatialCellRange();
+}
+
+void FWebToUERuntimePresentation::QueryDisplayCommands(const FSlateRect& LocalBounds,
+	bool bRequireDrawable, TArray<int32>& OutCommandIndices) const
+{
+	using namespace WebToUE::Runtime::Presentation::Private;
+	OutCommandIndices.Reset();
+	if (!IsUsableRect(LocalBounds) || DisplayCommands.IsEmpty()) return;
+	if (DisplayQueryMarks.Num() != DisplayCommands.Num())
+	{
+		DisplayQueryMarks.SetNumZeroed(DisplayCommands.Num());
+	}
+	if (++DisplayQueryGeneration == 0)
+	{
+		DisplayQueryMarks.Init(0, DisplayCommands.Num());
+		DisplayQueryGeneration = 1;
+	}
+	const auto AddCandidate = [this, &LocalBounds, bRequireDrawable,
+		&OutCommandIndices](int32 CommandIndex)
+	{
+		if (!DisplayCommands.IsValidIndex(CommandIndex) ||
+			DisplayQueryMarks[CommandIndex] == DisplayQueryGeneration)
+		{
+			return;
+		}
+		DisplayQueryMarks[CommandIndex] = DisplayQueryGeneration;
+		const FWebToUEPaintCommand& Command = DisplayCommands[CommandIndex];
+		const bool bRelevant = bRequireDrawable ? Command.bDrawable
+			: (Command.bInteractive || Command.bScrollable);
+		if (Command.bDisplayed && bRelevant &&
+			FSlateRect::DoRectanglesIntersect(Command.VisibleBounds, LocalBounds))
+		{
+			OutCommandIndices.Add(CommandIndex);
+		}
+	};
+	for (const int32 CommandIndex : LargeDisplayCommands)
+	{
+		AddCandidate(CommandIndex);
+	}
+	const FWebToUESpatialCellRange QueryCells = {
+		FMath::FloorToInt(LocalBounds.Left / SpatialCellSize),
+		FMath::FloorToInt(LocalBounds.Top / SpatialCellSize),
+		FMath::FloorToInt(LocalBounds.Right / SpatialCellSize),
+		FMath::FloorToInt(LocalBounds.Bottom / SpatialCellSize)
+	};
+	if (QueryCells.GetCellCount() <= 4096)
+	{
+		for (int32 Y = QueryCells.MinY; Y <= QueryCells.MaxY; ++Y)
+		{
+			for (int32 X = QueryCells.MinX; X <= QueryCells.MaxX; ++X)
+			{
+				if (const TArray<int32>* Cell =
+					DisplaySpatialCells.Find(MakeSpatialCellKey(X, Y)))
+				{
+					for (const int32 CommandIndex : *Cell) AddCandidate(CommandIndex);
+				}
+			}
+		}
+	}
+	else
+	{
+		for (const TPair<uint64, TArray<int32>>& Pair : DisplaySpatialCells)
+		{
+			for (const int32 CommandIndex : Pair.Value) AddCandidate(CommandIndex);
+		}
+	}
+	OutCommandIndices.Sort();
+}
+
+void FWebToUERuntimePresentation::AddDirtyRegion(const FSlateRect& PreviousBounds,
+	const FSlateRect& CurrentBounds, int32 CommandIndex) const
+{
+	using namespace WebToUE::Runtime::Presentation::Private;
+	const FSlateRect Region = UnionRects(PreviousBounds, CurrentBounds);
+	if (!IsUsableRect(Region)) return;
+	DirtyRects.Add(Region);
+	DirtyCommandIndices.AddUnique(CommandIndex);
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::DirtyRectsAdded);
+}
+
+void FWebToUERuntimePresentation::MarkDisplayCommandDirty(
+	const FWebToUENode& Node) const
+{
+	const int32* CommandIndex =
+		DisplayCommandIndices.Find(RuntimeInstance.GetHandle(&Node));
+	if (CommandIndex && DisplayCommands.IsValidIndex(*CommandIndex))
+	{
+		const FSlateRect Bounds = DisplayCommands[*CommandIndex].VisibleBounds;
+		AddDirtyRegion(Bounds, Bounds, *CommandIndex);
+	}
+}
+
+int32 FWebToUERuntimePresentation::PatchDisplaySubtree(
+	const FWebToUENode& Node, bool bIncludeDescendants) const
 {
 	const FWebToUEDocument* RuntimeDocument = GetDocument();
 	const FWebToUEDisplayCommandRange* Range =
@@ -797,55 +1105,52 @@ int32 FWebToUERuntimePresentation::PatchDisplaySubtree(const FWebToUENode& Node)
 		return 0;
 	}
 
+	const int32* RootCommandIndex =
+		DisplayCommandIndices.Find(RuntimeInstance.GetHandle(&Node));
+	if (!RootCommandIndex || !DisplayCommands.IsValidIndex(*RootCommandIndex))
+	{
+		bDisplayListDirty = true;
+		return 0;
+	}
+	const FWebToUEPaintCommand& RootCommand = DisplayCommands[*RootCommandIndex];
 	float ParentOpacity = 1.0f;
 	bool bParentDisplayed = true;
 	bool bParentEnabled = true;
-	FVector2f InheritedScrollOffset = FVector2f::ZeroVector;
-	FSlateRect InheritedClip;
-	bool bHasInheritedClip = false;
-	TArray<const FWebToUENode*, TInlineAllocator<16>> Ancestors;
-	for (const FWebToUENode* Current = Node.Parent; Current; Current = Current->Parent)
+	if (Node.Parent)
 	{
-		Ancestors.Add(Current);
-	}
-	for (int32 Index = Ancestors.Num() - 1; Index >= 0; --Index)
-	{
-		const FWebToUENode& Ancestor = *Ancestors[Index];
-		const FWebToUEComputedStyle& AncestorStyle = GetStyle(Ancestor);
-		const FWebToUERuntimeLayoutResult& AncestorLayout = GetLayout(Ancestor);
-		const FVector2f AncestorPosition =
-			AncestorLayout.Position - InheritedScrollOffset;
-		const FSlateRect AncestorBounds(AncestorPosition.X, AncestorPosition.Y,
-			AncestorPosition.X + AncestorLayout.Size.X,
-			AncestorPosition.Y + AncestorLayout.Size.Y);
-		ParentOpacity *= AncestorStyle.Opacity;
-		bParentDisplayed &= RuntimeDocument->IsDisplayed(Ancestor);
-		bParentEnabled &= AncestorStyle.bEnabled;
-		if (RuntimeDocument->ClipsOverflow(Ancestor))
+		const int32* ParentCommandIndex =
+			DisplayCommandIndices.Find(RuntimeInstance.GetHandle(Node.Parent));
+		if (ParentCommandIndex && DisplayCommands.IsValidIndex(*ParentCommandIndex))
 		{
-			InheritedClip = bHasInheritedClip
-				? InheritedClip.IntersectionWith(AncestorBounds) : AncestorBounds;
-			bHasInheritedClip = true;
-		}
-		if (RuntimeDocument->IsScrollable(Ancestor))
-		{
-			InheritedScrollOffset += GetState(Ancestor).ScrollOffset;
+			const FWebToUEPaintCommand& ParentCommand =
+				DisplayCommands[*ParentCommandIndex];
+			ParentOpacity = ParentCommand.Opacity;
+			bParentDisplayed = ParentCommand.bDisplayed;
+			bParentEnabled = ParentCommand.bEnabled;
 		}
 	}
+	const FVector2f InheritedScrollOffset = GetLayout(Node).Position -
+		RootCommand.Bounds.GetTopLeft2f();
+	const FSlateRect InheritedClip = RootCommand.ClipBounds;
+	const bool bHasInheritedClip = RootCommand.bHasClip;
+	const int32 RootDepth = RootCommand.Depth;
 
 	int32 PatchedCount = 0;
-	TFunction<void(const FWebToUENode&, float, bool, bool, const FVector2f&,
-		const FSlateRect&, bool)> Patch;
-	Patch = [&](const FWebToUENode& Current, float InParentOpacity,
-		bool bInParentDisplayed, bool bInParentEnabled,
+	const auto Patch = [&](const auto& Self, const FWebToUENode& Current,
+		float InParentOpacity,
+		bool bInParentDisplayed, bool bInParentEnabled, int32 Depth,
 		const FVector2f& InScrollOffset, const FSlateRect& InClip, bool bInHasClip)
 	{
 		const int32* CommandIndex =
 			DisplayCommandIndices.Find(RuntimeInstance.GetHandle(&Current));
 		if (!CommandIndex || !DisplayCommands.IsValidIndex(*CommandIndex)) return;
 		FWebToUEPaintCommand& Command = DisplayCommands[*CommandIndex];
+		const FSlateRect PreviousBounds = Command.VisibleBounds;
+		RemoveDisplayCommandFromSpatialIndex(*CommandIndex);
 		UpdateDisplayCommand(*RuntimeDocument, Current, Command, InParentOpacity,
-			bInParentDisplayed, bInParentEnabled, InScrollOffset, InClip, bInHasClip);
+			bInParentDisplayed, bInParentEnabled, Depth, InScrollOffset, InClip, bInHasClip);
+		AddDisplayCommandToSpatialIndex(*CommandIndex);
+		AddDirtyRegion(PreviousBounds, Command.VisibleBounds, *CommandIndex);
 		++PatchedCount;
 		FSlateRect ChildClip = InClip;
 		bool bHasChildClip = bInHasClip;
@@ -857,18 +1162,95 @@ int32 FWebToUERuntimePresentation::PatchDisplaySubtree(const FWebToUENode& Node)
 		const FVector2f ChildScrollOffset = InScrollOffset +
 			(RuntimeDocument->IsScrollable(Current)
 				? GetState(Current).ScrollOffset : FVector2f::ZeroVector);
-		for (const FWebToUEInstanceHandle ChildHandle : GetPaintOrder(Current))
+		if (bIncludeDescendants)
 		{
-			if (const FWebToUENode* Child = RuntimeInstance.ResolveNode(ChildHandle))
+			for (const FWebToUEInstanceHandle ChildHandle : GetPaintOrder(Current))
 			{
-				Patch(*Child, Command.Opacity, Command.bDisplayed, Command.bEnabled,
-					ChildScrollOffset, ChildClip, bHasChildClip);
+				if (const FWebToUENode* Child = RuntimeInstance.ResolveNode(ChildHandle))
+				{
+					Self(Self, *Child, Command.Opacity, Command.bDisplayed,
+						Command.bEnabled, Depth + 1,
+						ChildScrollOffset, ChildClip, bHasChildClip);
+				}
 			}
 		}
+		UpdateDisplaySubtreeBounds(Current);
 	};
-	Patch(Node, ParentOpacity, bParentDisplayed, bParentEnabled,
-		InheritedScrollOffset, InheritedClip, bHasInheritedClip);
+	Patch(Patch, Node, ParentOpacity, bParentDisplayed, bParentEnabled,
+		RootDepth, InheritedScrollOffset, InheritedClip, bHasInheritedClip);
+	for (const FWebToUENode* Ancestor = Node.Parent; Ancestor; Ancestor = Ancestor->Parent)
+	{
+		UpdateDisplaySubtreeBounds(*Ancestor);
+	}
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::DisplaySpatialIndexPatches, PatchedCount);
 	return PatchedCount;
+}
+
+void FWebToUERuntimePresentation::PaintDebugOverlay(const FGeometry& Geometry,
+	FSlateWindowElementList& Out, int32& LayerId) const
+{
+	using namespace WebToUE::Runtime::Presentation::Private;
+	const int32 DebugMode = CVarDisplayListDebug.GetValueOnGameThread();
+	if (DebugMode <= 0) return;
+	const FSlateBrush* WhiteBrush = FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"));
+	const auto DrawOutline = [&Geometry, &Out, &LayerId, WhiteBrush](
+		const FSlateRect& Rect, const FLinearColor& Color)
+	{
+		if (!IsUsableRect(Rect)) return;
+		constexpr float Thickness = 1.5f;
+		const FVector2f Position = Rect.GetTopLeft2f();
+		const FVector2f Size = Rect.GetSize2f();
+		FSlateDrawElement::MakeBox(Out, LayerId,
+			Geometry.ToPaintGeometry(FVector2f(Size.X, Thickness),
+				FSlateLayoutTransform(Position)), WhiteBrush, ESlateDrawEffect::None, Color);
+		FSlateDrawElement::MakeBox(Out, LayerId,
+			Geometry.ToPaintGeometry(FVector2f(Size.X, Thickness),
+				FSlateLayoutTransform(Position + FVector2f(0.0f, Size.Y - Thickness))),
+			WhiteBrush, ESlateDrawEffect::None, Color);
+		FSlateDrawElement::MakeBox(Out, LayerId,
+			Geometry.ToPaintGeometry(FVector2f(Thickness, Size.Y),
+				FSlateLayoutTransform(Position)), WhiteBrush, ESlateDrawEffect::None, Color);
+		FSlateDrawElement::MakeBox(Out, LayerId,
+			Geometry.ToPaintGeometry(FVector2f(Thickness, Size.Y),
+				FSlateLayoutTransform(Position + FVector2f(Size.X - Thickness, 0.0f))),
+			WhiteBrush, ESlateDrawEffect::None, Color);
+		++LayerId;
+	};
+	if (DebugMode >= 3)
+	{
+		for (const FWebToUEPaintCommand& Command : DisplayCommands)
+		{
+			if (Command.bDisplayed)
+			{
+				DrawOutline(Command.VisibleBounds, FLinearColor(0.0f, 0.65f, 1.0f, 0.65f));
+			}
+		}
+	}
+	if (DebugMode == 1 || DebugMode >= 3)
+	{
+		for (const FSlateRect& DirtyRect : DirtyRects)
+		{
+			constexpr float DirtyRectPadding = 2.0f;
+			DrawOutline(FSlateRect(
+				DirtyRect.Left - DirtyRectPadding,
+				DirtyRect.Top - DirtyRectPadding,
+				DirtyRect.Right + DirtyRectPadding,
+				DirtyRect.Bottom + DirtyRectPadding),
+				FLinearColor(1.0f, 0.1f, 0.1f, 0.9f));
+		}
+	}
+	if (DebugMode == 2 || DebugMode >= 3)
+	{
+		for (const int32 CommandIndex : DirtyCommandIndices)
+		{
+			if (DisplayCommands.IsValidIndex(CommandIndex))
+			{
+				DrawOutline(DisplayCommands[CommandIndex].VisibleBounds,
+					FLinearColor(1.0f, 0.55f, 0.0f, 0.9f));
+			}
+		}
+	}
 }
 
 int32 FWebToUERuntimePresentation::PaintCommand(
@@ -1081,69 +1463,82 @@ FWebToUENode* FWebToUERuntimePresentation::HitTest(const FVector2f& LocalPositio
 	SCOPE_CYCLE_COUNTER(STAT_WebToUE_HitTest);
 	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_HitTest);
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::HitTest);
-	FWebToUENode* Best = nullptr;
-	const FWebToUEDocument* RuntimeDocument = GetDocument();
-	if (!RuntimeDocument || !RuntimeDocument->Root) return nullptr;
-
-	TFunction<void(FWebToUENode&, const FVector2f&, const FVector2f&, const FVector2f&, bool)> Visit;
-	Visit = [&](FWebToUENode& Node, const FVector2f& InheritedScrollOffset,
-		const FVector2f& ClipMin, const FVector2f& ClipMax, bool bHasClip)
+	if (bDisplayListDirty && !bLayoutDirty) RebuildDisplayList();
+	constexpr float PointExtent = 0.01f;
+	QueryDisplayCommands(FSlateRect(LocalPosition.X, LocalPosition.Y,
+		LocalPosition.X + PointExtent, LocalPosition.Y + PointExtent),
+		false, DisplayQueryScratch);
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::HitTestCandidates, DisplayQueryScratch.Num());
+	for (int32 QueryIndex = DisplayQueryScratch.Num() - 1; QueryIndex >= 0; --QueryIndex)
 	{
-		if (!RuntimeDocument->IsDisplayed(Node)) return;
-		if (bHasClip && (LocalPosition.X < ClipMin.X || LocalPosition.Y < ClipMin.Y ||
-			LocalPosition.X > ClipMax.X || LocalPosition.Y > ClipMax.Y)) return;
-
-		const FWebToUEComputedStyle& Style = GetStyle(Node);
-		const FWebToUERuntimeLayoutResult& LayoutResult = GetLayout(Node);
-		const FVector2f Position = LayoutResult.Position - InheritedScrollOffset;
-		const FVector2f NodeMax = Position + LayoutResult.Size;
-		const bool bInsideNode = LocalPosition.X >= Position.X &&
-			LocalPosition.Y >= Position.Y && LocalPosition.X <= NodeMax.X &&
-			LocalPosition.Y <= NodeMax.Y;
-		if (bInsideNode && Node.IsInteractive() && Style.bEnabled)
+		const int32 CommandIndex = DisplayQueryScratch[QueryIndex];
+		if (!DisplayCommands.IsValidIndex(CommandIndex)) continue;
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::HitTestCommandsVisited);
+		const FWebToUEPaintCommand& Command = DisplayCommands[CommandIndex];
+		if (!Command.bInteractive || !Command.bEnabled ||
+			!Command.VisibleBounds.ContainsPoint(FVector2D(LocalPosition)))
 		{
-			if (!Best)
-			{
-				Best = &Node;
-			}
-			else
-			{
-				const FWebToUEComputedStyle& BestStyle = GetStyle(*Best);
-				const FWebToUERuntimeLayoutResult& BestLayout = GetLayout(*Best);
-				if (Style.ZIndex > BestStyle.ZIndex ||
-					(Style.ZIndex == BestStyle.ZIndex &&
-						LayoutResult.PaintOrder > BestLayout.PaintOrder))
-				{
-					Best = &Node;
-				}
-			}
+			continue;
 		}
+		if (FWebToUENode* Node = RuntimeInstance.ResolveNode(Command.Owner)) return Node;
+	}
+	return nullptr;
+}
 
-		FVector2f ChildClipMin = ClipMin;
-		FVector2f ChildClipMax = ClipMax;
-		bool bChildHasClip = bHasClip;
-		if (RuntimeDocument->ClipsOverflow(Node))
+bool FWebToUERuntimePresentation::ScrollAt(
+	const FVector2f& LocalPosition, float WheelDelta)
+{
+	if (FMath::IsNearlyZero(WheelDelta)) return false;
+	if (bDisplayListDirty && !bLayoutDirty) RebuildDisplayList();
+	constexpr float PointExtent = 0.01f;
+	QueryDisplayCommands(FSlateRect(LocalPosition.X, LocalPosition.Y,
+		LocalPosition.X + PointExtent, LocalPosition.Y + PointExtent),
+		false, DisplayQueryScratch);
+	DisplayQueryScratch.Sort([this](int32 A, int32 B)
+	{
+		if (!DisplayCommands.IsValidIndex(A)) return false;
+		if (!DisplayCommands.IsValidIndex(B)) return true;
+		if (DisplayCommands[A].Depth != DisplayCommands[B].Depth)
 		{
-			ChildClipMin = bHasClip
-				? FVector2f(FMath::Max(ClipMin.X, Position.X), FMath::Max(ClipMin.Y, Position.Y))
-				: Position;
-			ChildClipMax = bHasClip
-				? FVector2f(FMath::Min(ClipMax.X, NodeMax.X), FMath::Min(ClipMax.Y, NodeMax.Y))
-				: NodeMax;
-			bChildHasClip = true;
-			if (ChildClipMin.X > ChildClipMax.X || ChildClipMin.Y > ChildClipMax.Y) return;
+			return DisplayCommands[A].Depth > DisplayCommands[B].Depth;
 		}
+		return A > B;
+	});
+	constexpr float WheelScrollAmount = 48.0f;
+	for (const int32 CommandIndex : DisplayQueryScratch)
+	{
+		if (!DisplayCommands.IsValidIndex(CommandIndex)) continue;
+		const FWebToUEPaintCommand& Command = DisplayCommands[CommandIndex];
+		if (!Command.bScrollable ||
+			!Command.VisibleBounds.ContainsPoint(FVector2D(LocalPosition))) continue;
+		FWebToUENode* Node = RuntimeInstance.ResolveNode(Command.Owner);
+		if (!Node) continue;
+		FWebToUERuntimeNodeState& State = GetState(*Node);
+		const float PreviousOffset = State.ScrollOffset.Y;
+		State.ScrollOffset.Y = FMath::Clamp(
+			PreviousOffset - WheelDelta * WheelScrollAmount,
+			0.0f, State.MaxScrollOffset.Y);
+		if (!FMath::IsNearlyEqual(PreviousOffset, State.ScrollOffset.Y))
+		{
+			ApplyScrollOffsetChange(*Node);
+			return true;
+		}
+	}
+	return false;
+}
 
-		const FVector2f ChildScrollOffset = InheritedScrollOffset +
-			(RuntimeDocument->IsScrollable(Node) ? GetState(Node).ScrollOffset : FVector2f::ZeroVector);
-		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
-		{
-			Visit(*Child, ChildScrollOffset, ChildClipMin, ChildClipMax, bChildHasClip);
-		}
-	};
-	Visit(*RuntimeDocument->Root, FVector2f::ZeroVector, FVector2f::ZeroVector,
-		FVector2f::ZeroVector, false);
-	return Best;
+void FWebToUERuntimePresentation::ApplyScrollOffsetChange(const FWebToUENode& Node)
+{
+	if (bDisplayListDirty) return;
+	const int32 PatchedCommandCount = PatchDisplaySubtree(Node);
+	if (PatchedCommandCount <= 0) return;
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::DisplayCommandsPatched, PatchedCommandCount);
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::DisplayCommandsReused,
+		FMath::Max(0, DisplayCommands.Num() - PatchedCommandCount));
 }
 
 #if WITH_DEV_AUTOMATION_TESTS

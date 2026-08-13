@@ -75,18 +75,41 @@ struct FWebToUEPaintBatchKey
 	}
 };
 
+struct FWebToUESpatialCellRange
+{
+	int32 MinX = 0;
+	int32 MinY = 0;
+	int32 MaxX = -1;
+	int32 MaxY = -1;
+
+	bool IsValid() const { return MinX <= MaxX && MinY <= MaxY; }
+	int64 GetCellCount() const
+	{
+		return IsValid()
+			? int64(MaxX - MinX + 1) * int64(MaxY - MinY + 1) : 0;
+	}
+};
+
 struct FWebToUEPaintCommand
 {
 	FWebToUEInstanceHandle Owner;
 	EWebToUEPaintCommandType Type = EWebToUEPaintCommandType::Box;
 	FSlateRect Bounds = FSlateRect(0.0f, 0.0f, 0.0f, 0.0f);
 	FSlateRect ClipBounds = FSlateRect(0.0f, 0.0f, 0.0f, 0.0f);
+	FSlateRect VisibleBounds = FSlateRect(0.0f, 0.0f, 0.0f, 0.0f);
+	FSlateRect SubtreeBounds = FSlateRect(0.0f, 0.0f, 0.0f, 0.0f);
 	FWebToUEPaintBatchKey BatchKey;
+	FWebToUESpatialCellRange SpatialCells;
 	float Opacity = 1.0f;
+	int32 Depth = 0;
 	bool bDisplayed = false;
 	bool bDrawable = false;
+	bool bInteractive = false;
+	bool bScrollable = false;
 	bool bEnabled = true;
 	bool bHasClip = false;
+	bool bSpatiallyIndexed = false;
+	bool bLargeSpatialEntry = false;
 };
 
 struct FWebToUEDisplayCommandRange
@@ -106,11 +129,15 @@ public:
 	void RebuildCaches(bool bReloadResources);
 	bool ApplyBoundTextChange(FWebToUENode& Node);
 	void ApplyStyleUpdates(TConstArrayView<FWebToUEStyleUpdate> Updates);
+	void ApplyRuntimeStateChanges(
+		TConstArrayView<FWebToUEInstanceHandle> ChangedNodes);
 	void Layout(const FVector2f& ViewportSize) const;
 	int32 Paint(const FPaintArgs& Args, const FGeometry& Geometry,
 		const FSlateRect& CullingRect, FSlateWindowElementList& Out, int32 LayerId,
 		const FWidgetStyle& WidgetStyle, bool bParentEnabled) const;
 	FWebToUENode* HitTest(const FVector2f& LocalPosition) const;
+	bool ScrollAt(const FVector2f& LocalPosition, float WheelDelta);
+	void ApplyScrollOffsetChange(const FWebToUENode& Node);
 	FVector2f GetVisualPosition(const FWebToUENode& Node) const;
 	TConstArrayView<FWebToUEInstanceHandle> GetPaintOrder(const FWebToUENode& Parent) const;
 	FText GetDisplayText(const FWebToUENode& Node) const;
@@ -142,6 +169,13 @@ public:
 		const FWebToUENode& Node) const;
 	const FWebToUEDisplayCommandRange* GetDisplayCommandRangeForTesting(
 		const FWebToUENode& Node) const;
+	int32 GetDisplaySpatialCellCountForTesting() const { return DisplaySpatialCells.Num(); }
+	int32 GetDirtyRectCountForTesting() const { return DirtyRects.Num(); }
+	int32 GetDirtyCommandCountForTesting() const { return DirtyCommandIndices.Num(); }
+	const FSlateRect* GetDirtyRectForTesting(int32 Index) const
+	{
+		return DirtyRects.IsValidIndex(Index) ? &DirtyRects[Index] : nullptr;
+	}
 #endif
 
 private:
@@ -160,6 +194,13 @@ private:
 	mutable TArray<FWebToUEPaintCommand> DisplayCommands;
 	mutable TMap<FWebToUEInstanceHandle, int32> DisplayCommandIndices;
 	mutable TMap<FWebToUEInstanceHandle, FWebToUEDisplayCommandRange> DisplayCommandRanges;
+	mutable TMap<uint64, TArray<int32>> DisplaySpatialCells;
+	mutable TArray<int32> LargeDisplayCommands;
+	mutable TArray<uint32> DisplayQueryMarks;
+	mutable TArray<int32> DisplayQueryScratch;
+	mutable uint32 DisplayQueryGeneration = 0;
+	mutable TArray<FSlateRect> DirtyRects;
+	mutable TArray<int32> DirtyCommandIndices;
 	mutable bool bDisplayListDirty = true;
 #if WITH_DEV_AUTOMATION_TESTS
 	mutable uint64 ResourceLoadAttemptsForTesting = 0;
@@ -195,15 +236,27 @@ private:
 	void RebuildDisplayList() const;
 	void BuildDisplaySubtree(const FWebToUEDocument& RuntimeDocument,
 		const FWebToUENode& Node, float ParentOpacity, bool bParentDisplayed,
-		bool bParentEnabled,
+		bool bParentEnabled, int32 Depth,
 		const FVector2f& InheritedScrollOffset, const FSlateRect& InheritedClip,
 		bool bHasInheritedClip) const;
-	int32 PatchDisplaySubtree(const FWebToUENode& Node) const;
+	int32 PatchDisplaySubtree(const FWebToUENode& Node,
+		bool bIncludeDescendants = true) const;
 	void UpdateDisplayCommand(const FWebToUEDocument& RuntimeDocument,
 		const FWebToUENode& Node, FWebToUEPaintCommand& Command,
-		float ParentOpacity, bool bParentDisplayed, bool bParentEnabled,
+		float ParentOpacity, bool bParentDisplayed, bool bParentEnabled, int32 Depth,
 		const FVector2f& InheritedScrollOffset,
 		const FSlateRect& InheritedClip, bool bHasInheritedClip) const;
+	void UpdateDisplaySubtreeBounds(const FWebToUENode& Node) const;
+	void RebuildDisplaySpatialIndex() const;
+	void AddDisplayCommandToSpatialIndex(int32 CommandIndex) const;
+	void RemoveDisplayCommandFromSpatialIndex(int32 CommandIndex) const;
+	void QueryDisplayCommands(const FSlateRect& LocalBounds,
+		bool bRequireDrawable, TArray<int32>& OutCommandIndices) const;
+	void AddDirtyRegion(const FSlateRect& PreviousBounds,
+		const FSlateRect& CurrentBounds, int32 CommandIndex) const;
+	void MarkDisplayCommandDirty(const FWebToUENode& Node) const;
+	void PaintDebugOverlay(const FGeometry& Geometry, FSlateWindowElementList& Out,
+		int32& LayerId) const;
 	int32 PaintCommand(const FWebToUEPaintCommand& Command, const FPaintArgs& Args,
 		const FGeometry& Geometry, const FSlateRect& CullingRect,
 		FSlateWindowElementList& Out, int32 LayerId, const FWidgetStyle& WidgetStyle,
