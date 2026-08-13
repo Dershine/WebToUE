@@ -669,9 +669,9 @@ bool FWebToUERuntimeWarmLayoutBenchmarkTest::RunTest(const FString& Parameters)
 			static_cast<uint64>(Scenario.Definition.NodeCount));
 		TestEqual(*(Prefix + TEXT("reuses every text layout object")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutBuilds), uint64(0));
-		TestEqual(*(Prefix + TEXT("computes every warm text layout once")),
+		TestEqual(*(Prefix + TEXT("reuses every warm Desired Size result")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes),
-			static_cast<uint64>(TextNodeCount));
+			uint64(0));
 		TestEqual(*(Prefix + TEXT("does not rebuild brushes")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(0));
 		TestEqual(*(Prefix + TEXT("does not visit style nodes")),
@@ -909,9 +909,9 @@ bool FWebToUERuntimeUnchangedPaintBenchmarkTest::RunTest(const FString& Paramete
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(0));
 		TestEqual(*(Prefix + TEXT("reuses every text layout object")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutBuilds), uint64(0));
-		TestEqual(*(Prefix + TEXT("computes every warm text layout once for paint")),
+		TestEqual(*(Prefix + TEXT("reuses every warm Desired Size result for paint")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes),
-			static_cast<uint64>(TextNodeCount));
+			uint64(0));
 		TestEqual(*(Prefix + TEXT("does not rebuild brushes")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(0));
 		TestEqual(*(Prefix + TEXT("does not mark any WebToUE allocation")),
