@@ -8,6 +8,7 @@
 
 class SWebToUEView;
 class UWebToUEDocument;
+struct FWebToUERuntimeLayoutResult;
 enum class EWebToUEPseudoState : uint8;
 struct FWebToUEComputedStyle;
 struct FWebToUENode;
@@ -72,6 +73,9 @@ public:
 	const FWebToUEComputedStyle& GetComputedStyleForTesting(const FWebToUENode& Node) const;
 	FWebToUEInstanceHandle GetInstanceHandleForTesting(const FWebToUENode& Node) const;
 	FWebToUENode* ResolveInstanceHandleForTesting(FWebToUEInstanceHandle Handle) const;
+	void SetHoveredNodeForTesting(FWebToUENode* Node);
+	const FWebToUERuntimeLayoutResult& GetLayoutResultForTesting(
+		const FWebToUENode& Node) const;
 #endif
 
 #if WITH_EDITOR

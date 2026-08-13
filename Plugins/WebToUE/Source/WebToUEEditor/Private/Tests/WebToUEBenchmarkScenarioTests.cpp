@@ -49,6 +49,8 @@ bool FWebToUEBenchmarkStatisticsTest::RunTest(const FString& Parameters)
 		FWebToUEBenchmarkBudgetPolicy::MediumSingleFieldNotifyP95Milliseconds, 0.5);
 	TestEqual(TEXT("The medium warm full-layout P95 target is explicit"),
 		FWebToUEBenchmarkBudgetPolicy::MediumWarmFullLayoutP95Milliseconds, 2.0);
+	TestEqual(TEXT("The stress single-node layout P95 target is explicit"),
+		FWebToUEBenchmarkBudgetPolicy::StressSingleNodeLayoutP95Milliseconds, 16.6);
 	TestEqual(TEXT("The medium unchanged-paint allocation target is explicit"),
 		FWebToUEBenchmarkBudgetPolicy::MediumUnchangedPaintMaximumTrackedAllocations, uint64(0));
 	TestEqual(TEXT("The medium unchanged-paint allocation payload-byte target is explicit"),
@@ -59,6 +61,8 @@ bool FWebToUEBenchmarkStatisticsTest::RunTest(const FString& Parameters)
 		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumSingleFieldNotifyBudget);
 	TestTrue(TEXT("The medium warm full-layout target is an enforced regression gate"),
 		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumWarmFullLayoutBudget);
+	TestTrue(TEXT("The stress single-node layout target is an enforced regression gate"),
+		FWebToUEBenchmarkBudgetPolicy::bEnforceStressSingleNodeLayoutBudget);
 	TestTrue(TEXT("The medium unchanged-paint zero-allocation target is an enforced regression gate"),
 		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumUnchangedPaintBudget);
 	TestEqual(TEXT("The percentile method is explicit"),

@@ -38,6 +38,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUERuntimeUnchangedPaintBenchmarkTest,
 	"WebToUE.Editor.RuntimeUnchangedPaintBenchmark",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUERuntimeStressLayoutBenchmarkTest,
+	"WebToUE.Editor.RuntimeStressLayoutBenchmark",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace WebToUE::Benchmark::Tests
 {
 	static constexpr const TCHAR* RuntimePhaseTelemetryNames[] = {
@@ -655,9 +659,8 @@ bool FWebToUERuntimeWarmLayoutBenchmarkTest::RunTest(const FString& Parameters)
 		const FString Prefix = FString::Printf(TEXT("Runtime warm layout sample %d: "), SampleIndex);
 		TestEqual(*(Prefix + TEXT("performs one full layout")),
 			Sample.Snapshot.Get(EWebToUEPerformancePhase::Layout).CallCount, uint64(1));
-		TestEqual(*(Prefix + TEXT("measures every text node once")),
-			Sample.Snapshot.Get(EWebToUEPerformancePhase::Measure).CallCount,
-			static_cast<uint64>(TextNodeCount));
+		TestEqual(*(Prefix + TEXT("does not remeasure unchanged text")),
+			Sample.Snapshot.Get(EWebToUEPerformancePhase::Measure).CallCount, uint64(0));
 		TestEqual(*(Prefix + TEXT("does not hydrate")),
 			Sample.Snapshot.Get(EWebToUEPerformancePhase::Hydrate).CallCount, uint64(0));
 		TestEqual(*(Prefix + TEXT("does not resolve styles")),
@@ -668,9 +671,8 @@ bool FWebToUERuntimeWarmLayoutBenchmarkTest::RunTest(const FString& Parameters)
 			Sample.Snapshot.Get(EWebToUEPerformancePhase::HitTest).CallCount, uint64(0));
 		TestEqual(*(Prefix + TEXT("does not refresh bindings")),
 			Sample.Snapshot.Get(EWebToUEPerformancePhase::Binding).CallCount, uint64(0));
-		TestEqual(*(Prefix + TEXT("rebuilds one Yoga node per runtime node")),
-			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt),
-			static_cast<uint64>(Scenario.Definition.NodeCount));
+		TestEqual(*(Prefix + TEXT("reuses every persistent Yoga node")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(0));
 		TestEqual(*(Prefix + TEXT("reuses every text layout object")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutBuilds), uint64(0));
 		TestEqual(*(Prefix + TEXT("reuses every warm Desired Size result")),
@@ -682,9 +684,12 @@ bool FWebToUERuntimeWarmLayoutBenchmarkTest::RunTest(const FString& Parameters)
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(0));
 		TestEqual(*(Prefix + TEXT("does not evaluate selectors")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), uint64(0));
-		TestEqual(*(Prefix + TEXT("marks Yoga and measure-context allocations")),
-			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations),
-			static_cast<uint64>(Scenario.Definition.NodeCount + TextNodeCount));
+		TestEqual(*(Prefix + TEXT("performs no WTUE-owned allocation")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations), uint64(0));
+		TestEqual(*(Prefix + TEXT("does not rewrite Yoga styles")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaStyleWrites), uint64(0));
+		TestEqual(*(Prefix + TEXT("does not change cached layout results")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaLayoutResultsChanged), uint64(0));
 		TestTrue(*(Prefix + TEXT("records a positive end-to-end duration")),
 			Sample.InclusiveMilliseconds > 0.0);
 
@@ -1072,6 +1077,140 @@ bool FWebToUERuntimeUnchangedPaintBenchmarkTest::RunTest(const FString& Paramete
 		AddInfo(FString::Printf(TEXT("Runtime unchanged paint %s: p50_ms=%.6f,p95_ms=%.6f"),
 			RuntimePhaseTelemetryNames[PhaseIndex], PhaseDistribution.P50, PhaseDistribution.P95));
 	}
+
+	RuntimeView->ReleaseSlateResources(true);
+	return true;
+}
+
+bool FWebToUERuntimeStressLayoutBenchmarkTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::Benchmark::Tests;
+
+	SetTelemetryStorage(TEXT("WebToUEPerformance"));
+	const FWebToUEBenchmarkEnvironment Environment = FWebToUEBenchmarkEnvironment::Capture();
+	TestTrue(TEXT("The stress layout benchmark runs in Win64 Editor Development"),
+		Environment.IsStandardConfiguration());
+	const TArray<FWebToUEBenchmarkScenarioDefinition>& Definitions =
+		FWebToUEBenchmarkScenarioGenerator::GetStandardDefinitions();
+	TestTrue(TEXT("The stress benchmark scenario is available"), Definitions.IsValidIndex(2));
+	if (!Definitions.IsValidIndex(2)) return false;
+
+	const FWebToUEBenchmarkScenario Scenario =
+		FWebToUEBenchmarkScenarioGenerator::Generate(Definitions[2]);
+	const FString TestDirectory = FPaths::Combine(
+		FPaths::ProjectSavedDir(), TEXT("WebToUEAutomation"));
+	const FString TestFilename = FPaths::Combine(
+		TestDirectory, TEXT("RuntimeStressLayoutBenchmark.html"));
+	IFileManager::Get().MakeDirectory(*TestDirectory, true);
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().Delete(*TestFilename, false, true);
+	};
+
+	const FString Source = FString::Printf(
+		TEXT("<style>%s#benchmark-node-0998:hover { width: 104px; }</style>%s"),
+		*Scenario.Css, *Scenario.Html);
+	UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
+	const bool bImported = FFileHelper::SaveStringToFile(Source, *TestFilename) &&
+		UWebToUEFactory::ImportIntoDocument(*Document, TestFilename, false);
+	TestTrue(TEXT("The stress layout document imports"), bImported);
+	if (!bImported) return false;
+	TestEqual(TEXT("The stress layout document has exactly 2,000 nodes"),
+		Document->GetCompiledNodes().Num(), Scenario.Definition.NodeCount);
+
+	UWebToUEView* RuntimeView = NewObject<UWebToUEView>(GetTransientPackage());
+	RuntimeView->SetDocument(Document);
+	const TSharedRef<SWidget> SlateView = RuntimeView->TakeWidget();
+	const FVector2f RuntimeViewportSize(1280.0f, 720.0f);
+	RuntimeView->LayoutForTesting(RuntimeViewportSize);
+	FWebToUENode* Target = RuntimeView->FindRuntimeNodeByIdForTesting(
+		TEXT("benchmark-node-0998"));
+	TestNotNull(TEXT("The stress layout target exists near the tail"), Target);
+	if (!Target)
+	{
+		RuntimeView->ReleaseSlateResources(true);
+		return false;
+	}
+
+	TArray<FRuntimeUpdateSample> Samples;
+	Samples.Reserve(FWebToUEBenchmarkSamplingPolicy::SampleCount);
+	const int32 TotalIterations = FWebToUEBenchmarkSamplingPolicy::WarmupCount +
+		FWebToUEBenchmarkSamplingPolicy::SampleCount;
+	bool bHovered = false;
+	for (int32 Iteration = 0; Iteration < TotalIterations; ++Iteration)
+	{
+		bHovered = !bHovered;
+		FRuntimeUpdateSample Sample;
+		{
+			FWebToUEPerformanceCapture Capture;
+			const double StartSeconds = FPlatformTime::Seconds();
+			RuntimeView->SetHoveredNodeForTesting(bHovered ? Target : nullptr);
+			RuntimeView->LayoutForTesting(RuntimeViewportSize);
+			Sample.InclusiveMilliseconds =
+				(FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+			Sample.Snapshot = Capture.GetSnapshot();
+		}
+		if (Iteration < FWebToUEBenchmarkSamplingPolicy::WarmupCount) continue;
+
+		const int32 SampleIndex = Samples.Num() + 1;
+		const FString Prefix = FString::Printf(TEXT("Stress layout sample %d: "), SampleIndex);
+		TestEqual(*(Prefix + TEXT("visits only the direct style target")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(1));
+		TestEqual(*(Prefix + TEXT("writes only the changed width property")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaStyleWrites), uint64(1));
+		TestEqual(*(Prefix + TEXT("does not rebuild persistent Yoga nodes")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(0));
+		TestEqual(*(Prefix + TEXT("does not synchronously load resources")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::ResourceLoadAttempts), uint64(0));
+		TestTrue(*(Prefix + TEXT("changes at least the target layout result")),
+			Sample.Snapshot.GetCounter(
+				EWebToUEPerformanceCounter::YogaLayoutResultsChanged) > 0);
+		TestTrue(*(Prefix + TEXT("bounds changed layout results by the corpus size")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaLayoutResultsChanged) <=
+				static_cast<uint64>(Scenario.Definition.NodeCount));
+		TestTrue(*(Prefix + TEXT("records a positive duration")),
+			Sample.InclusiveMilliseconds > 0.0);
+
+		const FString Context = MakeRuntimeTelemetryContext(Environment,
+			Scenario.Definition, TEXT("runtime_stress_single_layout_sample"), SampleIndex);
+		AddTelemetryData(TEXT("sample.index"), SampleIndex, Context);
+		AddTelemetryData(TEXT("runtime.stress_single_layout.inclusive_ms"),
+			Sample.InclusiveMilliseconds, Context);
+		Sample.Snapshot.ForEachTelemetryMeasurement(
+			[&](const TCHAR* Name, double Value) { AddTelemetryData(Name, Value, Context); });
+		Samples.Add(MoveTemp(Sample));
+	}
+
+	TestEqual(TEXT("The stress layout benchmark records the policy sample count"),
+		Samples.Num(), FWebToUEBenchmarkSamplingPolicy::SampleCount);
+	TArray<double> InclusiveSamples;
+	for (const FRuntimeUpdateSample& Sample : Samples)
+	{
+		InclusiveSamples.Add(Sample.InclusiveMilliseconds);
+	}
+	FWebToUEBenchmarkDistribution Distribution;
+	TestTrue(TEXT("The stress single-layout duration produces a distribution"),
+		FWebToUEBenchmarkStatistics::TryCalculate(InclusiveSamples, Distribution));
+	const bool bMeetsTarget = Distribution.P95 <
+		FWebToUEBenchmarkBudgetPolicy::StressSingleNodeLayoutP95Milliseconds;
+	if (FWebToUEBenchmarkBudgetPolicy::bEnforceStressSingleNodeLayoutBudget)
+	{
+		TestTrue(TEXT("The stress single-layout P95 stays below 16.6 ms"), bMeetsTarget);
+	}
+	const FString SummaryContext = MakeRuntimeTelemetryContext(Environment,
+		Scenario.Definition, TEXT("runtime_stress_single_layout_summary"));
+	AddTelemetryData(TEXT("runtime.stress_single_layout.p50_ms"), Distribution.P50,
+		SummaryContext);
+	AddTelemetryData(TEXT("runtime.stress_single_layout.p95_ms"), Distribution.P95,
+		SummaryContext);
+	AddTelemetryData(TEXT("runtime.stress_single_layout.target_p95_ms"),
+		FWebToUEBenchmarkBudgetPolicy::StressSingleNodeLayoutP95Milliseconds,
+		SummaryContext);
+	AddInfo(FString::Printf(
+		TEXT("Runtime stress single layout: p50_ms=%.6f,p95_ms=%.6f,target_p95_ms=%.6f,target_met=%s"),
+		Distribution.P50, Distribution.P95,
+		FWebToUEBenchmarkBudgetPolicy::StressSingleNodeLayoutP95Milliseconds,
+		bMeetsTarget ? TEXT("true") : TEXT("false")));
 
 	RuntimeView->ReleaseSlateResources(true);
 	return true;

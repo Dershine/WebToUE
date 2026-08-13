@@ -39,6 +39,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPersistentLayoutStateTest,
 	"WebToUE.Runtime.PersistentLayoutState",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPersistentLayoutDependenciesTest,
+	"WebToUE.Runtime.PersistentLayoutDependencies",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace WebToUE::RuntimePresentation::Tests
 {
 	static void AddAttribute(FWebToUECompiledNode& Node, const TCHAR* Name, const TCHAR* Value)
@@ -640,6 +644,55 @@ bool FWebToUEPersistentLayoutStateTest::RunTest(const FString& Parameters)
 		RelayoutSnapshot.GetCounter(EWebToUEPerformanceCounter::YogaLayoutResultsChanged) > 0);
 	TestTrue(TEXT("Updated width reaches the runtime layout result"),
 		FMath::IsNearlyEqual(View->GetLayoutResultForTesting(*Item).Size.X, 80.0f));
+	return true;
+}
+
+bool FWebToUEPersistentLayoutDependenciesTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body><div id='outer'><div id='wrap'><button id='item'>A long constrained label</button>")
+		TEXT("<div id='sibling'>Sibling</div><div id='absolute'>Absolute</div></div></div></body>"),
+		TEXT("#outer { width: 120px; } #wrap { width: 120px; flex-direction: row; ")
+		TEXT("flex-wrap: wrap; position: relative; } #item { width: 40px; height: 40px; }")
+		TEXT("#item:hover { width: 80px; } #sibling { width: 60px; height: 20px; flex-shrink: 0; }")
+		TEXT("#absolute { position: absolute; left: 5px; top: 70px; width: 20px; height: 10px; }"));
+	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
+	View->SetRuntimeDocumentForTesting(Document);
+	FWebToUENode* Item = View->FindRuntimeNodeByIdForTesting(TEXT("item"));
+	FWebToUENode* Sibling = View->FindRuntimeNodeByIdForTesting(TEXT("sibling"));
+	FWebToUENode* Absolute = View->FindRuntimeNodeByIdForTesting(TEXT("absolute"));
+	TestNotNull(TEXT("Deep layout item exists"), Item);
+	TestNotNull(TEXT("Deep layout sibling exists"), Sibling);
+	TestNotNull(TEXT("Deep layout absolute child exists"), Absolute);
+	if (!Item || !Sibling || !Absolute || Item->Children.IsEmpty()) return false;
+
+	View->LayoutForTesting(FVector2f(320.0f, 180.0f));
+	const FVector2f InitialSiblingPosition = View->GetLayoutResultForTesting(*Sibling).Position;
+	const FVector2f InitialAbsolutePosition = View->GetLayoutResultForTesting(*Absolute).Position;
+	FWebToUEPerformanceSnapshot Snapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->SetHoveredNodeForTesting(Item);
+		View->LayoutForTesting(FVector2f(320.0f, 180.0f));
+		Snapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("Deep width change writes one Yoga property"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaStyleWrites), uint64(1));
+	TestEqual(TEXT("Deep width change reuses the Yoga tree"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(0));
+	TestTrue(TEXT("Wrap moves the affected flow sibling"),
+		!View->GetLayoutResultForTesting(*Sibling).Position.Equals(InitialSiblingPosition));
+	TestTrue(TEXT("The absolute child retains its independent anchored position"),
+		View->GetLayoutResultForTesting(*Absolute).Position.Equals(InitialAbsolutePosition));
+	TestTrue(TEXT("The changed constraint remeasures only bounded text work"),
+		Snapshot.Get(EWebToUEPerformancePhase::Measure).CallCount > 0 &&
+		Snapshot.Get(EWebToUEPerformancePhase::Measure).CallCount <= 2);
+	TestTrue(TEXT("The changed wrap constraint recomputes a bounded text cache"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes) > 0 &&
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes) <= 2);
+	TestTrue(TEXT("Layout result changes stay below the full test tree"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaLayoutResultsChanged) > 0 &&
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaLayoutResultsChanged) < 10);
 	return true;
 }
 

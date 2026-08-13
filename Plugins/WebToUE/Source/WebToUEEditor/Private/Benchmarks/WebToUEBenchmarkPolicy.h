@@ -15,16 +15,18 @@ struct FWebToUEBenchmarkSamplingPolicy
 
 struct FWebToUEBenchmarkBudgetPolicy
 {
-	static constexpr int32 SchemaVersion = 8;
+	static constexpr int32 SchemaVersion = 9;
 	static constexpr double MediumSingleNodeHoverP95Milliseconds = 0.5;
 	static constexpr double MediumSingleFieldNotifyP95Milliseconds = 0.5;
 	static constexpr double MediumWarmFullLayoutP95Milliseconds = 2.0;
+	static constexpr double StressSingleNodeLayoutP95Milliseconds = 16.6;
 	static constexpr uint64 MediumUnchangedPaintMaximumTrackedAllocations = 0;
 	static constexpr uint64 MediumUnchangedPaintMaximumTrackedAllocationPayloadBytes = 0;
 
 	static constexpr bool bEnforceMediumSingleNodeHoverBudget = true;
 	static constexpr bool bEnforceMediumSingleFieldNotifyBudget = true;
 	static constexpr bool bEnforceMediumWarmFullLayoutBudget = true;
+	static constexpr bool bEnforceStressSingleNodeLayoutBudget = true;
 	static constexpr bool bEnforceMediumUnchangedPaintBudget = true;
 };
 

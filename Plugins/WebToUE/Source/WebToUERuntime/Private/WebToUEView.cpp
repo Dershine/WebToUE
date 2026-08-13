@@ -133,6 +133,21 @@ FWebToUENode* UWebToUEView::ResolveInstanceHandleForTesting(
 {
 	return SlateView ? SlateView->ResolveInstanceHandleForTesting(Handle) : nullptr;
 }
+
+void UWebToUEView::SetHoveredNodeForTesting(FWebToUENode* Node)
+{
+	if (SlateView)
+	{
+		SlateView->SetHoveredNodeForTesting(Node);
+	}
+}
+
+const FWebToUERuntimeLayoutResult& UWebToUEView::GetLayoutResultForTesting(
+	const FWebToUENode& Node) const
+{
+	check(SlateView);
+	return SlateView->GetLayoutResultForTesting(Node);
+}
 #endif
 
 void UWebToUEView::BindFieldNotifications()
