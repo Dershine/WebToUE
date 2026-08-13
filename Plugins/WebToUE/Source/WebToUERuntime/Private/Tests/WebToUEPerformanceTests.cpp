@@ -124,8 +124,8 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(2));
 	TestEqual(TEXT("Two style refreshes each build body and button brushes"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(4));
-	TestEqual(TEXT("The representative workflow records all marked allocation events"),
-		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations), uint64(20));
+	TestEqual(TEXT("Fixed cascade slots avoid one matched-rule growth per style pass"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocations), uint64(17));
 	TestEqual(TEXT("Runtime state and render data each have a known owned payload"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::TrackedAllocationPayloadEvents), uint64(2));
 	TestEqual(TEXT("The separated runtime payloads are sized for every hydrated node"),
@@ -191,7 +191,7 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Telemetry exposes selector evaluations"),
 		TelemetryMeasurements.FindRef(TEXT("workload.selector_evaluations")), 3.0);
 	TestEqual(TEXT("Telemetry exposes tracked allocation events"),
-		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocations")), 20.0);
+		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocations")), 17.0);
 	TestEqual(TEXT("Telemetry exposes tracked allocation payload events"),
 		TelemetryMeasurements.FindRef(TEXT("workload.tracked_allocation_payload_events")), 2.0);
 	TestEqual(TEXT("Telemetry exposes tracked allocation payload bytes"),

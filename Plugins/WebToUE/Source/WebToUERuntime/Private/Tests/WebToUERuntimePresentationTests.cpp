@@ -18,6 +18,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPaintOnlyPseudoResourceSafetyTest,
 	"WebToUE.Runtime.PaintOnlyPseudoResourceSafety",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETypedCascadeSlateOutputTest,
+	"WebToUE.Runtime.TypedCascadeSlateOutput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace WebToUE::RuntimePresentation::Tests
 {
 	static void AddAttribute(FWebToUECompiledNode& Node, const TCHAR* Name, const TCHAR* Value)
@@ -180,6 +184,65 @@ bool FWebToUERuntimePresentationIsolationTest::RunTest(const FString& Parameters
 		Document->GetCompiledNodes().GetData(), InitialNodeStorage);
 	TestEqual(TEXT("Presentation work does not replace compiled rule storage"),
 		Document->GetCompiledRules().GetData(), InitialRuleStorage);
+	return true;
+}
+
+bool FWebToUETypedCascadeSlateOutputTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::RuntimePresentation::Tests;
+	UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
+	FWebToUECompiledDocumentData CompiledDocument;
+	CompiledDocument.RootNodeIndex = 0;
+
+	FWebToUECompiledNode& Body = CompiledDocument.Nodes.AddDefaulted_GetRef();
+	Body.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	Body.Tag = TEXT("body");
+	FWebToUECompiledNode& FirstButton = CompiledDocument.Nodes.AddDefaulted_GetRef();
+	FirstButton.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	FirstButton.Tag = TEXT("button");
+	FirstButton.ParentIndex = 0;
+	AddAttribute(FirstButton, TEXT("id"), TEXT("first"));
+	FWebToUECompiledNode& SecondButton = CompiledDocument.Nodes.AddDefaulted_GetRef();
+	SecondButton.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	SecondButton.Tag = TEXT("button");
+	SecondButton.ParentIndex = 0;
+	AddAttribute(SecondButton, TEXT("id"), TEXT("second"));
+
+	FWebToUECompiledRule& BodyRule = CompiledDocument.Rules.AddDefaulted_GetRef();
+	BodyRule.Specificity = 1;
+	BodyRule.Selector.AddDefaulted_GetRef().Type = TEXT("body");
+	AddDeclaration(BodyRule, TEXT("row-gap"), TEXT("2px"));
+	AddDeclaration(BodyRule, TEXT("gap"), TEXT("18px"));
+	FWebToUECompiledRule& ButtonRule = CompiledDocument.Rules.AddDefaulted_GetRef();
+	ButtonRule.Specificity = 1;
+	ButtonRule.SourceOrder = 1;
+	ButtonRule.Selector.AddDefaulted_GetRef().Type = TEXT("button");
+	AddDeclaration(ButtonRule, TEXT("width"), TEXT("100px"));
+	AddDeclaration(ButtonRule, TEXT("height"), TEXT("20px"));
+	AddDeclaration(ButtonRule, TEXT("background-color"), TEXT("transparent"));
+	AddDeclaration(ButtonRule, TEXT("background"), TEXT("blue"));
+
+	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
+	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
+	View->SetDocument(Document);
+	View->LayoutForTesting(FVector2f(320.0f, 180.0f));
+	FWebToUENode* RuntimeFirst = View->FindRuntimeNodeByIdForTesting(TEXT("first"));
+	FWebToUENode* RuntimeSecond = View->FindRuntimeNodeByIdForTesting(TEXT("second"));
+	TestNotNull(TEXT("The first cascade output node hydrates"), RuntimeFirst);
+	TestNotNull(TEXT("The second cascade output node hydrates"), RuntimeSecond);
+	if (!RuntimeFirst || !RuntimeSecond) return false;
+
+	const FWebToUERuntimeLayoutResult& FirstLayout =
+		View->GetLayoutResultForTesting(*RuntimeFirst);
+	const FWebToUERuntimeLayoutResult& SecondLayout =
+		View->GetLayoutResultForTesting(*RuntimeSecond);
+	TestTrue(TEXT("The final Yoga layout uses the later gap shorthand winner"),
+		FMath::IsNearlyEqual(SecondLayout.Position.Y - FirstLayout.Position.Y - FirstLayout.Size.Y,
+			18.0f, 0.1f));
+
+	const TArray<FLinearColor> Tints = PaintViewAndGetRoundedBoxTints(View);
+	TestTrue(TEXT("The later opaque background shorthand produces final Slate draw elements"),
+		!Tints.IsEmpty());
 	return true;
 }
 

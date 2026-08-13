@@ -496,17 +496,35 @@ namespace WebToUE::Private
 		}
 	}
 
-	void ApplyProperties(const TMap<EWebToUECssProperty, FWebToUEStyleValue>& Properties,
+	void ApplyCascadedProperty(EWebToUECssProperty PropertySlot,
+		EWebToUECssProperty SourceProperty, const FWebToUEStyleValue& Value,
 		FWebToUEComputedStyle& Style)
 	{
-		for (uint8 RawProperty = static_cast<uint8>(EWebToUECssProperty::Display);
-			RawProperty <= static_cast<uint8>(EWebToUECssProperty::ZIndex); ++RawProperty)
+		if (PropertySlot == SourceProperty)
 		{
-			const EWebToUECssProperty Property = static_cast<EWebToUECssProperty>(RawProperty);
-			if (const FWebToUEStyleValue* Value = Properties.Find(Property))
-			{
-				ApplyProperty(Property, *Value, Style);
-			}
+			ApplyProperty(PropertySlot, Value, Style);
+			return;
+		}
+
+		switch (PropertySlot)
+		{
+		case EWebToUECssProperty::MarginLeft: Style.Margin.Left = Value.Edges.Left; break;
+		case EWebToUECssProperty::MarginTop: Style.Margin.Top = Value.Edges.Top; break;
+		case EWebToUECssProperty::MarginRight: Style.Margin.Right = Value.Edges.Right; break;
+		case EWebToUECssProperty::MarginBottom: Style.Margin.Bottom = Value.Edges.Bottom; break;
+		case EWebToUECssProperty::PaddingLeft: Style.Padding.Left = Value.Edges.Left; break;
+		case EWebToUECssProperty::PaddingTop: Style.Padding.Top = Value.Edges.Top; break;
+		case EWebToUECssProperty::PaddingRight: Style.Padding.Right = Value.Edges.Right; break;
+		case EWebToUECssProperty::PaddingBottom: Style.Padding.Bottom = Value.Edges.Bottom; break;
+		case EWebToUECssProperty::RowGap: Style.RowGap = Value.Length.Value; break;
+		case EWebToUECssProperty::ColumnGap: Style.ColumnGap = Value.Length.Value; break;
+		case EWebToUECssProperty::FlexGrow: Style.FlexGrow = Value.Flex.Grow; break;
+		case EWebToUECssProperty::FlexShrink: Style.FlexShrink = Value.Flex.Shrink; break;
+		case EWebToUECssProperty::FlexBasis: Style.FlexBasis = Value.Flex.Basis; break;
+		case EWebToUECssProperty::BackgroundColor: Style.BackgroundColor = Value.Color; break;
+		case EWebToUECssProperty::BorderWidth: Style.BorderWidth = Value.Border.Width; break;
+		case EWebToUECssProperty::BorderColor: Style.BorderColor = Value.Border.Color; break;
+		default: checkNoEntry(); break;
 		}
 	}
 }

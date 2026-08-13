@@ -3,10 +3,114 @@
 #include "WebToUEPerformance.h"
 #include "WebToUEStyleProperties.h"
 
+#include "Containers/StaticArray.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 
 namespace WebToUE::Private
 {
+	static constexpr int32 CascadeSlotCount =
+		static_cast<int32>(EWebToUECssProperty::ZIndex) + 1;
+
+	struct FCascadePriority
+	{
+		int32 Specificity = 0;
+		int32 SourceOrder = 0;
+		int32 DeclarationOrder = 0;
+		bool bInline = false;
+
+		bool IsHigherThan(const FCascadePriority& Other) const
+		{
+			if (bInline != Other.bInline) return bInline;
+			if (Specificity != Other.Specificity) return Specificity > Other.Specificity;
+			if (SourceOrder != Other.SourceOrder) return SourceOrder > Other.SourceOrder;
+			return DeclarationOrder >= Other.DeclarationOrder;
+		}
+	};
+
+	struct FCascadeWinner
+	{
+		const FWebToUEStyleValue* Value = nullptr;
+		EWebToUECssProperty SourceProperty = EWebToUECssProperty::Invalid;
+		FCascadePriority Priority;
+	};
+
+	class FTypedCascade
+	{
+	public:
+		void Reset()
+		{
+			for (FCascadeWinner& Winner : Winners)
+			{
+				Winner.Value = nullptr;
+			}
+		}
+
+		void Submit(const FWebToUEStyleDeclaration& Declaration,
+			const FCascadePriority& Priority)
+		{
+			const auto SubmitSlot = [this, &Declaration, &Priority](EWebToUECssProperty Slot)
+			{
+				FCascadeWinner& Winner = Winners[static_cast<int32>(Slot)];
+				if (!Winner.Value || Priority.IsHigherThan(Winner.Priority))
+				{
+					Winner.Value = &Declaration.TypedValue;
+					Winner.SourceProperty = Declaration.Property;
+					Winner.Priority = Priority;
+				}
+			};
+
+			switch (Declaration.Property)
+			{
+			case EWebToUECssProperty::Margin:
+				SubmitSlot(EWebToUECssProperty::MarginLeft);
+				SubmitSlot(EWebToUECssProperty::MarginTop);
+				SubmitSlot(EWebToUECssProperty::MarginRight);
+				SubmitSlot(EWebToUECssProperty::MarginBottom);
+				break;
+			case EWebToUECssProperty::Padding:
+				SubmitSlot(EWebToUECssProperty::PaddingLeft);
+				SubmitSlot(EWebToUECssProperty::PaddingTop);
+				SubmitSlot(EWebToUECssProperty::PaddingRight);
+				SubmitSlot(EWebToUECssProperty::PaddingBottom);
+				break;
+			case EWebToUECssProperty::Gap:
+				SubmitSlot(EWebToUECssProperty::RowGap);
+				SubmitSlot(EWebToUECssProperty::ColumnGap);
+				break;
+			case EWebToUECssProperty::Flex:
+				if (Declaration.TypedValue.Flex.bHasGrow) SubmitSlot(EWebToUECssProperty::FlexGrow);
+				if (Declaration.TypedValue.Flex.bHasShrink) SubmitSlot(EWebToUECssProperty::FlexShrink);
+				if (Declaration.TypedValue.Flex.bHasBasis) SubmitSlot(EWebToUECssProperty::FlexBasis);
+				break;
+			case EWebToUECssProperty::Background:
+				SubmitSlot(EWebToUECssProperty::BackgroundColor);
+				break;
+			case EWebToUECssProperty::Border:
+				if (Declaration.TypedValue.Border.bHasWidth) SubmitSlot(EWebToUECssProperty::BorderWidth);
+				if (Declaration.TypedValue.Border.bHasColor) SubmitSlot(EWebToUECssProperty::BorderColor);
+				break;
+			default:
+				SubmitSlot(Declaration.Property);
+				break;
+			}
+		}
+
+		void Apply(FWebToUEComputedStyle& Style) const
+		{
+			for (int32 SlotIndex = static_cast<int32>(EWebToUECssProperty::Display);
+				SlotIndex < CascadeSlotCount; ++SlotIndex)
+			{
+				const FCascadeWinner& Winner = Winners[SlotIndex];
+				if (!Winner.Value) continue;
+				ApplyCascadedProperty(static_cast<EWebToUECssProperty>(SlotIndex),
+					Winner.SourceProperty, *Winner.Value, Style);
+			}
+		}
+
+	private:
+		TStaticArray<FCascadeWinner, CascadeSlotCount> Winners;
+	};
+
 	static bool SegmentMatches(const FWebToUESelectorSegment& Segment, const FWebToUENode& Node,
 		const FWebToUERuntimeNodeState& State)
 	{
@@ -21,7 +125,7 @@ namespace WebToUE::Private
 	}
 
 	static void ResolveNode(FWebToUENode& Node, FWebToUEDocument& Document,
-		const FWebToUEComputedStyle* ParentStyle)
+		const FWebToUEComputedStyle* ParentStyle, FTypedCascade& Cascade)
 	{
 		FWebToUERuntimeNodeState& RuntimeState = Document.GetRuntimeNodeState(Node);
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::StyleNodeVisits);
@@ -46,7 +150,7 @@ namespace WebToUE::Private
 			ApplyInheritedProperties(*ParentStyle, Style);
 		}
 
-		TArray<const FWebToUEStyleRule*> Matches;
+		Cascade.Reset();
 		const int32 CandidateCount = Document.ForEachSelectorCandidate(Node,
 			[&](const FWebToUEStyleRule& Rule)
 		{
@@ -54,34 +158,23 @@ namespace WebToUE::Private
 			if (FWebToUEStyleResolver::Matches(Rule, Node, Document))
 			{
 				FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::SelectorMatches);
-				if (Matches.Num() == Matches.Max())
+				for (int32 DeclarationOrder = 0;
+					DeclarationOrder < Rule.Declarations.Num(); ++DeclarationOrder)
 				{
-					FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
+					Cascade.Submit(Rule.Declarations[DeclarationOrder],
+						{ Rule.Specificity, Rule.SourceOrder, DeclarationOrder, false });
 				}
-				Matches.Add(&Rule);
 			}
 		});
 		FWebToUEPerformanceCapture::RecordCounter(
 			EWebToUEPerformanceCounter::SelectorCandidates, CandidateCount);
-		Matches.Sort([](const FWebToUEStyleRule& A, const FWebToUEStyleRule& B)
+		for (int32 DeclarationOrder = 0;
+			DeclarationOrder < Node.InlineStyleDeclarations.Num(); ++DeclarationOrder)
 		{
-			return A.Specificity == B.Specificity
-				? A.SourceOrder < B.SourceOrder
-				: A.Specificity < B.Specificity;
-		});
-		TMap<EWebToUECssProperty, FWebToUEStyleValue> Properties;
-		for (const FWebToUEStyleRule* Rule : Matches)
-		{
-			for (const FWebToUEStyleDeclaration& Declaration : Rule->Declarations)
-			{
-				Properties.Add(Declaration.Property, Declaration.TypedValue);
-			}
+			Cascade.Submit(Node.InlineStyleDeclarations[DeclarationOrder],
+				{ 0, 0, DeclarationOrder, true });
 		}
-		for (const FWebToUEStyleDeclaration& Declaration : Node.InlineStyleDeclarations)
-		{
-			Properties.Add(Declaration.Property, Declaration.TypedValue);
-		}
-		ApplyProperties(Properties, Style);
+		Cascade.Apply(Style);
 		Style.bVisible = Style.bVisible && RuntimeState.bRuntimeVisible;
 		Style.bEnabled = !Node.Attributes.Contains(TEXT("disabled")) && RuntimeState.bRuntimeEnabled;
 		if (!Style.bEnabled) RuntimeState.PseudoStates |= EWebToUEPseudoState::Disabled;
@@ -89,7 +182,7 @@ namespace WebToUE::Private
 		Document.GetComputedStyle(Node) = MoveTemp(Style);
 		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
 		{
-			ResolveNode(*Child, Document, &Document.GetComputedStyle(Node));
+			ResolveNode(*Child, Document, &Document.GetComputedStyle(Node), Cascade);
 		}
 	}
 }
@@ -127,6 +220,7 @@ void FWebToUEStyleResolver::Resolve(FWebToUEDocument& Document)
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Style);
 	if (Document.Root)
 	{
-		WebToUE::Private::ResolveNode(*Document.Root, Document, nullptr);
+		WebToUE::Private::FTypedCascade Cascade;
+		WebToUE::Private::ResolveNode(*Document.Root, Document, nullptr, Cascade);
 	}
 }

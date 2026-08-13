@@ -35,7 +35,8 @@ namespace WebToUE::Private
 	WEBTOUECORE_API const TCHAR* LexToString(EWebToUECssProperty Property);
 	WEBTOUECORE_API void ApplyInheritedProperties(
 		const FWebToUEComputedStyle& ParentStyle, FWebToUEComputedStyle& Style);
-	WEBTOUECORE_API void ApplyProperties(
-		const TMap<EWebToUECssProperty, FWebToUEStyleValue>& Properties,
+	WEBTOUECORE_API void ApplyCascadedProperty(
+		EWebToUECssProperty PropertySlot, EWebToUECssProperty SourceProperty,
+		const FWebToUEStyleValue& Value,
 		FWebToUEComputedStyle& Style);
 }

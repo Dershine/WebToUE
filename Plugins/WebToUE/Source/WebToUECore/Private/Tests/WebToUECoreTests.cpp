@@ -20,6 +20,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPropertyMetadataTest, "WebToUE.Core.Pro
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUESelectorIndexTest, "WebToUE.Core.SelectorIndex",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETypedCascadeTest, "WebToUE.Core.TypedCascade",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 bool FWebToUEHtmlCssTest::RunTest(const FString& Parameters)
 {
 	const FString Html = TEXT(R"(
@@ -97,6 +100,69 @@ bool FWebToUESelectorIndexTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Duplicate class tokens do not revisit the same class bucket"), CandidateCount, uint64(7));
 	TestEqual(TEXT("Every candidate is evaluated exactly once"),
 		Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), CandidateCount);
+	return true;
+}
+
+bool FWebToUETypedCascadeTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body>")
+		TEXT("<div id='components'></div>")
+		TEXT("<div id='specificity' class='specificity'></div>")
+		TEXT("<div id='source-order' class='source-order'></div>")
+		TEXT("<div id='inline' class='inline' style='margin-left: 31px; margin: 32px; color: invalid; color: blue'></div>")
+		TEXT("</body>"),
+		TEXT("#components { ")
+		TEXT("margin-left: 1px; margin: 2px; padding-left: 3px; padding: 4px; ")
+		TEXT("row-gap: 5px; gap: 6px; flex-grow: 7; flex: 8 9 10px; ")
+		TEXT("background-color: red; background: green; ")
+		TEXT("border-width: 11px; border-color: red; border: 12px solid blue; }")
+		TEXT("#specificity { margin: 21px; } .specificity { margin-left: 22px; }")
+		TEXT(".source-order { padding: 23px; } .source-order { padding-left: 24px; }")
+		TEXT(".inline { margin-left: 30px; color: red; }"),
+		TEXT("TypedCascade.html"));
+	TestFalse(TEXT("The typed-cascade document compiles without errors"), Document->HasErrors());
+
+	TMap<FString, FWebToUENode*> Nodes;
+	Document->ForEachNode([&Nodes](FWebToUENode& Node)
+	{
+		const FString Id = Node.GetAttribute(TEXT("id"));
+		if (!Id.IsEmpty()) Nodes.Add(Id, &Node);
+	});
+	FWebToUENode* Components = Nodes.FindRef(TEXT("components"));
+	FWebToUENode* Specificity = Nodes.FindRef(TEXT("specificity"));
+	FWebToUENode* SourceOrder = Nodes.FindRef(TEXT("source-order"));
+	FWebToUENode* Inline = Nodes.FindRef(TEXT("inline"));
+	TestNotNull(TEXT("The shorthand component target exists"), Components);
+	TestNotNull(TEXT("The specificity target exists"), Specificity);
+	TestNotNull(TEXT("The source-order target exists"), SourceOrder);
+	TestNotNull(TEXT("The inline target exists"), Inline);
+	if (!Components || !Specificity || !SourceOrder || !Inline) return false;
+
+	const FWebToUEComputedStyle& ComponentStyle = Document->GetComputedStyle(*Components);
+	TestEqual(TEXT("A later margin shorthand wins the left component"),
+		ComponentStyle.Margin.Left.Value, 2.0f);
+	TestEqual(TEXT("A later padding shorthand wins the left component"),
+		ComponentStyle.Padding.Left.Value, 4.0f);
+	TestEqual(TEXT("A later gap shorthand wins the row component"), ComponentStyle.RowGap, 6.0f);
+	TestEqual(TEXT("A later flex shorthand wins the grow component"), ComponentStyle.FlexGrow, 8.0f);
+	TestEqual(TEXT("The flex shorthand supplies shrink"), ComponentStyle.FlexShrink, 9.0f);
+	TestEqual(TEXT("The flex shorthand supplies basis"), ComponentStyle.FlexBasis.Value, 10.0f);
+	TestEqual(TEXT("A later background shorthand wins its color component"),
+		ComponentStyle.BackgroundColor, FLinearColor::Green);
+	TestEqual(TEXT("A later border shorthand wins its width component"),
+		ComponentStyle.BorderWidth, 12.0f);
+	TestEqual(TEXT("A later border shorthand wins its color component"),
+		ComponentStyle.BorderColor, FLinearColor::Blue);
+
+	TestEqual(TEXT("Higher specificity shorthand beats lower specificity longhand"),
+		Document->GetComputedStyle(*Specificity).Margin.Left.Value, 21.0f);
+	TestEqual(TEXT("Later source order longhand beats an earlier shorthand"),
+		Document->GetComputedStyle(*SourceOrder).Padding.Left.Value, 24.0f);
+	TestEqual(TEXT("Inline shorthand beats stylesheet longhand"),
+		Document->GetComputedStyle(*Inline).Margin.Left.Value, 32.0f);
+	TestEqual(TEXT("The last valid inline declaration wins after an invalid declaration"),
+		Document->GetComputedStyle(*Inline).Color, FLinearColor::Blue);
 	return true;
 }
 
