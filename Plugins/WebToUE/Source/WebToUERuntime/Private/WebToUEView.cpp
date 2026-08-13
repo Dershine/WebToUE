@@ -87,6 +87,23 @@ bool UWebToUEView::GetRuntimeMemoryCensusForTesting(
 {
 	return SlateView && SlateView->GetRuntimeMemoryCensusForTesting(OutCensus);
 }
+
+FWebToUENode* UWebToUEView::FindRuntimeNodeByIdForTesting(const FString& Id) const
+{
+	return SlateView ? SlateView->FindRuntimeNodeByIdForTesting(Id) : nullptr;
+}
+
+FWebToUEInstanceHandle UWebToUEView::GetInstanceHandleForTesting(
+	const FWebToUENode& Node) const
+{
+	return SlateView ? SlateView->GetInstanceHandleForTesting(Node) : FWebToUEInstanceHandle();
+}
+
+FWebToUENode* UWebToUEView::ResolveInstanceHandleForTesting(
+	FWebToUEInstanceHandle Handle) const
+{
+	return SlateView ? SlateView->ResolveInstanceHandleForTesting(Handle) : nullptr;
+}
 #endif
 
 void UWebToUEView::BindFieldNotifications()

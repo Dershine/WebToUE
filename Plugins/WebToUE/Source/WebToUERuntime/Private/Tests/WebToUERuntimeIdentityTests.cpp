@@ -3,7 +3,9 @@
 #include "Misc/AutomationTest.h"
 #include "SWebToUEView.h"
 #include "WebToUEDocument.h"
+#include "WebToUEView.h"
 
+#include "Misc/ScopeExit.h"
 #include "UObject/Package.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUERuntimeIdentityTest,
@@ -179,6 +181,51 @@ bool FWebToUERuntimeIdentityTest::RunTest(const FString& Parameters)
 	ReplacementView->SetDocument(Document);
 	TestNull(TEXT("A destroyed View's handle cannot resolve in a replacement View"),
 		ReplacementView->ResolveInstanceHandleForTesting(DestroyedViewHandle));
+
+	UWebToUEView* HostedView = NewObject<UWebToUEView>(GetTransientPackage());
+	HostedView->AddToRoot();
+	TSharedPtr<SWidget> HostedWidget;
+	ON_SCOPE_EXIT
+	{
+		HostedWidget.Reset();
+		HostedView->ReleaseSlateResources(true);
+		HostedView->RemoveFromRoot();
+	};
+	HostedView->SetDocument(Document);
+	HostedWidget = HostedView->TakeWidget();
+	FWebToUENode* HostedButton = HostedView->FindRuntimeNodeByIdForTesting(TEXT("target"));
+	TestNotNull(TEXT("The UWidget-hosted View hydrates before reimport"), HostedButton);
+	if (!HostedButton)
+	{
+		return false;
+	}
+	const FWebToUEInstanceHandle PreReimportHandle =
+		HostedView->GetInstanceHandleForTesting(*HostedButton);
+
+	FWebToUECompiledDocumentData ReimportedDocument;
+	ReimportedDocument.RootNodeIndex = 0;
+	ReimportedDocument.Nodes = Document->GetCompiledNodes();
+	ReimportedDocument.Rules = Document->GetCompiledRules();
+	FWebToUECompiledNode& ReimportedNode = ReimportedDocument.Nodes.AddDefaulted_GetRef();
+	ReimportedNode.Type = static_cast<uint8>(EWebToUENodeType::Text);
+	ReimportedNode.Tag = TEXT("#text");
+	ReimportedNode.Text = TEXT("Reimport revision");
+	ReimportedNode.LocalizedText = FText::FromString(ReimportedNode.Text);
+	ReimportedNode.ParentIndex = 0;
+	Document->CommitCompiledDocument(MoveTemp(ReimportedDocument));
+	Document->NotifyDocumentChanged();
+
+	FWebToUENode* ReimportedButton =
+		HostedView->FindRuntimeNodeByIdForTesting(TEXT("target"));
+	TestNotNull(TEXT("The document-changed delegate rehydrates the hosted View"), ReimportedButton);
+	TestNull(TEXT("A pre-reimport Handle cannot resolve after automatic View refresh"),
+		HostedView->ResolveInstanceHandleForTesting(PreReimportHandle));
+	if (ReimportedButton)
+	{
+		TestNotEqual(TEXT("Automatic reimport refresh advances the Instance generation"),
+			HostedView->GetInstanceHandleForTesting(*ReimportedButton).GetGeneration(),
+			PreReimportHandle.GetGeneration());
+	}
 
 	return true;
 }

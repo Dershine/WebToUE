@@ -57,7 +57,8 @@ namespace WebToUE::Private
 
 	struct FYogaMeasureContext
 	{
-		const FWebToUENode* WebNode = nullptr;
+		const FWebToUEDocument* Document = nullptr;
+		FWebToUEInstanceHandle NodeHandle;
 		const FWebToUELayoutEngine::FMeasureNode* MeasureNode = nullptr;
 	};
 
@@ -78,11 +79,13 @@ namespace WebToUE::Private
 		TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Measure);
 		FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Measure);
 		const FYogaMeasureContext* Context = static_cast<const FYogaMeasureContext*>(YGNodeGetContext(Node));
-		if (!Context || !Context->WebNode || !Context->MeasureNode) return { 0.0f, 0.0f };
+		if (!Context || !Context->Document || !Context->MeasureNode) return { 0.0f, 0.0f };
+		const FWebToUENode* WebNode = Context->Document->ResolveNode(Context->NodeHandle);
+		if (!WebNode) return { 0.0f, 0.0f };
 		const FWebToUELayoutEngine::FMeasureConstraints Constraints = {
 			Width, Height, ToMeasureMode(WidthMode), ToMeasureMode(HeightMode)
 		};
-		FVector2f Measured = (*Context->MeasureNode)(*Context->WebNode, Constraints);
+		FVector2f Measured = (*Context->MeasureNode)(*WebNode, Constraints);
 		if (WidthMode == YGMeasureModeExactly) Measured.X = Width;
 		else if (WidthMode == YGMeasureModeAtMost) Measured.X = FMath::Min(Measured.X, Width);
 		if (HeightMode == YGMeasureModeExactly) Measured.Y = Height;
@@ -147,7 +150,8 @@ namespace WebToUE::Private
 			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 			TUniquePtr<FYogaMeasureContext>& Context =
 				MeasureContexts.Add_GetRef(MakeUnique<FYogaMeasureContext>());
-			Context->WebNode = &WebNode;
+			Context->Document = &Document;
+			Context->NodeHandle = WebNode.InstanceHandle;
 			Context->MeasureNode = &MeasureNode;
 			YGNodeSetContext(Node, Context.Get());
 			YGNodeSetMeasureFunc(Node, MeasureYogaNode);

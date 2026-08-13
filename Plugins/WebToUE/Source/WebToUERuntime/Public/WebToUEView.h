@@ -3,10 +3,12 @@
 #include "CoreMinimal.h"
 #include "Components/Widget.h"
 #include "INotifyFieldValueChanged.h"
+#include "WebToUEIdentity.h"
 #include "WebToUEView.generated.h"
 
 class SWebToUEView;
 class UWebToUEDocument;
+struct FWebToUENode;
 
 #if WITH_DEV_AUTOMATION_TESTS
 struct FWebToUERuntimeMemoryCensus
@@ -60,6 +62,9 @@ public:
 #if WITH_DEV_AUTOMATION_TESTS
 	void LayoutForTesting(const FVector2f& ViewportSize);
 	bool GetRuntimeMemoryCensusForTesting(FWebToUERuntimeMemoryCensus& OutCensus) const;
+	FWebToUENode* FindRuntimeNodeByIdForTesting(const FString& Id) const;
+	FWebToUEInstanceHandle GetInstanceHandleForTesting(const FWebToUENode& Node) const;
+	FWebToUENode* ResolveInstanceHandleForTesting(FWebToUEInstanceHandle Handle) const;
 #endif
 
 #if WITH_EDITOR
