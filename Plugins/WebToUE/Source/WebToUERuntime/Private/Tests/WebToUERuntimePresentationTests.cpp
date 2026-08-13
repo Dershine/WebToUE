@@ -503,6 +503,8 @@ bool FWebToUEPaintOnlyPseudoResourceSafetyTest::RunTest(const FString& Parameter
 		HoverSnapshot.GetCounter(EWebToUEPerformanceCounter::PaintOrderCacheBuilds), uint64(0));
 	TestEqual(TEXT("Opacity-only pseudo does not rebuild a brush"),
 		HoverSnapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(0));
+	TestEqual(TEXT("Opacity-only pseudo performs no resource load attempt"),
+		HoverSnapshot.GetCounter(EWebToUEPerformanceCounter::ResourceLoadAttempts), uint64(0));
 
 	const TArray<FLinearColor> HoverTints = PaintViewAndGetRoundedBoxTints(View);
 	TestTrue(TEXT("Final Slate output carries the hovered opacity into a draw element"),

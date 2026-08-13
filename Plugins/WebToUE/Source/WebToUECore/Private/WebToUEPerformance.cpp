@@ -52,7 +52,8 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.paint_order_cache_builds"),
 		TEXT("workload.binding_fields_read"),
 		TEXT("workload.binding_ops_executed"),
-		TEXT("workload.binding_nodes_updated")
+		TEXT("workload.binding_nodes_updated"),
+		TEXT("workload.resource_load_attempts")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -253,6 +254,7 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::BindingFieldsRead: return TEXT("binding_fields_read");
 	case EWebToUEPerformanceCounter::BindingOpsExecuted: return TEXT("binding_ops_executed");
 	case EWebToUEPerformanceCounter::BindingNodesUpdated: return TEXT("binding_nodes_updated");
+	case EWebToUEPerformanceCounter::ResourceLoadAttempts: return TEXT("resource_load_attempts");
 	default: return TEXT("unknown");
 	}
 }

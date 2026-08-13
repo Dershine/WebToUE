@@ -531,6 +531,8 @@ void FWebToUERuntimePresentation::RebuildBrush(FWebToUENode& Node,
 	{
 		if (!bReloadResource) return;
 		const FString Source = Node.GetAttribute(TEXT("src"));
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::ResourceLoadAttempts);
 #if WITH_DEV_AUTOMATION_TESTS
 		++ResourceLoadAttemptsForTesting;
 #endif

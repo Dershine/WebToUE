@@ -215,6 +215,8 @@ bool FWebToUERuntimeHoverBenchmarkTest::RunTest(const FString& Parameters)
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TextCacheInvalidations), uint64(0));
 		TestEqual(*(Prefix + TEXT("does not rebuild paint order")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::PaintOrderCacheBuilds), uint64(0));
+		TestEqual(*(Prefix + TEXT("performs no resource load attempt")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::ResourceLoadAttempts), uint64(0));
 		TestTrue(*(Prefix + TEXT("records a positive end-to-end duration")),
 			Sample.InclusiveMilliseconds > 0.0);
 
@@ -460,6 +462,8 @@ bool FWebToUERuntimeFieldNotifyBenchmarkTest::RunTest(const FString& Parameters)
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(0));
 		TestEqual(*(Prefix + TEXT("does not rebuild paint order")),
 			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::PaintOrderCacheBuilds), uint64(0));
+		TestEqual(*(Prefix + TEXT("performs no resource load attempt")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::ResourceLoadAttempts), uint64(0));
 		TestTrue(*(Prefix + TEXT("records a positive end-to-end duration")),
 			Sample.InclusiveMilliseconds > 0.0);
 
