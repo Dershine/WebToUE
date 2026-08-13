@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-13，当前 HEAD + working tree。
+> 当前基线：2026-08-13，M2.5 closure。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -75,13 +75,15 @@ Flex：
 | `data-ue-bind-text="Property"` | 根 UObject 属性转文本 |
 | `data-ue-bind-visible="BoolProperty"` | 控制可见性 |
 | `data-ue-bind-enabled="BoolProperty"` | 控制可用状态和 `:disabled` |
-| FieldNotify | 订阅实际使用字段并触发刷新；尚未局部更新节点 |
+| FieldNotify | 订阅实际使用的根字段；编译 Root Field→Binding Op→Runtime Instance Handle 直接索引，单字段只读取一次并更新直接依赖节点 |
+
+当前绑定只支持根 UObject 属性；嵌套路径、Converter 和双向绑定仍属 M3。文本绑定以 Instance Handle 保留节点级 Text Layout Cache；Cache Key 覆盖显示文本、RichText 模式、字体、颜色/文本样式、当前 Culture 和换行约束。文本值变化只重算目标文本；Desired Size 相同仅重绘，变化时记录目标 Measure 与文本到根的 Layout 依赖路径。`visible` 只产生 Paint/HitTest 影响；`enabled` 在同一 FieldNotify 刷新内先更新 Disabled Pseudo State，再匹配 `:disabled` 及其编译依赖目标。
 
 事件：`data-ue-on-click="EventName"` 广播 `EventName` 和 `ElementId`。
 
 输入：鼠标移动/点击/滚轮、Tab/Shift+Tab、Enter/Space。尚无触摸、手柄、IME 和可访问性导航。
 
-图片：`src` 使用 Unreal 软对象路径，例如 `/Game/UI/T_Logo.T_Logo`；不支持磁盘图片和 HTTP 下载。仅影响 Paint 的 Pseudo State 变化按 old/new 属性差异只更新受影响目标：保留已加载图片、无关 Brush、Text Cache 与 Paint Order，且不进入 Measure/Yoga；背景变化可重建该目标 Brush。Resource 影响、绑定或完整文档刷新仍可能同步加载，Resource Manifest 与完整 Resource Cache 属于 M2.6。
+图片：`src` 使用 Unreal 软对象路径，例如 `/Game/UI/T_Logo.T_Logo`；不支持磁盘图片和 HTTP 下载。仅影响 Paint 的 Pseudo State 变化按 old/new 属性差异只更新受影响目标：保留已加载图片、无关 Brush、Text Cache 与 Paint Order，且不进入 Measure/Yoga；背景变化可重建该目标 Brush。根字段 text/visible/enabled 绑定不会进入资源加载；Resource 影响或完整文档刷新仍可能同步加载，Resource Manifest 与完整 Resource Cache 属于 M2.6。
 
 ## 4. 诊断与资产行为
 
@@ -95,7 +97,7 @@ Flex：
 
 第一次导入错误不会产生有效运行数据；已有资产重导入失败（包括 UI Source 缺失）保留上次成功运行数据并更新诊断。
 
-WTUE Document 使用自定义版本 GUID，当前版本 `TypedStyleDeclarations`（4）包含初始 Compiled Document、本地化富文本、有序声明和类型化样式声明演进。已加载旧资产会请求源文件重编译；版本 3 声明在无法立刻重编译时可于 Hydration 一次性解析兼容 payload，版本 4 writer 不再写入旧 Name/Value 字符串。全局未加载资产扫描和完整字段级迁移仍属于 M6。
+WTUE Document 使用自定义版本 GUID，当前版本 `CompiledBindingOps`（5）包含初始 Compiled Document、本地化富文本、有序声明、类型化样式声明和根字段 Binding Op 演进。已加载旧资产会请求源文件重编译；版本 3 声明在无法立刻重编译时可于 Hydration 一次性解析兼容 payload，版本 4/5 writer 不再写入旧 Name/Value 字符串。项目内 MainMenu/HUD 已从保留的 UI Source 重编译为版本 5；全局未加载资产扫描和完整字段级迁移仍属于 M6。
 
 ## 5. 明确尚未支持
 
