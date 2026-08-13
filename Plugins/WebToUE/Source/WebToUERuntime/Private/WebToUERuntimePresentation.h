@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "WebToUECompiler.h"
+#include "WebToUEDocument.h"
 
 #include "UObject/StrongObjectPtr.h"
 
@@ -9,6 +10,7 @@ class FPaintArgs;
 class FSlateStyleSet;
 class FSlateTextBlockLayout;
 class FSlateWindowElementList;
+struct FStreamableHandle;
 class FWidgetStyle;
 class SWebToUEView;
 struct FSlateBrush;
@@ -79,6 +81,13 @@ public:
 	int32 GetBrushCacheCountForTesting() const { return Brushes.Num(); }
 	const void* GetBrushIdentityForTesting(const FWebToUENode& Node) const;
 	uint64 GetResourceLoadAttemptsForTesting() const { return ResourceLoadAttemptsForTesting; }
+	uint64 GetResourceAsyncRequestsForTesting() const { return ResourceAsyncRequestsForTesting; }
+	uint64 GetResourceFailuresForTesting() const { return ResourceFailuresForTesting; }
+	uint64 GetResourceCancellationsForTesting() const { return ResourceCancellationsForTesting; }
+	int32 FindResourceHandleForTesting(EWebToUEResourceKind Kind,
+		const FSoftObjectPath& Path) const;
+	const UObject* GetResourceObjectForTesting(int32 Handle) const;
+	bool FinalizeResourcesForTesting() const { return FinalizeResourcePreload(); }
 	const void* GetTextLayoutCacheIdentityForTesting(const FWebToUENode& Node) const;
 	bool IsLayoutDirtyForTesting() const { return bLayoutDirty; }
 	bool IsMeasureDirtyForTesting(const FWebToUENode& Node) const;
@@ -98,11 +107,15 @@ private:
 	mutable TMap<FWebToUEInstanceHandle, TUniquePtr<FWebToUETextLayoutCache>> TextLayouts;
 	mutable TSet<FWebToUEInstanceHandle> MeasureDirtyNodes;
 	mutable TSet<FWebToUEInstanceHandle> LayoutDirtyNodes;
-	mutable TArray<TStrongObjectPtr<UObject>> LoadedResources;
+	mutable TArray<TStrongObjectPtr<UObject>> ResolvedResources;
+	mutable TSharedPtr<FStreamableHandle> PendingResourceRequest;
 	TArray<FWebToUEInstanceHandle> PaintOrderNodes;
 	TMap<FWebToUEInstanceHandle, FWebToUEPaintOrderRange> PaintOrderRanges;
 #if WITH_DEV_AUTOMATION_TESTS
 	mutable uint64 ResourceLoadAttemptsForTesting = 0;
+	mutable uint64 ResourceAsyncRequestsForTesting = 0;
+	mutable uint64 ResourceFailuresForTesting = 0;
+	mutable uint64 ResourceCancellationsForTesting = 0;
 #endif
 
 	FWebToUEDocument* GetDocument();
@@ -123,11 +136,17 @@ private:
 		const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
 	FVector2f MeasureNodeWithStyle(const FWebToUENode& Node, const FWebToUEComputedStyle& Style,
 		const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
+	void BeginResourcePreload() const;
+	void CancelResourcePreload() const;
+	bool FinalizeResourcePreload() const;
+	int32 FindResourceHandle(EWebToUEResourceKind Kind, const FSoftObjectPath& Path) const;
+	UObject* GetResolvedResource(EWebToUEResourceKind Kind, const FSoftObjectPath& Path) const;
+	UObject* GetResolvedFont(const FString& Family) const;
 	int32 PaintNode(const FWebToUEDocument& RuntimeDocument, const FWebToUENode& Node,
 		const FPaintArgs& Args, const FGeometry& Geometry, const FSlateRect& CullingRect,
 		FSlateWindowElementList& Out, int32 LayerId, const FWidgetStyle& WidgetStyle,
 		float ParentOpacity, bool bParentEnabled, const FVector2f& InheritedScrollOffset) const;
 	void RebuildBrushes(bool bReloadResources) const;
-	void RebuildBrush(FWebToUENode& Node, bool bReloadResource) const;
+	void RebuildBrush(FWebToUENode& Node) const;
 	void RebuildPaintOrderCache();
 };

@@ -30,5 +30,6 @@ public:
 	TArray<FWebToUEFontFamily> FontFamilies;
 
 	FSoftObjectPath FindFontObjectPath(const FString& Family) const;
-	FSlateFontInfo ResolveFont(const FString& Family, float Size, const FString& Weight) const;
+	FSlateFontInfo ResolveFont(const FString& Family, float Size, const FString& Weight,
+		UObject* ResolvedFontObject = nullptr) const;
 };

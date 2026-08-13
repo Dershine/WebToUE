@@ -278,6 +278,37 @@ uint64 SWebToUEView::GetPresentationResourceLoadAttemptsForTesting() const
 	return Presentation->GetResourceLoadAttemptsForTesting();
 }
 
+uint64 SWebToUEView::GetPresentationResourceAsyncRequestsForTesting() const
+{
+	return Presentation->GetResourceAsyncRequestsForTesting();
+}
+
+uint64 SWebToUEView::GetPresentationResourceFailuresForTesting() const
+{
+	return Presentation->GetResourceFailuresForTesting();
+}
+
+uint64 SWebToUEView::GetPresentationResourceCancellationsForTesting() const
+{
+	return Presentation->GetResourceCancellationsForTesting();
+}
+
+int32 SWebToUEView::FindPresentationResourceHandleForTesting(
+	EWebToUEResourceKind Kind, const FSoftObjectPath& Path) const
+{
+	return Presentation->FindResourceHandleForTesting(Kind, Path);
+}
+
+const UObject* SWebToUEView::GetPresentationResourceObjectForTesting(int32 Handle) const
+{
+	return Presentation->GetResourceObjectForTesting(Handle);
+}
+
+bool SWebToUEView::FinalizePresentationResourcesForTesting() const
+{
+	return Presentation->FinalizeResourcesForTesting();
+}
+
 const void* SWebToUEView::GetPresentationTextCacheIdentityForTesting(
 	const FWebToUENode& Node) const
 {

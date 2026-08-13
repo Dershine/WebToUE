@@ -8,6 +8,7 @@
 #include "WebToUEStyleProperties.h"
 
 #include "Input/HittestGrid.h"
+#include "Engine/Texture2D.h"
 #include "Internationalization/Culture.h"
 #include "Internationalization/Internationalization.h"
 #include "Misc/ScopeExit.h"
@@ -452,6 +453,8 @@ bool FWebToUEPaintOnlyPseudoResourceSafetyTest::RunTest(const FString& Parameter
 	AddAttribute(Image, TEXT("id"), TEXT("unrelated-image"));
 	AddAttribute(Image, TEXT("src"),
 		TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
+	CompiledDocument.ResourceManifest.Add({ EWebToUEResourceKind::Texture,
+		FSoftObjectPath(TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture")) });
 
 	FWebToUECompiledRule& ButtonRule = CompiledDocument.Rules.AddDefaulted_GetRef();
 	ButtonRule.Specificity = 1;
@@ -467,6 +470,9 @@ bool FWebToUEPaintOnlyPseudoResourceSafetyTest::RunTest(const FString& Parameter
 	AddDeclaration(HoverRule, TEXT("opacity"), TEXT("0.25"));
 
 	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
+	TestNotNull(TEXT("The test texture is resident before runtime presentation"),
+		LoadObject<UTexture2D>(nullptr,
+			TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture")));
 	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
 	View->SetDocument(Document);
 	FWebToUENode* RuntimeButton = View->FindRuntimeNodeByIdForTesting(TEXT("paint-target"));
@@ -483,8 +489,8 @@ bool FWebToUEPaintOnlyPseudoResourceSafetyTest::RunTest(const FString& Parameter
 		}));
 	const void* InitialImageBrush = View->GetPresentationBrushIdentityForTesting(*RuntimeImage);
 	TestNotNull(TEXT("The unrelated image has a materialized brush"), InitialImageBrush);
-	TestEqual(TEXT("Initial cache construction attempts the image resource once"),
-		View->GetPresentationResourceLoadAttemptsForTesting(), uint64(1));
+	TestEqual(TEXT("Initial cache construction performs no synchronous resource load"),
+		View->GetPresentationResourceLoadAttemptsForTesting(), uint64(0));
 
 	const void* InitialButtonBrush = View->GetPresentationBrushIdentityForTesting(*RuntimeButton);
 	FWebToUEPerformanceSnapshot HoverSnapshot;
@@ -496,7 +502,7 @@ bool FWebToUEPaintOnlyPseudoResourceSafetyTest::RunTest(const FString& Parameter
 	TestEqual(TEXT("The paint-only pseudo updates computed opacity"),
 		View->GetComputedStyleForTesting(*RuntimeButton).Opacity, 0.25f);
 	TestEqual(TEXT("Paint-only pseudo does not re-enter synchronous image loading"),
-		View->GetPresentationResourceLoadAttemptsForTesting(), uint64(1));
+		View->GetPresentationResourceLoadAttemptsForTesting(), uint64(0));
 	TestEqual(TEXT("Paint-only pseudo preserves the unrelated image brush identity"),
 		View->GetPresentationBrushIdentityForTesting(*RuntimeImage), InitialImageBrush);
 	TestEqual(TEXT("Opacity-only pseudo preserves the affected element brush identity"),

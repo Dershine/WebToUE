@@ -73,6 +73,13 @@ public:
 	int32 GetPresentationBrushCacheCountForTesting() const;
 	const void* GetPresentationBrushIdentityForTesting(const FWebToUENode& Node) const;
 	uint64 GetPresentationResourceLoadAttemptsForTesting() const;
+	uint64 GetPresentationResourceAsyncRequestsForTesting() const;
+	uint64 GetPresentationResourceFailuresForTesting() const;
+	uint64 GetPresentationResourceCancellationsForTesting() const;
+	int32 FindPresentationResourceHandleForTesting(EWebToUEResourceKind Kind,
+		const FSoftObjectPath& Path) const;
+	const UObject* GetPresentationResourceObjectForTesting(int32 Handle) const;
+	bool FinalizePresentationResourcesForTesting() const;
 	const void* GetPresentationTextCacheIdentityForTesting(const FWebToUENode& Node) const;
 	bool IsPresentationLayoutDirtyForTesting() const;
 	const FString& GetLastPseudoInvalidationReportForTesting() const

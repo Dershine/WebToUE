@@ -37,6 +37,10 @@ public:
 		return BindingOpsByField;
 	}
 	TConstArrayView<FWebToUERuntimeBindingOp> GetBindingOps(FName RootField) const;
+	TConstArrayView<FWebToUECompiledResource> GetResourceManifest() const
+	{
+		return ResourceManifest;
+	}
 	FWebToUELayoutEngine& GetLayoutEngine() { return *LayoutEngine; }
 
 	FWebToUENode* GetHoveredNode() const { return const_cast<FWebToUENode*>(ResolveNode(HoveredNode)); }
@@ -62,5 +66,6 @@ private:
 	FWebToUEInstanceHandle PressedNode;
 	FWebToUEInstanceHandle FocusedNode;
 	TMap<FName, TArray<FWebToUERuntimeBindingOp>> BindingOpsByField;
+	TArray<FWebToUECompiledResource> ResourceManifest;
 	TUniquePtr<FWebToUELayoutEngine> LayoutEngine;
 };

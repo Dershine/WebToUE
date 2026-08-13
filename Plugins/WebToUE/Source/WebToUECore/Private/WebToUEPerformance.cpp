@@ -56,7 +56,13 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.resource_load_attempts"),
 		TEXT("workload.yoga_style_writes"),
 		TEXT("workload.yoga_nodes_dirtied"),
-		TEXT("workload.yoga_layout_results_changed")
+		TEXT("workload.yoga_layout_results_changed"),
+		TEXT("workload.resource_manifest_entries"),
+		TEXT("workload.resource_async_requests"),
+		TEXT("workload.resource_cache_hits"),
+		TEXT("workload.resource_failures"),
+		TEXT("workload.resource_cancellations"),
+		TEXT("workload.resource_known_owned_bytes")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -261,6 +267,12 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::YogaStyleWrites: return TEXT("yoga_style_writes");
 	case EWebToUEPerformanceCounter::YogaNodesDirtied: return TEXT("yoga_nodes_dirtied");
 	case EWebToUEPerformanceCounter::YogaLayoutResultsChanged: return TEXT("yoga_layout_results_changed");
+	case EWebToUEPerformanceCounter::ResourceManifestEntries: return TEXT("resource_manifest_entries");
+	case EWebToUEPerformanceCounter::ResourceAsyncRequests: return TEXT("resource_async_requests");
+	case EWebToUEPerformanceCounter::ResourceCacheHits: return TEXT("resource_cache_hits");
+	case EWebToUEPerformanceCounter::ResourceFailures: return TEXT("resource_failures");
+	case EWebToUEPerformanceCounter::ResourceCancellations: return TEXT("resource_cancellations");
+	case EWebToUEPerformanceCounter::ResourceKnownOwnedBytes: return TEXT("resource_known_owned_bytes");
 	default: return TEXT("unknown");
 	}
 }

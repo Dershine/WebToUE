@@ -7,12 +7,17 @@
 
 #include "Algo/StableSort.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
+#include "Engine/AssetManager.h"
+#include "Engine/Font.h"
+#include "Engine/FontFace.h"
+#include "Engine/StreamableManager.h"
 #include "Engine/Texture2D.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Text/PlainTextLayoutMarshaller.h"
 #include "Framework/Text/RichTextLayoutMarshaller.h"
 #include "Internationalization/Culture.h"
 #include "Internationalization/Internationalization.h"
+#include "Internationalization/StringTable.h"
 #include "Layout/Clipping.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Rendering/DrawElements.h"
@@ -30,22 +35,24 @@ namespace WebToUE::Runtime::Presentation::Private
 		return ETextJustify::Left;
 	}
 
-	static FTextBlockStyle MakeTextBlockStyle(const FWebToUEComputedStyle& ComputedStyle)
+	static FTextBlockStyle MakeTextBlockStyle(const FWebToUEComputedStyle& ComputedStyle,
+		UObject* ResolvedFontObject)
 	{
 		const UWebToUESettings* Settings = GetDefault<UWebToUESettings>();
 		FTextBlockStyle Style = FTextBlockStyle::GetDefault();
 		Style.SetFont(Settings->ResolveFont(
-			ComputedStyle.FontFamily, ComputedStyle.FontSize, ComputedStyle.FontWeight));
+			ComputedStyle.FontFamily, ComputedStyle.FontSize, ComputedStyle.FontWeight,
+			ResolvedFontObject));
 		Style.SetColorAndOpacity(ComputedStyle.Color);
 		return Style;
 	}
 
 	static TSharedRef<FSlateStyleSet> MakeRichTextStyleSet(
-		const FWebToUEComputedStyle& ComputedStyle)
+		const FWebToUEComputedStyle& ComputedStyle, UObject* ResolvedFontObject)
 	{
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 		TSharedRef<FSlateStyleSet> StyleSet = MakeShared<FSlateStyleSet>(TEXT("WebToUERichText"));
-		const FTextBlockStyle BaseStyle = MakeTextBlockStyle(ComputedStyle);
+		const FTextBlockStyle BaseStyle = MakeTextBlockStyle(ComputedStyle, ResolvedFontObject);
 		const UWebToUESettings* Settings = GetDefault<UWebToUESettings>();
 		const auto AddStyle = [&](const FName Name, bool bBold, bool bItalic, bool bUnderline)
 		{
@@ -53,7 +60,7 @@ namespace WebToUE::Runtime::Presentation::Private
 			if (bBold || bItalic)
 			{
 				Style.SetFont(Settings->ResolveFont(ComputedStyle.FontFamily, ComputedStyle.FontSize,
-					bBold ? TEXT("bold") : ComputedStyle.FontWeight));
+					bBold ? TEXT("bold") : ComputedStyle.FontWeight, ResolvedFontObject));
 				if (bItalic) Style.SetTypefaceFontName(bBold ? TEXT("BoldItalic") : TEXT("Italic"));
 			}
 			if (bUnderline)
@@ -80,7 +87,10 @@ FWebToUERuntimePresentation::FWebToUERuntimePresentation(SWebToUEView& InOwnerWi
 {
 }
 
-FWebToUERuntimePresentation::~FWebToUERuntimePresentation() = default;
+FWebToUERuntimePresentation::~FWebToUERuntimePresentation()
+{
+	CancelResourcePreload();
+}
 
 FWebToUEDocument* FWebToUERuntimePresentation::GetDocument()
 {
@@ -141,12 +151,16 @@ void FWebToUERuntimePresentation::Reset()
 	TextLayouts.Reset();
 	MeasureDirtyNodes.Reset();
 	LayoutDirtyNodes.Reset();
-	LoadedResources.Reset();
 	PaintOrderNodes.Reset();
 	PaintOrderRanges.Reset();
 #if WITH_DEV_AUTOMATION_TESTS
 	ResourceLoadAttemptsForTesting = 0;
+	ResourceAsyncRequestsForTesting = 0;
+	ResourceFailuresForTesting = 0;
+	ResourceCancellationsForTesting = 0;
 #endif
+	CancelResourcePreload();
+	ResolvedResources.Reset();
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -154,7 +168,7 @@ uint64 FWebToUERuntimePresentation::GetKnownOwnedBytesForTesting() const
 {
 	uint64 Bytes = sizeof(*this) + Brushes.GetAllocatedSize() + TextLayouts.GetAllocatedSize() +
 		MeasureDirtyNodes.GetAllocatedSize() + LayoutDirtyNodes.GetAllocatedSize() +
-		LoadedResources.GetAllocatedSize() + PaintOrderNodes.GetAllocatedSize() +
+		ResolvedResources.GetAllocatedSize() + PaintOrderNodes.GetAllocatedSize() +
 		PaintOrderRanges.GetAllocatedSize();
 	for (const TPair<FWebToUEInstanceHandle, TSharedPtr<FSlateBrush>>& Pair : Brushes)
 	{
@@ -187,11 +201,164 @@ void FWebToUERuntimePresentation::RebuildCaches(bool bReloadResources)
 	else
 	{
 		Brushes.Reset();
-		LoadedResources.Reset();
+		CancelResourcePreload();
+		ResolvedResources.Reset();
 		PaintOrderNodes.Reset();
 		PaintOrderRanges.Reset();
 	}
 	bLayoutDirty = true;
+}
+
+namespace WebToUE::Runtime::Presentation::Private
+{
+	static bool IsExpectedResourceType(EWebToUEResourceKind Kind, UObject* Object)
+	{
+		if (!Object) return false;
+		switch (Kind)
+		{
+		case EWebToUEResourceKind::Texture:
+			return Object->IsA<UTexture2D>();
+		case EWebToUEResourceKind::Font:
+			return Object->IsA<UFont>() || Object->IsA<UFontFace>();
+		case EWebToUEResourceKind::StringTable:
+			return Object->IsA<UStringTable>();
+		default:
+			return false;
+		}
+	}
+}
+
+void FWebToUERuntimePresentation::CancelResourcePreload() const
+{
+	if (PendingResourceRequest.IsValid() && !PendingResourceRequest->HasLoadCompleted())
+	{
+		PendingResourceRequest->CancelHandle();
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::ResourceCancellations);
+#if WITH_DEV_AUTOMATION_TESTS
+		++ResourceCancellationsForTesting;
+#endif
+	}
+	PendingResourceRequest.Reset();
+}
+
+void FWebToUERuntimePresentation::BeginResourcePreload() const
+{
+	using namespace WebToUE::Runtime::Presentation::Private;
+	CancelResourcePreload();
+	const TConstArrayView<FWebToUECompiledResource> Manifest =
+		RuntimeInstance.GetResourceManifest();
+	ResolvedResources.Reset();
+	ResolvedResources.SetNum(Manifest.Num());
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::ResourceManifestEntries, Manifest.Num());
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::ResourceKnownOwnedBytes,
+		ResolvedResources.GetAllocatedSize());
+
+	TArray<FSoftObjectPath> PendingPaths;
+	PendingPaths.Reserve(Manifest.Num());
+	for (int32 Index = 0; Index < Manifest.Num(); ++Index)
+	{
+		const FWebToUECompiledResource& Resource = Manifest[Index];
+		if (UObject* Object = Resource.Path.ResolveObject())
+		{
+			if (IsExpectedResourceType(Resource.Kind, Object))
+			{
+				ResolvedResources[Index].Reset(Object);
+				FWebToUEPerformanceCapture::RecordCounter(
+					EWebToUEPerformanceCounter::ResourceCacheHits);
+			}
+			else
+			{
+				FWebToUEPerformanceCapture::RecordCounter(
+					EWebToUEPerformanceCounter::ResourceFailures);
+#if WITH_DEV_AUTOMATION_TESTS
+				++ResourceFailuresForTesting;
+#endif
+			}
+		}
+		else
+		{
+			PendingPaths.AddUnique(Resource.Path);
+		}
+	}
+	if (!PendingPaths.IsEmpty())
+	{
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::ResourceAsyncRequests, PendingPaths.Num());
+#if WITH_DEV_AUTOMATION_TESTS
+		ResourceAsyncRequestsForTesting += PendingPaths.Num();
+#endif
+		const TWeakPtr<SWidget> WeakOwnerWidget = OwnerWidget.AsShared();
+		PendingResourceRequest = UAssetManager::GetStreamableManager().RequestAsyncLoad(
+			PendingPaths, FStreamableDelegate::CreateLambda([WeakOwnerWidget]()
+			{
+				if (const TSharedPtr<SWidget> Widget = WeakOwnerWidget.Pin())
+				{
+					Widget->Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+				}
+			}), FStreamableManager::AsyncLoadHighPriority,
+			false, false, TEXT("WebToUEViewResources"));
+		FinalizeResourcePreload();
+	}
+}
+
+bool FWebToUERuntimePresentation::FinalizeResourcePreload() const
+{
+	using namespace WebToUE::Runtime::Presentation::Private;
+	if (!PendingResourceRequest.IsValid() || !PendingResourceRequest->HasLoadCompleted())
+	{
+		return false;
+	}
+	const TConstArrayView<FWebToUECompiledResource> Manifest =
+		RuntimeInstance.GetResourceManifest();
+	for (int32 Index = 0; Index < Manifest.Num(); ++Index)
+	{
+		if (ResolvedResources.IsValidIndex(Index) && ResolvedResources[Index].IsValid())
+		{
+			continue;
+		}
+		UObject* Object = Manifest[Index].Path.ResolveObject();
+		if (IsExpectedResourceType(Manifest[Index].Kind, Object))
+		{
+			ResolvedResources[Index].Reset(Object);
+		}
+		else
+		{
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::ResourceFailures);
+#if WITH_DEV_AUTOMATION_TESTS
+			++ResourceFailuresForTesting;
+#endif
+		}
+	}
+	PendingResourceRequest.Reset();
+	return true;
+}
+
+int32 FWebToUERuntimePresentation::FindResourceHandle(EWebToUEResourceKind Kind,
+	const FSoftObjectPath& Path) const
+{
+	const TConstArrayView<FWebToUECompiledResource> Manifest =
+		RuntimeInstance.GetResourceManifest();
+	return Manifest.IndexOfByPredicate([Kind, &Path](const FWebToUECompiledResource& Resource)
+	{
+		return Resource.Kind == Kind && Resource.Path == Path;
+	});
+}
+
+UObject* FWebToUERuntimePresentation::GetResolvedResource(EWebToUEResourceKind Kind,
+	const FSoftObjectPath& Path) const
+{
+	const int32 Handle = FindResourceHandle(Kind, Path);
+	return ResolvedResources.IsValidIndex(Handle) ? ResolvedResources[Handle].Get() : nullptr;
+}
+
+UObject* FWebToUERuntimePresentation::GetResolvedFont(const FString& Family) const
+{
+	const FSoftObjectPath Path = GetDefault<UWebToUESettings>()->FindFontObjectPath(Family);
+	return Path.IsValid() ? GetResolvedResource(EWebToUEResourceKind::Font, Path) : nullptr;
 }
 
 void FWebToUERuntimePresentation::MarkTextLayoutDependencyPath(const FWebToUENode& Node)
@@ -266,7 +433,7 @@ void FWebToUERuntimePresentation::ApplyStyleUpdates(
 			});
 		if (bBrushChanged && Node->Type == EWebToUENodeType::Element)
 		{
-			RebuildBrush(*Node, false);
+			RebuildBrush(*Node);
 		}
 	}
 	if (bRebuildPaintOrder)
@@ -328,7 +495,8 @@ FSlateTextBlockLayout& FWebToUERuntimePresentation::PrepareTextLayoutInCache(
 		TSharedRef<ITextLayoutMarshaller> Marshaller = FPlainTextLayoutMarshaller::Create();
 		if (bRichText)
 		{
-			Cache->RichTextStyleSet = MakeRichTextStyleSet(Style);
+			Cache->RichTextStyleSet = MakeRichTextStyleSet(
+				Style, GetResolvedFont(Style.FontFamily));
 			Marshaller = FRichTextLayoutMarshaller::Create(
 				TArray<TSharedRef<ITextDecorator>>(), Cache->RichTextStyleSet.Get());
 		}
@@ -346,7 +514,8 @@ FSlateTextBlockLayout& FWebToUERuntimePresentation::PrepareTextLayoutInCache(
 		ETextWrappingPolicy::DefaultWrapping, ETextTransformPolicy::None, FMargin(), 1.0f, true,
 		ToTextJustification(Style.TextAlign));
 	FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TextLayoutComputes);
-	Cache->Layout->ComputeDesiredSize(DesiredSizeArgs, 1.0f, MakeTextBlockStyle(Style));
+	Cache->Layout->ComputeDesiredSize(DesiredSizeArgs, 1.0f,
+		MakeTextBlockStyle(Style, GetResolvedFont(Style.FontFamily)));
 	Cache->Key = MoveTemp(Key);
 	Cache->DesiredSize = FVector2f(Cache->Layout->GetDesiredSize());
 	Cache->bHasKey = true;
@@ -397,6 +566,14 @@ void FWebToUERuntimePresentation::Layout(const FVector2f& ViewportSize) const
 {
 	FWebToUEDocument* RuntimeDocument = const_cast<FWebToUEDocument*>(GetDocument());
 	if (!RuntimeDocument || !RuntimeDocument->Root) return;
+	if (FinalizeResourcePreload())
+	{
+		TextLayouts.Reset();
+		RuntimeDocument->ForEachNode([this](FWebToUENode& Node)
+		{
+			if (Node.Tag == TEXT("img")) RebuildBrush(Node);
+		});
+	}
 	RuntimeInstance.GetLayoutEngine().LayoutPersistent(*RuntimeDocument, ViewportSize,
 		[this](const FWebToUENode& Node,
 			const FWebToUELayoutEngine::FMeasureConstraints& Constraints)
@@ -415,6 +592,15 @@ int32 FWebToUERuntimePresentation::Paint(const FPaintArgs& Args, const FGeometry
 {
 	FWebToUEDocument* RuntimeDocument = const_cast<FWebToUEDocument*>(GetDocument());
 	if (!RuntimeDocument || !RuntimeDocument->Root) return LayerId;
+	if (FinalizeResourcePreload())
+	{
+		TextLayouts.Reset();
+		RuntimeDocument->ForEachNode([this](FWebToUENode& Node)
+		{
+			if (Node.Tag == TEXT("img")) RebuildBrush(Node);
+		});
+		bLayoutDirty = true;
+	}
 	const FVector2f ViewportSize = FVector2f(Geometry.GetLocalSize());
 	if (bLayoutDirty || !ViewportSize.Equals(LastViewportSize, 0.1f))
 	{
@@ -522,32 +708,27 @@ void FWebToUERuntimePresentation::RebuildBrushes(bool bReloadResources) const
 	if (bReloadResources)
 	{
 		Brushes.Reset();
-		LoadedResources.Reset();
+		BeginResourcePreload();
 	}
 	const FWebToUEDocument* RuntimeDocument = GetDocument();
 	if (!RuntimeDocument) return;
-	RuntimeDocument->ForEachNode([this, bReloadResources](FWebToUENode& Node)
+	RuntimeDocument->ForEachNode([this](FWebToUENode& Node)
 	{
-		RebuildBrush(Node, bReloadResources);
+		RebuildBrush(Node);
 	});
 }
 
-void FWebToUERuntimePresentation::RebuildBrush(FWebToUENode& Node,
-	bool bReloadResource) const
+void FWebToUERuntimePresentation::RebuildBrush(FWebToUENode& Node) const
 {
 	const FWebToUEComputedStyle& Style = GetStyle(Node);
 	if (Node.Tag == TEXT("img"))
 	{
-		if (!bReloadResource) return;
-		const FString Source = Node.GetAttribute(TEXT("src"));
-		FWebToUEPerformanceCapture::RecordCounter(
-			EWebToUEPerformanceCounter::ResourceLoadAttempts);
-#if WITH_DEV_AUTOMATION_TESTS
-		++ResourceLoadAttemptsForTesting;
-#endif
-		if (UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Source))
+		const FWebToUEInstanceHandle NodeHandle = RuntimeInstance.GetHandle(&Node);
+		Brushes.Remove(NodeHandle);
+		UTexture2D* Texture = Cast<UTexture2D>(GetResolvedResource(
+			EWebToUEResourceKind::Texture, FSoftObjectPath(Node.GetAttribute(TEXT("src")))));
+		if (Texture)
 		{
-			LoadedResources.Emplace(Texture);
 			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
 			FWebToUEPerformanceCapture::RecordCounter(
 				EWebToUEPerformanceCounter::TrackedAllocations);
@@ -555,7 +736,7 @@ void FWebToUERuntimePresentation::RebuildBrush(FWebToUENode& Node,
 			Brush->DrawAs = ESlateBrushDrawType::Image;
 			Brush->SetResourceObject(Texture);
 			Brush->ImageSize = FVector2f(Texture->GetSizeX(), Texture->GetSizeY());
-			Brushes.Add(RuntimeInstance.GetHandle(&Node), MoveTemp(Brush));
+			Brushes.Add(NodeHandle, MoveTemp(Brush));
 		}
 	}
 	else if (Node.Type == EWebToUENodeType::Element)
@@ -574,6 +755,17 @@ const void* FWebToUERuntimePresentation::GetBrushIdentityForTesting(
 {
 	const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(RuntimeInstance.GetHandle(&Node));
 	return Brush ? Brush->Get() : nullptr;
+}
+
+int32 FWebToUERuntimePresentation::FindResourceHandleForTesting(
+	EWebToUEResourceKind Kind, const FSoftObjectPath& Path) const
+{
+	return FindResourceHandle(Kind, Path);
+}
+
+const UObject* FWebToUERuntimePresentation::GetResourceObjectForTesting(int32 Handle) const
+{
+	return ResolvedResources.IsValidIndex(Handle) ? ResolvedResources[Handle].Get() : nullptr;
 }
 #endif
 

@@ -141,6 +141,7 @@ uint64 FWebToUERuntimeInstance::GetKnownOwnedBytesForTesting() const
 	Bytes += RuntimeDocument->RuntimeRenderData.GetAllocatedSize();
 	Bytes += RuntimeDocument->RuntimeNodesBySlot.GetAllocatedSize();
 	Bytes += RuntimeDocument->PseudoInvalidationDependencies.GetAllocatedSize();
+	Bytes += ResourceManifest.GetAllocatedSize();
 	Bytes += GetSelectorIndexOwnedBytes(RuntimeDocument->SelectorIndex);
 	Bytes += GetSelectorTargetIndexOwnedBytes(RuntimeDocument->RuntimeSelectorTargets);
 
@@ -280,6 +281,7 @@ void FWebToUERuntimeInstance::Reset()
 	PressedNode = {};
 	FocusedNode = {};
 	BindingOpsByField.Reset();
+	ResourceManifest.Reset();
 }
 
 bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
@@ -303,6 +305,7 @@ bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 	FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 	RuntimeDocument = MakeShared<FWebToUEDocument>();
 	RuntimeDocument->SetSharedStyleTemplate(SharedStyleTemplate);
+	ResourceManifest = CompiledDocument.GetResourceManifest();
 
 	TArray<TSharedPtr<FWebToUENode>> Nodes;
 	if (!CompiledNodes.IsEmpty())
