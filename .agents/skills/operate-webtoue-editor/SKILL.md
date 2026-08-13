@@ -7,6 +7,17 @@ description: Safely operate the WebToUE Unreal Engine 5.8 Editor with VibeUE and
 
 Run a guarded Editor workflow that preserves user work and proves the new Editor session is usable. Treat source compilation, VibeUE readiness, MCP reachability, Python readiness, and test results as separate gates.
 
+## Authority and evidence boundary
+
+This skill owns **how** to operate the Editor, lifecycle wrapper, MCP, Automation, visual capture, and tracked release gates safely. It does not select roadmap scope or define product performance budgets; those are owned by `Plugins/WebToUE/Docs/WTUE_TechnicalSummary.md`.
+
+Keep these conclusions separate:
+
+- `SafeBuildAndLaunch` can prove the requested source build, Editor relaunch, readiness, and MCP gates recorded by the lifecycle operation.
+- `SafeBuildCookAndLaunch` can additionally prove its recorded Build/Cook/Stage/Pak/IoStore result. It does not launch or exercise the staged game and therefore cannot alone prove Packaged Runtime correctness.
+- Editor `PerformanceService`, Automation, and Paint microbenchmarks are diagnostic or regression evidence within their measured workload. They do not alone prove input-to-pixel latency, Render Thread/GPU cost, first-frame behavior, process/VRAM budgets, or product-level equivalence with UMG/Gameface.
+- When the task requires evidence outside the available workflow, report the missing runtime harness or measurement as unverified. Do not upgrade a nearby gate into stronger evidence.
+
 ## Start with status
 
 Run the non-mutating status probe from the repository root:

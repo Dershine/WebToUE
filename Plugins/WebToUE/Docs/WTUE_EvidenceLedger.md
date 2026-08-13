@@ -91,8 +91,11 @@
 
 只记录会改变工程判断、架构、里程碑或支持边界的变化；普通提交不在此重复 Git 历史。
 
+2026-08-13 的路线复核将后续 M2 重排为 M2.3～M2.9；此前记录中的 M2.3/M2.4/M2.5 编号保留当时语境，不反向改写历史。
+
 | 日期 | 基线 | 变化 | 路线影响 |
 | --- | --- | --- | --- |
+| 2026-08-13 | `61dcb0a` + roadmap working tree | 基于 Runtime 热路径、现有 Telemetry 与 Gameface/Slate 官方架构资料复核 M2：新增三类产品性能合同；将共享静态模板/稳定身份、真实 Packaged GT/RT/GPU/Batch/首帧/内存证据提升为宏观退出门；后续改为 M2.3 身份裁决、M2.4 Paint-only、M2.5 FieldNotify/Text、M2.6 Layout/Resource、M2.7 Display/真实渲染、M2.8 产品 Profile、M2.9 Go/No-Go。未修改 Runtime/资产，未运行新的 Automation、Build 或发布门。 | M2 宏观由 `3/7` 重述为 `3/9`，不是进度倒退或新性能结论；冻结大型 CSS/组件/动画扩张直到局部成本和真实渲染上限得到证明。 |
 | 2026-08-13 | 当前 HEAD + working tree | Editor 生命周期增加受跟踪 `SafeBuildCookAndLaunch`：固定 Win64 Build/Cook/Stage/Pak/IoStore、持久发布宿主/已观察进程树 PID、AutomationTool 退出码和完整日志，成功后 `-SkipBuild` 恢复 Editor；MCP 改为一次有界延迟复查并区分 `EditorReadyMcpPending`。Pester 5/5；真实 UAT→重启集成未执行。 | 加固 R-10 与发布流程，不改变 Runtime、产品协议或 M2 路线进度；不得把脚本层通过写成发布门通过。 |
 | 2026-08-13 | 当前 HEAD + working tree | Core 为每视图 Runtime Document 建立非序列化 Selector Index；每条规则按右端 ID/Class/Tag/Pseudo/Universal 归入单一主桶，节点 ID/Class identity 在初始化时规范化且重复 class 去重，热路径直接遍历桶并保留完整组合选择器校验。Telemetry schema 3 新增候选计数；新增 `SelectorIndex` 专项及 500/200 工作量门。聚焦 6/6、完整 30/30、Game + Editor Development 与 Cook/Stage/Pak/IoStore 通过。 | M2.2 进入 🚧 4/5；R-01 的 Selector 放大由 100,000 降为 10,694，但全树 Style/Yoga 仍待 M2.3；R-06 增加工作量门证据，宏观 M2 保持 3/7。 |
 | 2026-08-12 | 当前 HEAD + working tree | 为全部 52 项 CSS Property 建立唯一元数据表，统一稳定名称、显式继承和六类失效影响；Pseudo State 缓存规则影响并让 Paint-only 路径保留已加载图片及 Brush，避免额外 `LoadObject`。新增元数据完整性/分类测试和真实 Slate Paint 资源安全测试；聚焦 7/7、完整 29/29、Game + Editor Development 与 Cook/Stage/Pak/IoStore 通过。 | M2.2 进入 🚧 3/5；R-04 进入部分缓解，完整 Resource Cache 仍属 M2.4；宏观 M2 保持 3/7。 |

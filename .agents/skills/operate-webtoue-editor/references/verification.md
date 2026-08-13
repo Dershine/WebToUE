@@ -2,6 +2,13 @@
 
 Load this reference for a rebuild/relaunch acceptance pass or when a lifecycle gate fails.
 
+## Evidence separation
+
+- Build success, Editor readiness, MCP reachability, Python/world readiness, Automation, visual inspection, BuildCookRun, and Packaged Runtime execution are independent gates. Report only the gates actually exercised.
+- `SafeBuildCookAndLaunch` does not run the staged executable. `Release.ExitCode = 0` proves the recorded Build/Cook/Stage/Pak/IoStore operation, not Packaged gameplay, input, rendering, or performance acceptance.
+- Editor traces and microbenchmarks must retain their workload and build-context labels. Apply the corpus, sampling, and fair-comparison contract from `Plugins/WebToUE/Docs/WTUE_TechnicalSummary.md` before making a product performance claim.
+- If Packaged Runtime or end-to-end performance evidence is required but no safe runner/harness exists, mark that gate `Unverified` and report the missing capability instead of substituting Editor or BuildCookRun evidence.
+
 ## Acceptance sequence
 
 1. Run the lifecycle script with `-Action Status`.

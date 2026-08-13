@@ -238,6 +238,17 @@ When asked to rebuild / relaunch / test, use the project script — not manual `
   next session doesn't relearn it.
 <!-- END VibeUE -->
 
+## WebToUE project policy overrides
+
+This project-specific section lives outside the generated VibeUE block and overrides conflicting generic advice above.
+
+- Do not stage, commit, or push unless the user explicitly requests that exact Git action. A request to implement, finish, or reach a milestone is not commit or push authorization.
+- For Editor health, PIE, asset saves, C++ rebuild/relaunch, readiness, MCP health, viewport evidence, Unreal Automation, or tracked BuildCookRun, use `$operate-webtoue-editor` as the sole concrete workflow. Do not invoke `Plugins/VibeUE/BuildAndLaunchGame.ps1` directly.
+- `Plugins/WebToUE/Docs/WTUE_TechnicalSummary.md` owns roadmap scope, performance contracts, budgets, risks, and Go/No-Go conditions. Do not copy current milestone numbering or acceptance thresholds into this file.
+- `unreal.PerformanceService` and Editor microbenchmarks are diagnostic inputs, not sufficient proof of Packaged Runtime behavior or product-level performance equivalence. Apply the corpus and comparison policy from the Technical Summary.
+- A successful BuildCookRun proves only its recorded Build/Cook/Stage/Pak/IoStore and relaunch gates. It does not by itself prove Packaged Runtime correctness, input-to-pixel latency, renderer/GPU cost, or Gameface/UMG parity.
+- Keep this file limited to tool routing, safety rules, and reusable project gotchas. Record architecture, current capability, evidence history, and roadmap state in their designated project documents.
+
 ## Project gotchas
 
 - In UE 5.8's interactive Editor, `Automation RunTests <filter>` can remain queued without starting the controller. Use `AutomationTestToolset.DiscoverTests` followed by `RunTests` or `RunTestsByFilter`; after a selective run, `ListTests(nameFilter="VibeUE")` may report zero while `RunTestsByFilter("StartsWith:VibeUE")` still discovers and executes the suite correctly.
