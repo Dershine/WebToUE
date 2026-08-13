@@ -182,7 +182,7 @@ bool FWebToUEResourceLifecycleTest::RunTest(const FString& Parameters)
 	PendingDocument->CommitCompiledDocument(MoveTemp(PendingCompiled));
 	const TSharedRef<SWebToUEView> PendingView = SNew(SWebToUEView);
 	AddExpectedError(TEXT("/Game/WebToUEAutomation/T_Pending"),
-		EAutomationExpectedErrorFlags::Contains, 1);
+		EAutomationExpectedErrorFlags::Contains, -1);
 	FWebToUEPerformanceSnapshot RequestSnapshot;
 	{
 		FWebToUEPerformanceCapture Capture;

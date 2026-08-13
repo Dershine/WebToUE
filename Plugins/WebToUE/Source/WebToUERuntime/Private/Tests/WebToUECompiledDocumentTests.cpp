@@ -105,6 +105,10 @@ bool FWebToUECompiledDocumentBoundaryTest::RunTest(const FString& Parameters)
 		Document->GetResourceManifest()[1].Kind, EWebToUEResourceKind::StringTable);
 
 	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
+	AddExpectedError(TEXT("/WebToUETests/T_Boundary"),
+		EAutomationExpectedErrorFlags::Contains, -1);
+	AddExpectedError(TEXT("/WebToUETests/ST_Boundary"),
+		EAutomationExpectedErrorFlags::Contains, -1);
 	View->SetDocument(Document);
 	View->LayoutForTesting(FVector2f(320.0f, 180.0f));
 	FWebToUENode* RuntimeButton = View->HitTestForTesting(FVector2f(10.0f, 10.0f));

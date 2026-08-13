@@ -42,7 +42,7 @@ bool FWebToUEBenchmarkStatisticsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The benchmark policy schema is stable"), FWebToUEBenchmarkSamplingPolicy::SchemaVersion, 1);
 	TestEqual(TEXT("The standard policy performs one warmup"), FWebToUEBenchmarkSamplingPolicy::WarmupCount, 1);
 	TestEqual(TEXT("The standard policy records twenty samples"), FWebToUEBenchmarkSamplingPolicy::SampleCount, 20);
-	TestEqual(TEXT("The benchmark budget policy schema is stable"), FWebToUEBenchmarkBudgetPolicy::SchemaVersion, 8);
+	TestEqual(TEXT("The benchmark budget policy schema is stable"), FWebToUEBenchmarkBudgetPolicy::SchemaVersion, 9);
 	TestEqual(TEXT("The medium single-node hover P95 target is explicit"),
 		FWebToUEBenchmarkBudgetPolicy::MediumSingleNodeHoverP95Milliseconds, 0.5);
 	TestEqual(TEXT("The medium single-FieldNotify P95 target is explicit"),

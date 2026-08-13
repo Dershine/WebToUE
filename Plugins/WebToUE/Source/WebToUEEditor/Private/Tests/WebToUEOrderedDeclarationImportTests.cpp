@@ -18,6 +18,8 @@ bool FWebToUEOrderedDeclarationImportTest::RunTest(const FString& Parameters)
 	const FString Html = TEXT("<body><style>#target { color: #ff0000; width: 100px; color: invalid; color: #00ff00; width: 120px; }</style><div id='target'></div><div id='inline' style='opacity: 0.5; opacity: 0.75'></div></body>");
 	TestTrue(TEXT("The ordered declaration source is written"), FFileHelper::SaveStringToFile(Html, *TestFilename));
 	UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
+	AddExpectedError(TEXT("Ignored invalid value 'invalid' for CSS property 'color'"),
+		EAutomationExpectedErrorFlags::Contains, 1);
 	TestTrue(TEXT("The ordered declaration document imports"),
 		UWebToUEFactory::ImportIntoDocument(*Document, TestFilename, true));
 	TestEqual(TEXT("The import produces one compiled rule"), Document->GetCompiledRules().Num(), 1);
