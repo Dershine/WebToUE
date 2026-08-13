@@ -2,6 +2,7 @@
 
 #include "WebToUECompiler.h"
 #include "WebToUEDocument.h"
+#include "WebToUESettings.h"
 
 #include "EditorFramework/AssetImportData.h"
 #include "Internationalization/StringTable.h"
@@ -163,19 +164,29 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 		}
 	}
 
-	Source.ForEachNode([&Result](FWebToUENode& Node)
+	const auto AddResource = [&Result](EWebToUEResourceKind Kind, const FSoftObjectPath& Path)
+	{
+		if (!Path.IsValid()) return;
+		FWebToUECompiledResource Resource;
+		Resource.Kind = Kind;
+		Resource.Path = Path;
+		Result.ResourceManifest.AddUnique(MoveTemp(Resource));
+	};
+	const UWebToUESettings* Settings = GetDefault<UWebToUESettings>();
+	Source.ForEachNode([&Source, &AddResource, Settings](FWebToUENode& Node)
 	{
 		if (Node.Tag == TEXT("img"))
 		{
-			const FSoftObjectPath Path(Node.GetAttribute(TEXT("src")));
-			if (Path.IsValid()) Result.ReferencedTextures.AddUnique(TSoftObjectPtr<UTexture2D>(Path));
+			AddResource(EWebToUEResourceKind::Texture,
+				FSoftObjectPath(Node.GetAttribute(TEXT("src"))));
 		}
 		const FString StringTable = Node.GetAttribute(TEXT("data-ue-string-table"));
 		if (!StringTable.IsEmpty())
 		{
-			const FSoftObjectPath Path(StringTable);
-			if (Path.IsValid()) Result.ReferencedStringTables.AddUnique(TSoftObjectPtr<UStringTable>(Path));
+			AddResource(EWebToUEResourceKind::StringTable, FSoftObjectPath(StringTable));
 		}
+		AddResource(EWebToUEResourceKind::Font,
+			Settings->FindFontObjectPath(Source.GetComputedStyle(Node).FontFamily));
 	});
 	return Result;
 }

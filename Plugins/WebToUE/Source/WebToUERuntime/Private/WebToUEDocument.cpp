@@ -105,8 +105,7 @@ void UWebToUEDocument::CommitCompiledDocument(FWebToUECompiledDocumentData&& Com
 	CompiledRules = MoveTemp(CompiledDocument.Rules);
 	CompiledBindingOps = MoveTemp(CompiledDocument.BindingOps);
 	RootNodeIndex = CompiledDocument.RootNodeIndex;
-	ReferencedTextures = MoveTemp(CompiledDocument.ReferencedTextures);
-	ReferencedStringTables = MoveTemp(CompiledDocument.ReferencedStringTables);
+	ResourceManifest = MoveTemp(CompiledDocument.ResourceManifest);
 }
 
 void UWebToUEDocument::PostInitProperties()

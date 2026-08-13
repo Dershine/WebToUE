@@ -60,10 +60,10 @@ bool FWebToUECompiledDocumentBoundaryTest::RunTest(const FString& Parameters)
 	FWebToUECompiledDocumentData CompiledDocument;
 	CompiledDocument.LocalizationNamespace = TEXT("BoundaryTest");
 	CompiledDocument.RootNodeIndex = 0;
-	CompiledDocument.ReferencedTextures.Add(TSoftObjectPtr<UTexture2D>(
-		FSoftObjectPath(TEXT("/WebToUETests/T_Boundary.T_Boundary"))));
-	CompiledDocument.ReferencedStringTables.Add(TSoftObjectPtr<UStringTable>(
-		FSoftObjectPath(TEXT("/WebToUETests/ST_Boundary.ST_Boundary"))));
+	CompiledDocument.ResourceManifest.Add({ EWebToUEResourceKind::Texture,
+		FSoftObjectPath(TEXT("/WebToUETests/T_Boundary.T_Boundary")) });
+	CompiledDocument.ResourceManifest.Add({ EWebToUEResourceKind::StringTable,
+		FSoftObjectPath(TEXT("/WebToUETests/ST_Boundary.ST_Boundary")) });
 
 	FWebToUECompiledNode& Body = CompiledDocument.Nodes.AddDefaulted_GetRef();
 	Body.Type = static_cast<uint8>(EWebToUENodeType::Element);
@@ -97,10 +97,12 @@ bool FWebToUECompiledDocumentBoundaryTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The compiled rule view exposes both rules"), Document->GetCompiledRules().Num(), 2);
 	TestEqual(TEXT("The compiled root index is available through the read-only boundary"),
 		Document->GetRootNodeIndex(), 0);
-	TestEqual(TEXT("The compiled texture dependency is retained"),
-		Document->GetReferencedTextures().Num(), 1);
-	TestEqual(TEXT("The compiled String Table dependency is retained"),
-		Document->GetReferencedStringTables().Num(), 1);
+	TestEqual(TEXT("The typed resource manifest is retained"),
+		Document->GetResourceManifest().Num(), 2);
+	TestEqual(TEXT("The first manifest entry retains texture kind"),
+		Document->GetResourceManifest()[0].Kind, EWebToUEResourceKind::Texture);
+	TestEqual(TEXT("The second manifest entry retains String Table kind"),
+		Document->GetResourceManifest()[1].Kind, EWebToUEResourceKind::StringTable);
 
 	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
 	View->SetDocument(Document);

@@ -6,8 +6,27 @@
 #include "WebToUEDocument.generated.h"
 
 class UAssetImportData;
-class UStringTable;
-class UTexture2D;
+
+UENUM()
+enum class EWebToUEResourceKind : uint8
+{
+	Texture,
+	Font,
+	StringTable
+};
+
+USTRUCT()
+struct WEBTOUERUNTIME_API FWebToUECompiledResource
+{
+	GENERATED_BODY()
+	UPROPERTY() EWebToUEResourceKind Kind = EWebToUEResourceKind::Texture;
+	UPROPERTY() FSoftObjectPath Path;
+
+	bool operator==(const FWebToUECompiledResource& Other) const
+	{
+		return Kind == Other.Kind && Path == Other.Path;
+	}
+};
 
 USTRUCT()
 struct FWebToUECompiledAttribute
@@ -94,8 +113,7 @@ struct WEBTOUERUNTIME_API FWebToUECompiledDocumentData
 	TArray<FWebToUECompiledRule> Rules;
 	TArray<FWebToUECompiledBindingOp> BindingOps;
 	int32 RootNodeIndex = INDEX_NONE;
-	TArray<TSoftObjectPtr<UTexture2D>> ReferencedTextures;
-	TArray<TSoftObjectPtr<UStringTable>> ReferencedStringTables;
+	TArray<FWebToUECompiledResource> ResourceManifest;
 };
 
 UENUM(BlueprintType)
@@ -139,8 +157,7 @@ public:
 	const TArray<FWebToUECompiledBindingOp>& GetCompiledBindingOps() const { return CompiledBindingOps; }
 	TSharedPtr<const FWebToUERuntimeStyleTemplate> GetOrCreateRuntimeStyleTemplate() const;
 	int32 GetRootNodeIndex() const { return RootNodeIndex; }
-	const TArray<TSoftObjectPtr<UTexture2D>>& GetReferencedTextures() const { return ReferencedTextures; }
-	const TArray<TSoftObjectPtr<UStringTable>>& GetReferencedStringTables() const { return ReferencedStringTables; }
+	const TArray<FWebToUECompiledResource>& GetResourceManifest() const { return ResourceManifest; }
 
 #if WITH_EDITORONLY_DATA
 	UPROPERTY(VisibleAnywhere, Category="WebToUE", meta=(MultiLine=true))
@@ -201,10 +218,7 @@ private:
 	int32 RootNodeIndex = INDEX_NONE;
 
 	UPROPERTY()
-	TArray<TSoftObjectPtr<UTexture2D>> ReferencedTextures;
-
-	UPROPERTY()
-	TArray<TSoftObjectPtr<UStringTable>> ReferencedStringTables;
+	TArray<FWebToUECompiledResource> ResourceManifest;
 
 	mutable TSharedPtr<const FWebToUERuntimeStyleTemplate> RuntimeStyleTemplate;
 };

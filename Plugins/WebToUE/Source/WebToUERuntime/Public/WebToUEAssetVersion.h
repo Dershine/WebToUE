@@ -12,8 +12,9 @@ struct WEBTOUERUNTIME_API FWebToUEAssetVersion
 		OrderedDeclarations = 3,
 		TypedStyleDeclarations = 4,
 		CompiledBindingOps = 5,
+		CompiledResourceManifest = 6,
 
-		LatestVersion = CompiledBindingOps
+		LatestVersion = CompiledResourceManifest
 	};
 
 	static const FGuid GUID;

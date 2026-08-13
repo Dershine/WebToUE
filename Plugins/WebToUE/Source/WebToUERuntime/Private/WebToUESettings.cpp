@@ -2,6 +2,16 @@
 
 #include "Styling/CoreStyle.h"
 
+FSoftObjectPath UWebToUESettings::FindFontObjectPath(const FString& Family) const
+{
+	const FWebToUEFontFamily* Match = FontFamilies.FindByPredicate(
+		[&Family](const FWebToUEFontFamily& Candidate)
+		{
+			return Candidate.CssFamily.ToString().Equals(Family, ESearchCase::IgnoreCase);
+		});
+	return Match ? Match->FontObject.ToSoftObjectPath() : FSoftObjectPath();
+}
+
 FSlateFontInfo UWebToUESettings::ResolveFont(const FString& Family, float Size, const FString& Weight) const
 {
 	const FWebToUEFontFamily* Match = FontFamilies.FindByPredicate([&Family](const FWebToUEFontFamily& Candidate)

@@ -27,6 +27,8 @@ bool FWebToUEAssetVersionTest::RunTest(const FString& Parameters)
 		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::OrderedDeclarations));
 	TestTrue(TEXT("Assets without compiled binding ops require recompilation"),
 		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::TypedStyleDeclarations));
+	TestTrue(TEXT("Assets without a typed resource manifest require recompilation"),
+		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::CompiledBindingOps));
 	TestFalse(TEXT("Assets at the latest version do not require recompilation"),
 		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::LatestVersion));
 	return true;

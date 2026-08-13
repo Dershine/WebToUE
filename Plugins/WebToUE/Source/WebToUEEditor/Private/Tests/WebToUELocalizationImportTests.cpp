@@ -78,7 +78,16 @@ bool FWebToUELocalizationImportTest::RunTest(const FString& Parameters)
 	const int32 LastGoodRuleCount = Document->GetCompiledRules().Num();
 	const int32 LastGoodRootNodeIndex = Document->GetRootNodeIndex();
 	const FString LastGoodNamespace = Document->GetLocalizationNamespace();
-	const int32 LastGoodStringTableCount = Document->GetReferencedStringTables().Num();
+	const auto CountStringTables = [&Document]()
+	{
+		int32 Count = 0;
+		for (const FWebToUECompiledResource& Resource : Document->GetResourceManifest())
+		{
+			Count += Resource.Kind == EWebToUEResourceKind::StringTable ? 1 : 0;
+		}
+		return Count;
+	};
+	const int32 LastGoodStringTableCount = CountStringTables();
 	AddExpectedError(TEXT("data-ue-string-table and data-ue-string-key must be specified together"),
 		EAutomationExpectedErrorFlags::Contains, 1);
 	TestFalse(TEXT("Invalid reimport reports failure"), ImportHtml(
@@ -93,7 +102,7 @@ bool FWebToUELocalizationImportTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Invalid reimport preserves the document namespace"),
 		Document->GetLocalizationNamespace(), LastGoodNamespace);
 	TestEqual(TEXT("Invalid reimport preserves compiled String Table dependencies"),
-		Document->GetReferencedStringTables().Num(), LastGoodStringTableCount);
+		CountStringTables(), LastGoodStringTableCount);
 	const FWebToUECompiledNode* PreservedTextNode = Document->GetCompiledNodes().FindByPredicate(
 		[](const FWebToUECompiledNode& Node)
 		{
