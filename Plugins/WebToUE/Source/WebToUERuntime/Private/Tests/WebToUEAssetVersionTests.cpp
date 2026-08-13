@@ -25,6 +25,8 @@ bool FWebToUEAssetVersionTest::RunTest(const FString& Parameters)
 		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::LocalizedRichText));
 	TestTrue(TEXT("Assets without typed style declarations require recompilation"),
 		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::OrderedDeclarations));
+	TestTrue(TEXT("Assets without compiled binding ops require recompilation"),
+		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::TypedStyleDeclarations));
 	TestFalse(TEXT("Assets at the latest version do not require recompilation"),
 		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::LatestVersion));
 	return true;

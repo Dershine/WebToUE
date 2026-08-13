@@ -28,6 +28,24 @@ struct FWebToUECompiledDeclaration
 	UPROPERTY() FString Value;
 };
 
+UENUM()
+enum class EWebToUEBindingKind : uint8
+{
+	Text,
+	Visible,
+	Enabled
+};
+
+USTRUCT()
+struct FWebToUECompiledBindingOp
+{
+	GENERATED_BODY()
+	UPROPERTY() FName RootField;
+	UPROPERTY() EWebToUEBindingKind Kind = EWebToUEBindingKind::Text;
+	UPROPERTY() int32 TargetNodeIndex = INDEX_NONE;
+	UPROPERTY() bool bRichText = false;
+};
+
 USTRUCT()
 struct FWebToUECompiledNode
 {
@@ -74,6 +92,7 @@ struct WEBTOUERUNTIME_API FWebToUECompiledDocumentData
 	FString LocalizationNamespace;
 	TArray<FWebToUECompiledNode> Nodes;
 	TArray<FWebToUECompiledRule> Rules;
+	TArray<FWebToUECompiledBindingOp> BindingOps;
 	int32 RootNodeIndex = INDEX_NONE;
 	TArray<TSoftObjectPtr<UTexture2D>> ReferencedTextures;
 	TArray<TSoftObjectPtr<UStringTable>> ReferencedStringTables;
@@ -117,6 +136,7 @@ public:
 	const FString& GetLocalizationNamespace() const { return LocalizationNamespace; }
 	const TArray<FWebToUECompiledNode>& GetCompiledNodes() const { return CompiledNodes; }
 	const TArray<FWebToUECompiledRule>& GetCompiledRules() const { return CompiledRules; }
+	const TArray<FWebToUECompiledBindingOp>& GetCompiledBindingOps() const { return CompiledBindingOps; }
 	TSharedPtr<const FWebToUERuntimeStyleTemplate> GetOrCreateRuntimeStyleTemplate() const;
 	int32 GetRootNodeIndex() const { return RootNodeIndex; }
 	const TArray<TSoftObjectPtr<UTexture2D>>& GetReferencedTextures() const { return ReferencedTextures; }
@@ -173,6 +193,9 @@ private:
 
 	UPROPERTY()
 	TArray<FWebToUECompiledRule> CompiledRules;
+
+	UPROPERTY()
+	TArray<FWebToUECompiledBindingOp> CompiledBindingOps;
 
 	UPROPERTY()
 	int32 RootNodeIndex = INDEX_NONE;

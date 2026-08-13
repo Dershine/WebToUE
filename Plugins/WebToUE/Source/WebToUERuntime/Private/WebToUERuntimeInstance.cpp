@@ -254,6 +254,16 @@ const FWebToUENode* FWebToUERuntimeInstance::ResolveNode(FWebToUEInstanceHandle 
 	return RuntimeDocument ? RuntimeDocument->ResolveNode(Handle) : nullptr;
 }
 
+TConstArrayView<FWebToUERuntimeBindingOp> FWebToUERuntimeInstance::GetBindingOps(
+	FName RootField) const
+{
+	if (const TArray<FWebToUERuntimeBindingOp>* Ops = BindingOpsByField.Find(RootField))
+	{
+		return *Ops;
+	}
+	return {};
+}
+
 void FWebToUERuntimeInstance::Reset()
 {
 	++Generation;
@@ -265,6 +275,7 @@ void FWebToUERuntimeInstance::Reset()
 	HoveredNode = {};
 	PressedNode = {};
 	FocusedNode = {};
+	BindingOpsByField.Reset();
 }
 
 bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
@@ -349,6 +360,22 @@ bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 	RuntimeDocument->Root = Nodes[CompiledDocument.GetRootNodeIndex()];
 
 	RuntimeDocument->InitializeRuntimeData(OwnerId, Generation);
+	for (const FWebToUECompiledBindingOp& CompiledOp : CompiledDocument.GetCompiledBindingOps())
+	{
+		if (CompiledOp.RootField.IsNone() || !Nodes.IsValidIndex(CompiledOp.TargetNodeIndex))
+		{
+			UE_LOG(LogWebToUERuntimeInstance, Error,
+				TEXT("Failed to hydrate compiled binding op for field '%s' and node index %d."),
+				*CompiledOp.RootField.ToString(), CompiledOp.TargetNodeIndex);
+			Reset();
+			return false;
+		}
+		FWebToUERuntimeBindingOp& RuntimeOp =
+			BindingOpsByField.FindOrAdd(CompiledOp.RootField).AddDefaulted_GetRef();
+		RuntimeOp.Kind = CompiledOp.Kind;
+		RuntimeOp.Target = Nodes[CompiledOp.TargetNodeIndex]->InstanceHandle;
+		RuntimeOp.bRichText = CompiledOp.bRichText;
+	}
 	FWebToUEStyleResolver::Resolve(*RuntimeDocument);
 	return true;
 }

@@ -115,6 +115,21 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 			}
 		}
 		const int32 NodeIndex = Result.Nodes.Add(MoveTemp(Serialized));
+		const auto AddBindingOp = [&](const TCHAR* AttributeName, EWebToUEBindingKind Kind)
+		{
+			const FString RootField = Node->GetAttribute(AttributeName);
+			if (RootField.IsEmpty()) return;
+			FWebToUECompiledBindingOp& BindingOp = Result.BindingOps.AddDefaulted_GetRef();
+			BindingOp.RootField = FName(*RootField);
+			BindingOp.Kind = Kind;
+			BindingOp.TargetNodeIndex = NodeIndex;
+			BindingOp.bRichText = Kind == EWebToUEBindingKind::Text &&
+				Node->GetAttribute(TEXT("data-ue-rich-text")).Equals(
+					TEXT("true"), ESearchCase::IgnoreCase);
+		};
+		AddBindingOp(TEXT("data-ue-bind-text"), EWebToUEBindingKind::Text);
+		AddBindingOp(TEXT("data-ue-bind-visible"), EWebToUEBindingKind::Visible);
+		AddBindingOp(TEXT("data-ue-bind-enabled"), EWebToUEBindingKind::Enabled);
 		TMap<FString, int32> ChildOrdinals;
 		for (const TSharedPtr<FWebToUENode>& Child : Node->Children)
 		{

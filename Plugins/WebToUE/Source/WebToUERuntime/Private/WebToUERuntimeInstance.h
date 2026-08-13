@@ -1,9 +1,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "WebToUECoreTypes.h"
+#include "WebToUEDocument.h"
 
-class UWebToUEDocument;
+struct FWebToUERuntimeBindingOp
+{
+	EWebToUEBindingKind Kind = EWebToUEBindingKind::Text;
+	FWebToUEInstanceHandle Target;
+	bool bRichText = false;
+};
 
 class FWebToUERuntimeInstance
 {
@@ -24,6 +29,11 @@ public:
 	FWebToUEInstanceHandle GetHandle(const FWebToUENode* Node) const;
 	FWebToUENode* ResolveNode(FWebToUEInstanceHandle Handle);
 	const FWebToUENode* ResolveNode(FWebToUEInstanceHandle Handle) const;
+	const TMap<FName, TArray<FWebToUERuntimeBindingOp>>& GetBindingIndex() const
+	{
+		return BindingOpsByField;
+	}
+	TConstArrayView<FWebToUERuntimeBindingOp> GetBindingOps(FName RootField) const;
 
 	FWebToUENode* GetHoveredNode() const { return const_cast<FWebToUENode*>(ResolveNode(HoveredNode)); }
 	FWebToUENode* GetPressedNode() const { return const_cast<FWebToUENode*>(ResolveNode(PressedNode)); }
@@ -47,4 +57,5 @@ private:
 	FWebToUEInstanceHandle HoveredNode;
 	FWebToUEInstanceHandle PressedNode;
 	FWebToUEInstanceHandle FocusedNode;
+	TMap<FName, TArray<FWebToUERuntimeBindingOp>> BindingOpsByField;
 };

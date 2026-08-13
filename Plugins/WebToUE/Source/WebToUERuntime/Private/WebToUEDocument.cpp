@@ -103,6 +103,7 @@ void UWebToUEDocument::CommitCompiledDocument(FWebToUECompiledDocumentData&& Com
 	LocalizationNamespace = MoveTemp(CompiledDocument.LocalizationNamespace);
 	CompiledNodes = MoveTemp(CompiledDocument.Nodes);
 	CompiledRules = MoveTemp(CompiledDocument.Rules);
+	CompiledBindingOps = MoveTemp(CompiledDocument.BindingOps);
 	RootNodeIndex = CompiledDocument.RootNodeIndex;
 	ReferencedTextures = MoveTemp(CompiledDocument.ReferencedTextures);
 	ReferencedStringTables = MoveTemp(CompiledDocument.ReferencedStringTables);

@@ -380,16 +380,11 @@ void SWebToUEView::RefreshBindings(UObject* DataContext)
 TSet<FName> SWebToUEView::GetBoundFields() const
 {
 	TSet<FName> Result;
-	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
-	if (!RuntimeDocument) return Result;
-	RuntimeDocument->ForEachNode([&Result](FWebToUENode& Node)
+	for (const TPair<FName, TArray<FWebToUERuntimeBindingOp>>& Pair :
+		RuntimeInstance->GetBindingIndex())
 	{
-		for (const TCHAR* Attribute : { TEXT("data-ue-bind-text"), TEXT("data-ue-bind-visible"), TEXT("data-ue-bind-enabled") })
-		{
-			const FString Field = Node.GetAttribute(Attribute);
-			if (!Field.IsEmpty()) Result.Add(FName(*Field));
-		}
-	});
+		Result.Add(Pair.Key);
+	}
 	return Result;
 }
 
