@@ -46,6 +46,10 @@ enum class EWebToUEPerformanceCounter : uint8
 	// Sum of the known owned payload capacities in bytes. This excludes allocator overhead and
 	// allocations performed internally by Slate, Yoga, or other callees.
 	TrackedAllocationPayloadBytes,
+	PseudoStateNodesChanged,
+	PseudoTargetCandidates,
+	StyleDirtyTargets,
+	StylePropertyChanges,
 	Count
 };
 
@@ -61,7 +65,7 @@ struct WEBTOUECORE_API FWebToUEPerformanceSnapshot
 {
 	static constexpr int32 PhaseCount = static_cast<int32>(EWebToUEPerformancePhase::Count);
 	static constexpr int32 CounterCount = static_cast<int32>(EWebToUEPerformanceCounter::Count);
-	static constexpr int32 TelemetrySchemaVersion = 3;
+	static constexpr int32 TelemetrySchemaVersion = 4;
 	static constexpr int32 TelemetryMeasurementCount = (PhaseCount * 2) + CounterCount;
 	TStaticArray<FWebToUEPerformanceMetric, PhaseCount> Metrics;
 	TStaticArray<uint64, CounterCount> Counters{};

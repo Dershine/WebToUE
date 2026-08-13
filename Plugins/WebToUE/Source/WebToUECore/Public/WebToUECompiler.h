@@ -2,6 +2,7 @@
 
 #include "Containers/ArrayView.h"
 #include "WebToUECoreTypes.h"
+#include "WebToUEStyleProperties.h"
 
 struct WEBTOUECORE_API FWebToUEStyleSheetSource
 {
@@ -9,6 +10,21 @@ struct WEBTOUECORE_API FWebToUEStyleSheetSource
 	FString SourceName = TEXT("<memory>");
 	int32 StartLine = 1;
 	int32 StartColumn = 1;
+};
+
+struct WEBTOUECORE_API FWebToUEStyleChangeSet
+{
+	TArray<EWebToUECssProperty> ChangedProperties;
+	EWebToUEStyleImpact Impacts = EWebToUEStyleImpact::None;
+
+	bool IsEmpty() const { return ChangedProperties.IsEmpty(); }
+	bool HasInheritedPropertyChange() const;
+};
+
+struct WEBTOUECORE_API FWebToUEStyleUpdate
+{
+	FWebToUEInstanceHandle Target;
+	FWebToUEStyleChangeSet Changes;
 };
 
 class WEBTOUECORE_API FWebToUECompiler
@@ -29,8 +45,14 @@ class WEBTOUECORE_API FWebToUEStyleResolver
 {
 public:
 	static void Resolve(FWebToUEDocument& Document);
+	static void ResolveIncremental(FWebToUEDocument& Document,
+		TConstArrayView<FWebToUEInstanceHandle> Targets,
+		TArray<FWebToUEStyleUpdate>& OutUpdates);
 	static bool Matches(const FWebToUEStyleRule& Rule, const FWebToUENode& Node,
 		const FWebToUEDocument& Document);
+	static bool MatchesWithReason(const FWebToUEStyleRule& Rule,
+		const FWebToUENode& Target, const FWebToUEDocument& Document,
+		int32 ReasonSegmentIndex, const FWebToUENode& ReasonNode);
 };
 
 class WEBTOUECORE_API FWebToUELayoutEngine

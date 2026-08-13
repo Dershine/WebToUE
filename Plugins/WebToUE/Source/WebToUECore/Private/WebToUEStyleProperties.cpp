@@ -527,4 +527,80 @@ namespace WebToUE::Private
 		default: checkNoEntry(); break;
 		}
 	}
+
+	static bool EqualLength(const FWebToUELength& A, const FWebToUELength& B)
+	{
+		return A.Unit == B.Unit && FMath::IsNearlyEqual(A.Value, B.Value);
+	}
+
+	bool IsCanonicalComputedStyleProperty(EWebToUECssProperty Property)
+	{
+		switch (Property)
+		{
+		case EWebToUECssProperty::Margin:
+		case EWebToUECssProperty::Padding:
+		case EWebToUECssProperty::Gap:
+		case EWebToUECssProperty::Flex:
+		case EWebToUECssProperty::Background:
+		case EWebToUECssProperty::Border:
+		case EWebToUECssProperty::BorderStyle:
+			return false;
+		default:
+			return Property != EWebToUECssProperty::Invalid;
+		}
+	}
+
+	bool AreComputedStylePropertyValuesEqual(EWebToUECssProperty Property,
+		const FWebToUEComputedStyle& A, const FWebToUEComputedStyle& B)
+	{
+		switch (Property)
+		{
+		case EWebToUECssProperty::Display: return A.Display == B.Display;
+		case EWebToUECssProperty::Position: return A.Position == B.Position;
+		case EWebToUECssProperty::Visibility: return A.bVisible == B.bVisible;
+		case EWebToUECssProperty::Overflow: return A.Overflow == B.Overflow;
+		case EWebToUECssProperty::Width: return EqualLength(A.Width, B.Width);
+		case EWebToUECssProperty::Height: return EqualLength(A.Height, B.Height);
+		case EWebToUECssProperty::MinWidth: return EqualLength(A.MinWidth, B.MinWidth);
+		case EWebToUECssProperty::MinHeight: return EqualLength(A.MinHeight, B.MinHeight);
+		case EWebToUECssProperty::MaxWidth: return EqualLength(A.MaxWidth, B.MaxWidth);
+		case EWebToUECssProperty::MaxHeight: return EqualLength(A.MaxHeight, B.MaxHeight);
+		case EWebToUECssProperty::Left: return EqualLength(A.Inset.Left, B.Inset.Left);
+		case EWebToUECssProperty::Top: return EqualLength(A.Inset.Top, B.Inset.Top);
+		case EWebToUECssProperty::Right: return EqualLength(A.Inset.Right, B.Inset.Right);
+		case EWebToUECssProperty::Bottom: return EqualLength(A.Inset.Bottom, B.Inset.Bottom);
+		case EWebToUECssProperty::MarginLeft: return EqualLength(A.Margin.Left, B.Margin.Left);
+		case EWebToUECssProperty::MarginTop: return EqualLength(A.Margin.Top, B.Margin.Top);
+		case EWebToUECssProperty::MarginRight: return EqualLength(A.Margin.Right, B.Margin.Right);
+		case EWebToUECssProperty::MarginBottom: return EqualLength(A.Margin.Bottom, B.Margin.Bottom);
+		case EWebToUECssProperty::PaddingLeft: return EqualLength(A.Padding.Left, B.Padding.Left);
+		case EWebToUECssProperty::PaddingTop: return EqualLength(A.Padding.Top, B.Padding.Top);
+		case EWebToUECssProperty::PaddingRight: return EqualLength(A.Padding.Right, B.Padding.Right);
+		case EWebToUECssProperty::PaddingBottom: return EqualLength(A.Padding.Bottom, B.Padding.Bottom);
+		case EWebToUECssProperty::RowGap: return FMath::IsNearlyEqual(A.RowGap, B.RowGap);
+		case EWebToUECssProperty::ColumnGap: return FMath::IsNearlyEqual(A.ColumnGap, B.ColumnGap);
+		case EWebToUECssProperty::FlexDirection: return A.FlexDirection == B.FlexDirection;
+		case EWebToUECssProperty::FlexWrap: return A.FlexWrap == B.FlexWrap;
+		case EWebToUECssProperty::FlexGrow: return FMath::IsNearlyEqual(A.FlexGrow, B.FlexGrow);
+		case EWebToUECssProperty::FlexShrink: return FMath::IsNearlyEqual(A.FlexShrink, B.FlexShrink);
+		case EWebToUECssProperty::FlexBasis: return EqualLength(A.FlexBasis, B.FlexBasis);
+		case EWebToUECssProperty::JustifyContent: return A.JustifyContent == B.JustifyContent;
+		case EWebToUECssProperty::AlignItems: return A.AlignItems == B.AlignItems;
+		case EWebToUECssProperty::AlignSelf: return A.AlignSelf == B.AlignSelf;
+		case EWebToUECssProperty::Color: return A.Color.Equals(B.Color);
+		case EWebToUECssProperty::BackgroundColor: return A.BackgroundColor.Equals(B.BackgroundColor);
+		case EWebToUECssProperty::BorderColor: return A.BorderColor.Equals(B.BorderColor);
+		case EWebToUECssProperty::BorderWidth: return FMath::IsNearlyEqual(A.BorderWidth, B.BorderWidth);
+		case EWebToUECssProperty::BorderRadius: return FMath::IsNearlyEqual(A.BorderRadius, B.BorderRadius);
+		case EWebToUECssProperty::Opacity: return FMath::IsNearlyEqual(A.Opacity, B.Opacity);
+		case EWebToUECssProperty::FontFamily: return A.FontFamily == B.FontFamily;
+		case EWebToUECssProperty::FontSize: return FMath::IsNearlyEqual(A.FontSize, B.FontSize);
+		case EWebToUECssProperty::FontWeight: return A.FontWeight == B.FontWeight;
+		case EWebToUECssProperty::TextAlign: return A.TextAlign == B.TextAlign;
+		case EWebToUECssProperty::WhiteSpace: return A.WhiteSpace == B.WhiteSpace;
+		case EWebToUECssProperty::ObjectFit: return A.ObjectFit == B.ObjectFit;
+		case EWebToUECssProperty::ZIndex: return A.ZIndex == B.ZIndex;
+		default: return true;
+		}
+	}
 }

@@ -69,6 +69,10 @@ public:
 	uint64 GetPresentationResourceLoadAttemptsForTesting() const;
 	const void* GetPresentationTextCacheIdentityForTesting(const FWebToUENode& Node) const;
 	bool IsPresentationLayoutDirtyForTesting() const;
+	const FString& GetLastPseudoInvalidationReportForTesting() const
+	{
+		return LastPseudoInvalidationReport;
+	}
 	bool GetRuntimeMemoryCensusForTesting(FWebToUERuntimeMemoryCensus& OutCensus) const;
 #endif
 
@@ -78,7 +82,7 @@ private:
 	TUniquePtr<FWebToUERuntimeInstance> RuntimeInstance;
 	TUniquePtr<FWebToUERuntimePresentation> Presentation;
 	TSet<FString> LoggedBindingErrors;
-	EWebToUEStyleImpact PseudoStateImpacts = EWebToUEStyleImpact::Style;
+	FString LastPseudoInvalidationReport;
 
 	FWebToUEDocument* GetRuntimeDocument();
 	const FWebToUEDocument* GetRuntimeDocument() const;
@@ -91,15 +95,14 @@ private:
 
 	void RebuildStylesAndBrushes(
 		EWebToUEStyleImpact Impacts = EWebToUEStyleImpact::Resource);
-	void CachePseudoStateImpacts();
 	FText GetDisplayText(const FWebToUENode& Node) const;
 	FWebToUENode* HitTest(const FVector2f& LocalPosition) const;
 	bool ScrollAt(const FVector2f& LocalPosition, float WheelDelta);
 	void SetHoveredNode(FWebToUENode* Node);
 	void SetPressedNode(FWebToUENode* Node);
 	void SetFocusedNode(FWebToUENode* Node);
-	void ClearStateFlag(EWebToUEPseudoState Flag);
-	void SetStatePath(FWebToUENode* Node, EWebToUEPseudoState Flag);
+	void UpdatePseudoState(FWebToUENode* OldNode, FWebToUENode* NewNode,
+		EWebToUEPseudoState Flag, bool bIncludeAncestors);
 	void MoveFocus(int32 Direction);
 	void ActivateFocusedNode();
 	void DispatchClick(FWebToUENode& Node) const;

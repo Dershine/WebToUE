@@ -2,7 +2,9 @@
 
 #include "Misc/AutomationTest.h"
 #include "SWebToUEView.h"
+#include "WebToUECompiler.h"
 #include "WebToUEDocument.h"
+#include "WebToUEPerformance.h"
 #include "WebToUEStyleProperties.h"
 
 #include "Input/HittestGrid.h"
@@ -20,6 +22,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPaintOnlyPseudoResourceSafetyTest,
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETypedCascadeSlateOutputTest,
 	"WebToUE.Runtime.TypedCascadeSlateOutput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPseudoInvalidationPathTest,
+	"WebToUE.Runtime.PseudoInvalidationPath",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 namespace WebToUE::RuntimePresentation::Tests
@@ -316,6 +322,70 @@ bool FWebToUEPaintOnlyPseudoResourceSafetyTest::RunTest(const FString& Parameter
 		{
 			return FMath::IsNearlyEqual(Tint.A, 0.25f);
 		}));
+	return true;
+}
+
+bool FWebToUEPseudoInvalidationPathTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body><section id='menu'><button id='item'>Item</button>")
+		TEXT("<span id='label' class='label'>Label</span></section>")
+		TEXT("<button id='unrelated'>Other</button></body>"),
+		TEXT("#item { background-color: blue; opacity: 1; }")
+		TEXT("#item:hover { opacity: 0.5; }")
+		TEXT("#menu:hover > #item { background-color: red; }")
+		TEXT("#menu:hover .label { color: red; }"));
+	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
+	View->SetRuntimeDocumentForTesting(Document);
+	FWebToUENode* Item = View->FindRuntimeNodeByIdForTesting(TEXT("item"));
+	FWebToUENode* Label = View->FindRuntimeNodeByIdForTesting(TEXT("label"));
+	FWebToUENode* Unrelated = View->FindRuntimeNodeByIdForTesting(TEXT("unrelated"));
+	TestNotNull(TEXT("The pseudo path item exists"), Item);
+	TestNotNull(TEXT("The pseudo path label exists"), Label);
+	TestNotNull(TEXT("The unrelated hover target exists"), Unrelated);
+	if (!Item || !Label || !Unrelated || Label->Children.IsEmpty()) return false;
+
+	FWebToUEPerformanceSnapshot EnterSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->SetHoveredNodeForTesting(Item);
+		EnterSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("Hover changes only the target-to-root state path"),
+		EnterSnapshot.GetCounter(EWebToUEPerformanceCounter::PseudoStateNodesChanged), uint64(3));
+	TestEqual(TEXT("Two selector targets become dirty after dependency filtering"),
+		EnterSnapshot.GetCounter(EWebToUEPerformanceCounter::StyleDirtyTargets), uint64(2));
+	TestEqual(TEXT("Cascade visits two targets plus one inherited text descendant"),
+		EnterSnapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(3));
+	TestEqual(TEXT("The two target properties and inherited color produce four changes"),
+		EnterSnapshot.GetCounter(EWebToUEPerformanceCounter::StylePropertyChanges), uint64(4));
+	TestTrue(TEXT("Self hover updates opacity"),
+		FMath::IsNearlyEqual(View->GetComputedStyleForTesting(*Item).Opacity, 0.5f));
+	TestEqual(TEXT("Ancestor hover updates a direct-child target"),
+		View->GetComputedStyleForTesting(*Item).BackgroundColor, FLinearColor::Red);
+	TestEqual(TEXT("Ancestor hover updates a descendant target"),
+		View->GetComputedStyleForTesting(*Label).Color, FLinearColor::Red);
+	TestEqual(TEXT("Inherited paint style reaches the label text"),
+		View->GetComputedStyleForTesting(*Label->Children[0]).Color, FLinearColor::Red);
+	TestTrue(TEXT("The read-only report exposes the causal chain"),
+		View->GetLastPseudoInvalidationReportForTesting().Contains(TEXT("Hover")) &&
+		View->GetLastPseudoInvalidationReportForTesting().Contains(TEXT("background-color")) &&
+		View->GetLastPseudoInvalidationReportForTesting().Contains(TEXT("Style|Paint")));
+
+	FWebToUEPerformanceSnapshot ExitSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->SetHoveredNodeForTesting(Unrelated);
+		ExitSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("Moving hover updates only the old/new path difference"),
+		ExitSnapshot.GetCounter(EWebToUEPerformanceCounter::PseudoStateNodesChanged), uint64(3));
+	TestEqual(TEXT("Leaving the path revisits only the same affected style nodes"),
+		ExitSnapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(3));
+	TestEqual(TEXT("Leaving hover restores the item background"),
+		View->GetComputedStyleForTesting(*Item).BackgroundColor, FLinearColor::Blue);
+	TestEqual(TEXT("Leaving hover restores inherited label color"),
+		View->GetComputedStyleForTesting(*Label).Color, FLinearColor::White);
 	return true;
 }
 

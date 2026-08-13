@@ -43,7 +43,11 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.brush_builds"),
 		TEXT("workload.tracked_allocations"),
 		TEXT("workload.tracked_allocation_payload_events"),
-		TEXT("workload.tracked_allocation_payload_bytes")
+		TEXT("workload.tracked_allocation_payload_bytes"),
+		TEXT("workload.pseudo_state_nodes_changed"),
+		TEXT("workload.pseudo_target_candidates"),
+		TEXT("workload.style_dirty_targets"),
+		TEXT("workload.style_property_changes")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -235,6 +239,10 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::TrackedAllocations: return TEXT("tracked_allocations");
 	case EWebToUEPerformanceCounter::TrackedAllocationPayloadEvents: return TEXT("tracked_allocation_payload_events");
 	case EWebToUEPerformanceCounter::TrackedAllocationPayloadBytes: return TEXT("tracked_allocation_payload_bytes");
+	case EWebToUEPerformanceCounter::PseudoStateNodesChanged: return TEXT("pseudo_state_nodes_changed");
+	case EWebToUEPerformanceCounter::PseudoTargetCandidates: return TEXT("pseudo_target_candidates");
+	case EWebToUEPerformanceCounter::StyleDirtyTargets: return TEXT("style_dirty_targets");
+	case EWebToUEPerformanceCounter::StylePropertyChanges: return TEXT("style_property_changes");
 	default: return TEXT("unknown");
 	}
 }

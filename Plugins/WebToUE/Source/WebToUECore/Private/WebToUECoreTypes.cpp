@@ -96,6 +96,10 @@ void FWebToUEDocument::InitializeRuntimeData(uint64 InOwnerId, uint32 InGenerati
 	if (!SharedStyleTemplate)
 	{
 		InitializeSelectorIndex();
+		FWebToUERuntimeStyleTemplate LocalTemplate;
+		LocalTemplate.Rules = Rules;
+		LocalTemplate.CompilePseudoInvalidationDependencies();
+		PseudoInvalidationDependencies = MoveTemp(LocalTemplate.PseudoInvalidationDependencies);
 	}
 }
 
@@ -263,6 +267,15 @@ const TArray<FWebToUEStyleRule>& FWebToUEDocument::GetRules() const
 const FWebToUESelectorIndex& FWebToUEDocument::GetSelectorIndex() const
 {
 	return SharedStyleTemplate ? SharedStyleTemplate->SelectorIndex : SelectorIndex;
+}
+
+TConstArrayView<FWebToUEPseudoInvalidationDependency>
+FWebToUEDocument::GetPseudoInvalidationDependencies() const
+{
+	return SharedStyleTemplate
+		? TConstArrayView<FWebToUEPseudoInvalidationDependency>(
+			SharedStyleTemplate->PseudoInvalidationDependencies)
+		: TConstArrayView<FWebToUEPseudoInvalidationDependency>(PseudoInvalidationDependencies);
 }
 
 int32 FWebToUEDocument::ForEachSelectorCandidate(const FWebToUENode& Node,

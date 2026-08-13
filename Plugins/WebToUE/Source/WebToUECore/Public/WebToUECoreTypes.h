@@ -430,6 +430,7 @@ struct WEBTOUECORE_API FWebToUEDocument
 	TArray<FWebToUENode*> RuntimeNodesBySlot;
 	FWebToUERuntimeSelectorTargetIndex RuntimeSelectorTargets;
 	FWebToUESelectorIndex SelectorIndex;
+	TArray<FWebToUEPseudoInvalidationDependency> PseudoInvalidationDependencies;
 	TSharedPtr<const FWebToUERuntimeStyleTemplate> SharedStyleTemplate;
 
 	bool HasErrors() const;
@@ -438,6 +439,7 @@ struct WEBTOUECORE_API FWebToUEDocument
 	void SetSharedStyleTemplate(TSharedPtr<const FWebToUERuntimeStyleTemplate> InTemplate);
 	const TArray<FWebToUEStyleRule>& GetRules() const;
 	const FWebToUESelectorIndex& GetSelectorIndex() const;
+	TConstArrayView<FWebToUEPseudoInvalidationDependency> GetPseudoInvalidationDependencies() const;
 	void AddRuntimeNodeData(FWebToUENode& Node);
 	int32 ForEachSelectorCandidate(const FWebToUENode& Node,
 		TFunctionRef<void(const FWebToUEStyleRule&)> Visitor) const;

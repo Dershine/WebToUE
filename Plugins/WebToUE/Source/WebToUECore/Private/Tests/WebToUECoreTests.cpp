@@ -24,6 +24,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPseudoInvalidationDependencyTest,
 	"WebToUE.Core.PseudoInvalidationDependencies",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETypedCascadeChangeSetTest,
+	"WebToUE.Core.TypedCascadeChangeSet",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETypedCascadeTest, "WebToUE.Core.TypedCascade",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
@@ -150,6 +154,38 @@ bool FWebToUEPseudoInvalidationDependencyTest::RunTest(const FString& Parameters
 		Targets.Num() == 1 && Document->ResolveNode(Targets[0])
 			? Document->ResolveNode(Targets[0])->GetAttribute(TEXT("id")) : FString(),
 		FString(TEXT("item")));
+	return true;
+}
+
+bool FWebToUETypedCascadeChangeSetTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body><button id='target'>Target</button></body>"),
+		TEXT("#target { background-color: blue; opacity: 1; } ")
+		TEXT("#target:hover { background-color: red; opacity: 1; }"));
+	FWebToUENode* Target = nullptr;
+	Document->ForEachNode([&Target](FWebToUENode& Node)
+	{
+		if (Node.GetAttribute(TEXT("id")) == TEXT("target")) Target = &Node;
+	});
+	TestNotNull(TEXT("The incremental cascade target exists"), Target);
+	if (!Target) return false;
+
+	Document->GetRuntimeNodeState(*Target).PseudoStates |= EWebToUEPseudoState::Hover;
+	TArray<FWebToUEStyleUpdate> Updates;
+	FWebToUEStyleResolver::ResolveIncremental(
+		*Document, MakeArrayView(&Target->InstanceHandle, 1), Updates);
+	TestEqual(TEXT("The incremental cascade emits one target update"), Updates.Num(), 1);
+	if (Updates.Num() != 1) return false;
+	TestEqual(TEXT("Only the actually changed property enters the change set"),
+		Updates[0].Changes.ChangedProperties.Num(), 1);
+	TestTrue(TEXT("The changed property is the canonical background-color slot"),
+		Updates[0].Changes.ChangedProperties.Contains(EWebToUECssProperty::BackgroundColor));
+	TestFalse(TEXT("An unchanged opacity winner is omitted from the change set"),
+		Updates[0].Changes.ChangedProperties.Contains(EWebToUECssProperty::Opacity));
+	TestEqual(TEXT("The change set carries only Style and Paint impacts"),
+		Updates[0].Changes.Impacts,
+		EWebToUEStyleImpact::Style | EWebToUEStyleImpact::Paint);
 	return true;
 }
 

@@ -124,8 +124,8 @@ namespace WebToUE::Private
 		return EnumHasAllFlags(State.PseudoStates, Segment.RequiredState);
 	}
 
-	static void ResolveNode(FWebToUENode& Node, FWebToUEDocument& Document,
-		const FWebToUEComputedStyle* ParentStyle, FTypedCascade& Cascade)
+	static FWebToUEComputedStyle ComputeNodeStyle(FWebToUENode& Node,
+		FWebToUEDocument& Document, FTypedCascade& Cascade)
 	{
 		FWebToUERuntimeNodeState& RuntimeState = Document.GetRuntimeNodeState(Node);
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::StyleNodeVisits);
@@ -145,9 +145,9 @@ namespace WebToUE::Private
 			Style.JustifyContent = TEXT("center");
 			Style.AlignItems = TEXT("center");
 		}
-		if (ParentStyle)
+		if (Node.Parent)
 		{
-			ApplyInheritedProperties(*ParentStyle, Style);
+			ApplyInheritedProperties(Document.GetComputedStyle(*Node.Parent), Style);
 		}
 
 		Cascade.Reset();
@@ -179,38 +179,87 @@ namespace WebToUE::Private
 		Style.bEnabled = !Node.Attributes.Contains(TEXT("disabled")) && RuntimeState.bRuntimeEnabled;
 		if (!Style.bEnabled) RuntimeState.PseudoStates |= EWebToUEPseudoState::Disabled;
 		else RuntimeState.PseudoStates &= ~EWebToUEPseudoState::Disabled;
-		Document.GetComputedStyle(Node) = MoveTemp(Style);
-		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
-		{
-			ResolveNode(*Child, Document, &Document.GetComputedStyle(Node), Cascade);
-		}
+		return Style;
 	}
+
+	static FWebToUEStyleChangeSet BuildChangeSet(const FWebToUEComputedStyle& OldStyle,
+		const FWebToUEComputedStyle& NewStyle)
+	{
+		FWebToUEStyleChangeSet Result;
+		for (const FWebToUECssPropertyMetadata& Metadata : GetAllCssPropertyMetadata())
+		{
+			if (!IsCanonicalComputedStyleProperty(Metadata.Property) ||
+				AreComputedStylePropertyValuesEqual(Metadata.Property, OldStyle, NewStyle))
+			{
+				continue;
+			}
+			Result.ChangedProperties.Add(Metadata.Property);
+			Result.Impacts |= Metadata.Impacts;
+		}
+		return Result;
+	}
+
+	static int32 GetNodeDepth(const FWebToUENode& Node)
+	{
+		int32 Depth = 0;
+		for (const FWebToUENode* Parent = Node.Parent; Parent; Parent = Parent->Parent)
+		{
+			++Depth;
+		}
+		return Depth;
+	}
+
+	static bool MatchesInternal(const FWebToUEStyleRule& Rule,
+		const FWebToUENode& Node, const FWebToUEDocument& Document,
+		int32 ReasonSegmentIndex, const FWebToUENode* ReasonNode)
+	{
+		if (Rule.Selector.IsEmpty()) return false;
+		TFunction<bool(int32, const FWebToUENode*)> MatchAt =
+			[&](int32 Index, const FWebToUENode* Current)
+		{
+			if (!Current || Index < 0 ||
+				(Index == ReasonSegmentIndex && Current != ReasonNode) ||
+				!SegmentMatches(Rule.Selector[Index], *Current,
+					Document.GetRuntimeNodeState(*Current)))
+			{
+				return false;
+			}
+			if (Index == 0) return true;
+			if (Rule.Selector[Index].RelationToPrevious == EWebToUECombinator::Child)
+			{
+				return MatchAt(Index - 1, Current->Parent);
+			}
+			for (const FWebToUENode* Ancestor = Current->Parent; Ancestor;
+				Ancestor = Ancestor->Parent)
+			{
+				if (MatchAt(Index - 1, Ancestor)) return true;
+			}
+			return false;
+		};
+		return MatchAt(Rule.Selector.Num() - 1, &Node);
+	}
+}
+
+bool FWebToUEStyleChangeSet::HasInheritedPropertyChange() const
+{
+	return ChangedProperties.ContainsByPredicate([](EWebToUECssProperty Property)
+	{
+		return WebToUE::Private::GetCssPropertyMetadata(Property).bInherited;
+	});
 }
 
 bool FWebToUEStyleResolver::Matches(const FWebToUEStyleRule& Rule, const FWebToUENode& Node,
 	const FWebToUEDocument& Document)
 {
-	using namespace WebToUE::Private;
-	if (Rule.Selector.IsEmpty()) return false;
-	TFunction<bool(int32, const FWebToUENode*)> MatchAt = [&](int32 Index, const FWebToUENode* Current)
-	{
-		if (!Current || Index < 0 ||
-			!SegmentMatches(Rule.Selector[Index], *Current, Document.GetRuntimeNodeState(*Current)))
-		{
-			return false;
-		}
-		if (Index == 0) return true;
-		if (Rule.Selector[Index].RelationToPrevious == EWebToUECombinator::Child)
-		{
-			return MatchAt(Index - 1, Current->Parent);
-		}
-		for (const FWebToUENode* Ancestor = Current->Parent; Ancestor; Ancestor = Ancestor->Parent)
-		{
-			if (MatchAt(Index - 1, Ancestor)) return true;
-		}
-		return false;
-	};
-	return MatchAt(Rule.Selector.Num() - 1, &Node);
+	return WebToUE::Private::MatchesInternal(Rule, Node, Document, INDEX_NONE, nullptr);
+}
+
+bool FWebToUEStyleResolver::MatchesWithReason(const FWebToUEStyleRule& Rule,
+	const FWebToUENode& Target, const FWebToUEDocument& Document,
+	int32 ReasonSegmentIndex, const FWebToUENode& ReasonNode)
+{
+	return WebToUE::Private::MatchesInternal(
+		Rule, Target, Document, ReasonSegmentIndex, &ReasonNode);
 }
 
 void FWebToUEStyleResolver::Resolve(FWebToUEDocument& Document)
@@ -221,6 +270,56 @@ void FWebToUEStyleResolver::Resolve(FWebToUEDocument& Document)
 	if (Document.Root)
 	{
 		WebToUE::Private::FTypedCascade Cascade;
-		WebToUE::Private::ResolveNode(*Document.Root, Document, nullptr, Cascade);
+		Document.ForEachNode([&Document, &Cascade](FWebToUENode& Node)
+		{
+			Document.GetComputedStyle(Node) =
+				WebToUE::Private::ComputeNodeStyle(Node, Document, Cascade);
+		});
+	}
+}
+
+void FWebToUEStyleResolver::ResolveIncremental(FWebToUEDocument& Document,
+	TConstArrayView<FWebToUEInstanceHandle> Targets,
+	TArray<FWebToUEStyleUpdate>& OutUpdates)
+{
+	SCOPE_CYCLE_COUNTER(STAT_WebToUE_Style);
+	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_StyleIncremental);
+	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Style);
+	OutUpdates.Reset();
+	TArray<FWebToUEInstanceHandle> Pending;
+	Pending.Reserve(Targets.Num());
+	for (const FWebToUEInstanceHandle Target : Targets)
+	{
+		if (Document.ResolveNode(Target)) Pending.AddUnique(Target);
+	}
+	Pending.StableSort([&Document](FWebToUEInstanceHandle A, FWebToUEInstanceHandle B)
+	{
+		return WebToUE::Private::GetNodeDepth(*Document.ResolveNode(A)) <
+			WebToUE::Private::GetNodeDepth(*Document.ResolveNode(B));
+	});
+
+	WebToUE::Private::FTypedCascade Cascade;
+	for (int32 PendingIndex = 0; PendingIndex < Pending.Num(); ++PendingIndex)
+	{
+		FWebToUENode* Node = Document.ResolveNode(Pending[PendingIndex]);
+		if (!Node) continue;
+		const FWebToUEComputedStyle OldStyle = Document.GetComputedStyle(*Node);
+		FWebToUEComputedStyle NewStyle =
+			WebToUE::Private::ComputeNodeStyle(*Node, Document, Cascade);
+		FWebToUEStyleChangeSet Changes =
+			WebToUE::Private::BuildChangeSet(OldStyle, NewStyle);
+		Document.GetComputedStyle(*Node) = MoveTemp(NewStyle);
+		if (Changes.IsEmpty()) continue;
+		const bool bPropagateInherited = Changes.HasInheritedPropertyChange();
+		FWebToUEStyleUpdate& Update = OutUpdates.AddDefaulted_GetRef();
+		Update.Target = Node->InstanceHandle;
+		Update.Changes = MoveTemp(Changes);
+		if (bPropagateInherited)
+		{
+			for (const TSharedPtr<FWebToUENode>& Child : Node->Children)
+			{
+				Pending.AddUnique(Child->InstanceHandle);
+			}
+		}
 	}
 }

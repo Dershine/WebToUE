@@ -39,4 +39,9 @@ namespace WebToUE::Private
 		EWebToUECssProperty PropertySlot, EWebToUECssProperty SourceProperty,
 		const FWebToUEStyleValue& Value,
 		FWebToUEComputedStyle& Style);
+	WEBTOUECORE_API bool AreComputedStylePropertyValuesEqual(
+		EWebToUECssProperty Property,
+		const FWebToUEComputedStyle& A,
+		const FWebToUEComputedStyle& B);
+	WEBTOUECORE_API bool IsCanonicalComputedStyleProperty(EWebToUECssProperty Property);
 }

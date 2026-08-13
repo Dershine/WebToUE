@@ -81,7 +81,6 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	{
 		RuntimeInstance->Reset();
 	}
-	CachePseudoStateImpacts();
 	RebuildStylesAndBrushes();
 }
 
@@ -113,7 +112,6 @@ FText SWebToUEView::GetDisplayTextForTesting(const FWebToUENode& Node) const
 void SWebToUEView::SetRuntimeDocumentForTesting(TSharedRef<FWebToUEDocument> InDocument)
 {
 	RuntimeInstance->AdoptDocumentForTesting(MoveTemp(InDocument));
-	CachePseudoStateImpacts();
 	RebuildStylesAndBrushes();
 }
 
@@ -279,27 +277,6 @@ void SWebToUEView::RebuildStylesAndBrushes(EWebToUEStyleImpact Impacts)
 	}
 	Presentation->RebuildCaches(EnumHasAnyFlags(Impacts, EWebToUEStyleImpact::Resource));
 	Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
-}
-
-void SWebToUEView::CachePseudoStateImpacts()
-{
-	PseudoStateImpacts = EWebToUEStyleImpact::Style;
-	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
-	if (!RuntimeDocument) return;
-	for (const FWebToUEStyleRule& Rule : RuntimeDocument->GetRules())
-	{
-		const bool bHasPseudoState = Rule.Selector.ContainsByPredicate(
-			[](const FWebToUESelectorSegment& Segment)
-			{
-				return Segment.RequiredState != EWebToUEPseudoState::None;
-			});
-		if (!bHasPseudoState) continue;
-		for (const FWebToUEStyleDeclaration& Declaration : Rule.Declarations)
-		{
-			PseudoStateImpacts |=
-				WebToUE::Private::GetCssPropertyMetadata(Declaration.Property).Impacts;
-		}
-	}
 }
 
 static bool ReadPropertyAsText(UObject* Context, const FString& Field, FText& Out)
@@ -504,49 +481,230 @@ bool SWebToUEView::ScrollAt(const FVector2f& LocalPosition, float WheelDelta)
 	return false;
 }
 
-void SWebToUEView::ClearStateFlag(EWebToUEPseudoState Flag)
+namespace WebToUE::Runtime::PseudoInvalidation::Private
 {
-	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
-	if (!RuntimeDocument) return;
-	RuntimeDocument->ForEachNode([this, Flag](FWebToUENode& Node)
+	static const TCHAR* StateName(EWebToUEPseudoState State)
 	{
-		GetRuntimeState(Node).PseudoStates &= ~Flag;
-	});
+		switch (State)
+		{
+		case EWebToUEPseudoState::Hover: return TEXT("Hover");
+		case EWebToUEPseudoState::Active: return TEXT("Active");
+		case EWebToUEPseudoState::Focus: return TEXT("Focus");
+		case EWebToUEPseudoState::Disabled: return TEXT("Disabled");
+		default: return TEXT("None");
+		}
+	}
+
+	static FString FormatSelector(const FWebToUEStyleRule& Rule)
+	{
+		FString Result;
+		for (int32 Index = 0; Index < Rule.Selector.Num(); ++Index)
+		{
+			const FWebToUESelectorSegment& Segment = Rule.Selector[Index];
+			if (Index > 0)
+			{
+				Result += Segment.RelationToPrevious == EWebToUECombinator::Child
+					? TEXT(" > ") : TEXT(" ");
+			}
+			Result += Segment.Type.IsEmpty() ? TEXT("*") : Segment.Type;
+			if (!Segment.Id.IsEmpty()) Result += TEXT("#") + Segment.Id;
+			for (const FString& ClassName : Segment.Classes) Result += TEXT(".") + ClassName;
+			if (EnumHasAnyFlags(Segment.RequiredState, EWebToUEPseudoState::Hover)) Result += TEXT(":hover");
+			if (EnumHasAnyFlags(Segment.RequiredState, EWebToUEPseudoState::Active)) Result += TEXT(":active");
+			if (EnumHasAnyFlags(Segment.RequiredState, EWebToUEPseudoState::Focus)) Result += TEXT(":focus");
+			if (EnumHasAnyFlags(Segment.RequiredState, EWebToUEPseudoState::Disabled)) Result += TEXT(":disabled");
+		}
+		return Result;
+	}
+
+	static FString FormatNode(const FWebToUENode& Node)
+	{
+		const FString Id = Node.GetAttribute(TEXT("id"));
+		return Id.IsEmpty() ? Node.Tag : FString::Printf(TEXT("%s#%s"), *Node.Tag, *Id);
+	}
+
+	static FString FormatImpacts(EWebToUEStyleImpact Impacts)
+	{
+		TArray<FString> Names;
+		if (EnumHasAnyFlags(Impacts, EWebToUEStyleImpact::Style)) Names.Add(TEXT("Style"));
+		if (EnumHasAnyFlags(Impacts, EWebToUEStyleImpact::Measure)) Names.Add(TEXT("Measure"));
+		if (EnumHasAnyFlags(Impacts, EWebToUEStyleImpact::Layout)) Names.Add(TEXT("Layout"));
+		if (EnumHasAnyFlags(Impacts, EWebToUEStyleImpact::Paint)) Names.Add(TEXT("Paint"));
+		if (EnumHasAnyFlags(Impacts, EWebToUEStyleImpact::HitTest)) Names.Add(TEXT("HitTest"));
+		if (EnumHasAnyFlags(Impacts, EWebToUEStyleImpact::Resource)) Names.Add(TEXT("Resource"));
+		return FString::Join(Names, TEXT("|"));
+	}
 }
 
-void SWebToUEView::SetStatePath(FWebToUENode* Node, EWebToUEPseudoState Flag)
+void SWebToUEView::UpdatePseudoState(FWebToUENode* OldNode, FWebToUENode* NewNode,
+	EWebToUEPseudoState Flag, bool bIncludeAncestors)
 {
-	for (FWebToUENode* Current = Node; Current; Current = Current->Parent)
+	using namespace WebToUE::Runtime::PseudoInvalidation::Private;
+	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
+	if (!RuntimeDocument) return;
+
+	struct FTargetReason
 	{
-		GetRuntimeState(*Current).PseudoStates |= Flag;
+		FWebToUEInstanceHandle Target;
+		FWebToUEInstanceHandle Source;
+		int32 RuleIndex = INDEX_NONE;
+	};
+	TArray<FWebToUENode*> OldPath;
+	TArray<FWebToUENode*> NewPath;
+	for (FWebToUENode* Current = OldNode; Current;
+		Current = bIncludeAncestors ? Current->Parent : nullptr)
+	{
+		OldPath.Add(Current);
+	}
+	for (FWebToUENode* Current = NewNode; Current;
+		Current = bIncludeAncestors ? Current->Parent : nullptr)
+	{
+		NewPath.Add(Current);
+	}
+
+	TArray<FTargetReason> DirtyTargets;
+	const TArray<FWebToUEStyleRule>& Rules = RuntimeDocument->GetRules();
+	const auto CollectReasonTargets = [&](FWebToUENode& ReasonNode)
+	{
+		for (const FWebToUEPseudoInvalidationDependency& Dependency :
+			RuntimeDocument->GetPseudoInvalidationDependencies())
+		{
+			if (Dependency.ReasonState != Flag ||
+				!Rules.IsValidIndex(Dependency.RuleIndex))
+			{
+				continue;
+			}
+			const FWebToUEStyleRule& Rule = Rules[Dependency.RuleIndex];
+			if (!Rule.Selector.IsValidIndex(Dependency.ReasonSegmentIndex)) continue;
+			const auto TestTarget = [&](FWebToUEInstanceHandle TargetHandle)
+			{
+				FWebToUEPerformanceCapture::RecordCounter(
+					EWebToUEPerformanceCounter::PseudoTargetCandidates);
+				FWebToUENode* Target = RuntimeDocument->ResolveNode(TargetHandle);
+				if (!Target || !FWebToUEStyleResolver::MatchesWithReason(
+					Rule, *Target, *RuntimeDocument,
+					Dependency.ReasonSegmentIndex, ReasonNode))
+				{
+					return;
+				}
+				if (!DirtyTargets.ContainsByPredicate([TargetHandle](const FTargetReason& Existing)
+				{
+					return Existing.Target == TargetHandle;
+				}))
+				{
+					DirtyTargets.Add({ TargetHandle, ReasonNode.InstanceHandle,
+						Dependency.RuleIndex });
+				}
+			};
+			if (Dependency.ReasonSegmentIndex == Rule.Selector.Num() - 1)
+			{
+				TestTarget(ReasonNode.InstanceHandle);
+			}
+			else
+			{
+				RuntimeDocument->ForEachPotentialSelectorTarget(
+					Rule.Selector.Last(), TestTarget);
+			}
+		}
+	};
+
+	for (FWebToUENode* Node : OldPath)
+	{
+		if (NewPath.Contains(Node)) continue;
+		CollectReasonTargets(*Node);
+		GetRuntimeState(*Node).PseudoStates &= ~Flag;
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::PseudoStateNodesChanged);
+		CollectReasonTargets(*Node);
+	}
+	for (FWebToUENode* Node : NewPath)
+	{
+		if (OldPath.Contains(Node)) continue;
+		CollectReasonTargets(*Node);
+		GetRuntimeState(*Node).PseudoStates |= Flag;
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::PseudoStateNodesChanged);
+		CollectReasonTargets(*Node);
+	}
+
+	TArray<FWebToUEInstanceHandle> Targets;
+	Targets.Reserve(DirtyTargets.Num());
+	for (const FTargetReason& DirtyTarget : DirtyTargets) Targets.Add(DirtyTarget.Target);
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::StyleDirtyTargets, Targets.Num());
+	TArray<FWebToUEStyleUpdate> Updates;
+	if (!Targets.IsEmpty())
+	{
+		FWebToUEStyleResolver::ResolveIncremental(*RuntimeDocument, Targets, Updates);
+	}
+
+	EWebToUEStyleImpact CombinedImpacts = EWebToUEStyleImpact::None;
+	uint64 PropertyChangeCount = 0;
+	TArray<FString> ReportLines;
+	for (const FWebToUEStyleUpdate& Update : Updates)
+	{
+		CombinedImpacts |= Update.Changes.Impacts;
+		PropertyChangeCount += Update.Changes.ChangedProperties.Num();
+		const FWebToUENode* Target = RuntimeDocument->ResolveNode(Update.Target);
+		if (!Target) continue;
+		const FTargetReason* Reason = DirtyTargets.FindByPredicate(
+			[Target](const FTargetReason& Candidate)
+			{
+				for (const FWebToUENode* Current = Target; Current; Current = Current->Parent)
+				{
+					if (Current->InstanceHandle == Candidate.Target) return true;
+				}
+				return false;
+			});
+		const FWebToUENode* Source = Reason ? RuntimeDocument->ResolveNode(Reason->Source) : nullptr;
+		TArray<FString> Properties;
+		for (const EWebToUECssProperty Property : Update.Changes.ChangedProperties)
+		{
+			Properties.Add(WebToUE::Private::LexToString(Property));
+		}
+		ReportLines.Add(FString::Printf(TEXT("%s %s -> %s -> %s -> %s -> %s"),
+			StateName(Flag), Source ? *FormatNode(*Source) : TEXT("<source>"),
+			Reason && Rules.IsValidIndex(Reason->RuleIndex)
+				? *FormatSelector(Rules[Reason->RuleIndex]) : TEXT("<inherit>"),
+			*FString::Join(Properties, TEXT("|")),
+			*FormatImpacts(Update.Changes.Impacts), *FormatNode(*Target)));
+	}
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::StylePropertyChanges, PropertyChangeCount);
+	LastPseudoInvalidationReport = ReportLines.IsEmpty()
+		? FString::Printf(TEXT("%s -> no computed property change"), StateName(Flag))
+		: FString::Join(ReportLines, TEXT("\n"));
+
+	if (!Updates.IsEmpty())
+	{
+		Presentation->RebuildCaches(
+			EnumHasAnyFlags(CombinedImpacts, EWebToUEStyleImpact::Resource));
+		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 	}
 }
 
 void SWebToUEView::SetHoveredNode(FWebToUENode* Node)
 {
-	if (RuntimeInstance->GetHoveredNode() == Node) return;
+	FWebToUENode* OldNode = RuntimeInstance->GetHoveredNode();
+	if (OldNode == Node) return;
+	UpdatePseudoState(OldNode, Node, EWebToUEPseudoState::Hover, true);
 	RuntimeInstance->SetHoveredNode(Node);
-	ClearStateFlag(EWebToUEPseudoState::Hover);
-	SetStatePath(Node, EWebToUEPseudoState::Hover);
-	RebuildStylesAndBrushes(PseudoStateImpacts);
 }
 
 void SWebToUEView::SetPressedNode(FWebToUENode* Node)
 {
-	if (RuntimeInstance->GetPressedNode() == Node) return;
+	FWebToUENode* OldNode = RuntimeInstance->GetPressedNode();
+	if (OldNode == Node) return;
+	UpdatePseudoState(OldNode, Node, EWebToUEPseudoState::Active, false);
 	RuntimeInstance->SetPressedNode(Node);
-	ClearStateFlag(EWebToUEPseudoState::Active);
-	if (Node) GetRuntimeState(*Node).PseudoStates |= EWebToUEPseudoState::Active;
-	RebuildStylesAndBrushes(PseudoStateImpacts);
 }
 
 void SWebToUEView::SetFocusedNode(FWebToUENode* Node)
 {
-	if (RuntimeInstance->GetFocusedNode() == Node) return;
+	FWebToUENode* OldNode = RuntimeInstance->GetFocusedNode();
+	if (OldNode == Node) return;
+	UpdatePseudoState(OldNode, Node, EWebToUEPseudoState::Focus, false);
 	RuntimeInstance->SetFocusedNode(Node);
-	ClearStateFlag(EWebToUEPseudoState::Focus);
-	if (Node) GetRuntimeState(*Node).PseudoStates |= EWebToUEPseudoState::Focus;
-	RebuildStylesAndBrushes(PseudoStateImpacts);
 }
 
 FReply SWebToUEView::OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
