@@ -16,9 +16,34 @@ class FWebToUERuntimeInstance;
 
 struct FWebToUETextLayoutCache
 {
+	struct FKey
+	{
+		FString Text;
+		FString FontFamily;
+		FString FontWeight;
+		FString TextAlign;
+		FString WhiteSpace;
+		FString CultureName;
+		FLinearColor Color = FLinearColor::White;
+		float FontSize = 0.0f;
+		float WrapWidth = 0.0f;
+		bool bRichText = false;
+
+		bool operator==(const FKey& Other) const
+		{
+			return Text == Other.Text && FontFamily == Other.FontFamily &&
+				FontWeight == Other.FontWeight && TextAlign == Other.TextAlign &&
+				WhiteSpace == Other.WhiteSpace && CultureName == Other.CultureName &&
+				Color == Other.Color && FontSize == Other.FontSize &&
+				WrapWidth == Other.WrapWidth && bRichText == Other.bRichText;
+		}
+	};
+
 	TSharedPtr<FSlateStyleSet> RichTextStyleSet;
 	TUniquePtr<FSlateTextBlockLayout> Layout;
-	bool bRichText = false;
+	FKey Key;
+	FVector2f DesiredSize = FVector2f::ZeroVector;
+	bool bHasKey = false;
 };
 
 struct FWebToUEPaintOrderRange
@@ -36,7 +61,7 @@ public:
 
 	void Reset();
 	void RebuildCaches(bool bReloadResources);
-	void InvalidateBoundText(FWebToUENode& Node);
+	bool ApplyBoundTextChange(FWebToUENode& Node);
 	void ApplyStyleUpdates(TConstArrayView<FWebToUEStyleUpdate> Updates);
 	void Layout(const FVector2f& ViewportSize) const;
 	int32 Paint(const FPaintArgs& Args, const FGeometry& Geometry,
@@ -56,6 +81,11 @@ public:
 	uint64 GetResourceLoadAttemptsForTesting() const { return ResourceLoadAttemptsForTesting; }
 	const void* GetTextLayoutCacheIdentityForTesting(const FWebToUENode& Node) const;
 	bool IsLayoutDirtyForTesting() const { return bLayoutDirty; }
+	bool IsMeasureDirtyForTesting(const FWebToUENode& Node) const;
+	bool IsLayoutPathDirtyForTesting(const FWebToUENode& Node) const;
+	FVector2f PrepareTextLayoutForTesting(const FWebToUENode& Node,
+		const FWebToUEComputedStyle& Style, float WrapWidth) const;
+	FString GetTextCacheCultureForTesting(const FWebToUENode& Node) const;
 	uint64 GetKnownOwnedBytesForTesting() const;
 #endif
 
@@ -66,6 +96,8 @@ private:
 	mutable bool bLayoutDirty = true;
 	mutable TMap<FWebToUEInstanceHandle, TSharedPtr<FSlateBrush>> Brushes;
 	mutable TMap<FWebToUEInstanceHandle, TUniquePtr<FWebToUETextLayoutCache>> TextLayouts;
+	mutable TSet<FWebToUEInstanceHandle> MeasureDirtyNodes;
+	mutable TSet<FWebToUEInstanceHandle> LayoutDirtyNodes;
 	mutable TArray<TStrongObjectPtr<UObject>> LoadedResources;
 	TArray<FWebToUEInstanceHandle> PaintOrderNodes;
 	TMap<FWebToUEInstanceHandle, FWebToUEPaintOrderRange> PaintOrderRanges;
@@ -86,6 +118,7 @@ private:
 	FSlateTextBlockLayout& PrepareTextLayoutInCache(const FWebToUENode& Node,
 		const FWebToUEComputedStyle& Style, float WrapWidth,
 		TUniquePtr<FWebToUETextLayoutCache>& Cache) const;
+	void MarkTextLayoutDependencyPath(const FWebToUENode& Node);
 	FVector2f MeasureNode(const FWebToUENode& Node,
 		const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
 	FVector2f MeasureNodeWithStyle(const FWebToUENode& Node, const FWebToUEComputedStyle& Style,

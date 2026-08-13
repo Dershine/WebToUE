@@ -58,6 +58,12 @@ public:
 	void SetHoveredNodeForTesting(FWebToUENode* Node) { SetHoveredNode(Node); }
 	void SetFocusedNodeForTesting(FWebToUENode* Node) { SetFocusedNode(Node); }
 	void SetBoundTextForTesting(FWebToUENode& Node, const FText& Text);
+	bool ApplyBoundTextChangeForTesting(FWebToUENode& Node, const FText& Text, bool bRichText);
+	FVector2f PrepareTextLayoutForTesting(const FWebToUENode& Node,
+		const FWebToUEComputedStyle& Style, float WrapWidth) const;
+	bool IsPresentationMeasureDirtyForTesting(const FWebToUENode& Node) const;
+	bool IsPresentationLayoutPathDirtyForTesting(const FWebToUENode& Node) const;
+	FString GetPresentationTextCacheCultureForTesting(const FWebToUENode& Node) const;
 	const FWebToUERuntimeNodeState& GetRuntimeStateForTesting(const FWebToUENode& Node) const;
 	const FWebToUEComputedStyle& GetComputedStyleForTesting(const FWebToUENode& Node) const;
 	const FWebToUERuntimeLayoutResult& GetLayoutResultForTesting(const FWebToUENode& Node) const;

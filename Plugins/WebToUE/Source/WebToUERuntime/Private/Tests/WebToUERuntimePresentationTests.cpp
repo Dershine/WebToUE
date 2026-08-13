@@ -8,6 +8,9 @@
 #include "WebToUEStyleProperties.h"
 
 #include "Input/HittestGrid.h"
+#include "Internationalization/Culture.h"
+#include "Internationalization/Internationalization.h"
+#include "Misc/ScopeExit.h"
 #include "Rendering/DrawElements.h"
 #include "Types/PaintArgs.h"
 #include "UObject/Package.h"
@@ -26,6 +29,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETypedCascadeSlateOutputTest,
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPseudoInvalidationPathTest,
 	"WebToUE.Runtime.PseudoInvalidationPath",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETextCacheKeyAndDirtyPathTest,
+	"WebToUE.Runtime.TextCacheKeyAndDirtyPath",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 namespace WebToUE::RuntimePresentation::Tests
@@ -196,6 +203,163 @@ bool FWebToUERuntimePresentationIsolationTest::RunTest(const FString& Parameters
 		Document->GetCompiledNodes().GetData(), InitialNodeStorage);
 	TestEqual(TEXT("Presentation work does not replace compiled rule storage"),
 		Document->GetCompiledRules().GetData(), InitialRuleStorage);
+	return true;
+}
+
+bool FWebToUETextCacheKeyAndDirtyPathTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::RuntimePresentation::Tests;
+	const TSharedRef<FWebToUEDocument> Document = FWebToUECompiler::Compile(
+		TEXT("<body id='root'><section id='branch'><span id='target'>1111</span>")
+		TEXT("<span id='sibling'>Stable</span></section><aside id='other'>Other</aside></body>"),
+		TEXT("#target { white-space: normal; font-size: 16px; color: white; }"));
+	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
+	View->SetRuntimeDocumentForTesting(Document);
+	FWebToUENode* Root = View->FindRuntimeNodeByIdForTesting(TEXT("root"));
+	FWebToUENode* Branch = View->FindRuntimeNodeByIdForTesting(TEXT("branch"));
+	FWebToUENode* Target = View->FindRuntimeNodeByIdForTesting(TEXT("target"));
+	FWebToUENode* Sibling = View->FindRuntimeNodeByIdForTesting(TEXT("sibling"));
+	FWebToUENode* Other = View->FindRuntimeNodeByIdForTesting(TEXT("other"));
+	TestNotNull(TEXT("The text-cache root exists"), Root);
+	TestNotNull(TEXT("The text-cache branch exists"), Branch);
+	TestNotNull(TEXT("The text-cache target exists"), Target);
+	TestNotNull(TEXT("The text-cache sibling exists"), Sibling);
+	TestNotNull(TEXT("The unrelated branch exists"), Other);
+	if (!Root || !Branch || !Target || !Sibling || !Other || Target->Children.IsEmpty() ||
+		Sibling->Children.IsEmpty() || Other->Children.IsEmpty())
+	{
+		return false;
+	}
+	FWebToUENode& TargetText = *Target->Children[0];
+	FWebToUENode& SiblingText = *Sibling->Children[0];
+	FWebToUENode& OtherText = *Other->Children[0];
+	PaintView(View);
+	const void* TargetCache = View->GetPresentationTextCacheIdentityForTesting(TargetText);
+	const void* SiblingCache = View->GetPresentationTextCacheIdentityForTesting(SiblingText);
+	TestNotNull(TEXT("Final paint warms the target text cache"), TargetCache);
+	TestNotNull(TEXT("Final paint warms the sibling text cache"), SiblingCache);
+
+	const FWebToUEComputedStyle BaseStyle = View->GetComputedStyleForTesting(TargetText);
+	const float Constraint = View->GetLayoutResultForTesting(TargetText).Size.X;
+	View->PrepareTextLayoutForTesting(TargetText, BaseStyle, Constraint);
+	FWebToUEPerformanceSnapshot CacheHitSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->PrepareTextLayoutForTesting(TargetText, BaseStyle, Constraint);
+		CacheHitSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("An identical text key skips Desired Size computation"),
+		CacheHitSnapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(0));
+
+	FWebToUEComputedStyle ColorStyle = BaseStyle;
+	ColorStyle.Color = FLinearColor::Red;
+	FWebToUEPerformanceSnapshot StyleSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->PrepareTextLayoutForTesting(TargetText, ColorStyle, Constraint);
+		StyleSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("A text style change invalidates the cache key"),
+		StyleSnapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(1));
+	FWebToUEComputedStyle FontStyle = ColorStyle;
+	FontStyle.FontSize += 2.0f;
+	FWebToUEPerformanceSnapshot FontSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->PrepareTextLayoutForTesting(TargetText, FontStyle, Constraint);
+		FontSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("A font change invalidates the cache key"),
+		FontSnapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(1));
+	FWebToUEPerformanceSnapshot ConstraintSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->PrepareTextLayoutForTesting(TargetText, FontStyle, Constraint * 0.5f);
+		ConstraintSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("A constraint change invalidates the cache key"),
+		ConstraintSnapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(1));
+
+	const FString OriginalCulture = FInternationalization::Get().GetCurrentCulture()->GetName();
+	const FString AlternateCulture = OriginalCulture.StartsWith(TEXT("fr"))
+		? TEXT("en") : TEXT("fr");
+	ON_SCOPE_EXIT
+	{
+		FInternationalization::Get().SetCurrentCulture(OriginalCulture);
+	};
+	if (FInternationalization::Get().SetCurrentCulture(AlternateCulture))
+	{
+		FWebToUEPerformanceSnapshot CultureSnapshot;
+		{
+			FWebToUEPerformanceCapture Capture;
+			View->PrepareTextLayoutForTesting(TargetText, FontStyle, Constraint * 0.5f);
+			CultureSnapshot = Capture.GetSnapshot();
+		}
+		TestEqual(TEXT("A locale change invalidates the cache key"),
+			CultureSnapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(1));
+		TestEqual(TEXT("The cache records the active locale"),
+			View->GetPresentationTextCacheCultureForTesting(TargetText), AlternateCulture);
+	}
+	else
+	{
+		AddWarning(TEXT("The alternate culture is unavailable; locale-key invalidation was not exercised."));
+	}
+	FInternationalization::Get().SetCurrentCulture(OriginalCulture);
+
+	View->PrepareTextLayoutForTesting(TargetText, BaseStyle, Constraint);
+	View->LayoutForTesting(FVector2f(320.0f, 180.0f));
+	FWebToUEPerformanceSnapshot EqualSizeSnapshot;
+	bool bEqualSizeChanged = true;
+	{
+		FWebToUEPerformanceCapture Capture;
+		bEqualSizeChanged = View->ApplyBoundTextChangeForTesting(
+			TargetText, FText::FromString(TEXT("2222")), false);
+		EqualSizeSnapshot = Capture.GetSnapshot();
+	}
+	TestFalse(TEXT("Tabular digit text with unchanged Desired Size skips layout"),
+		bEqualSizeChanged);
+	TestFalse(TEXT("Unchanged Desired Size keeps presentation layout clean"),
+		View->IsPresentationLayoutDirtyForTesting());
+	TestEqual(TEXT("Unchanged Desired Size performs no Yoga work"),
+		EqualSizeSnapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(0));
+	TestEqual(TEXT("Only the changed text recomputes its Desired Size"),
+		EqualSizeSnapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(1));
+	TestEqual(TEXT("Plain-text key changes preserve the target cache allocation"),
+		View->GetPresentationTextCacheIdentityForTesting(TargetText), TargetCache);
+	TestEqual(TEXT("The unrelated sibling cache is untouched"),
+		View->GetPresentationTextCacheIdentityForTesting(SiblingText), SiblingCache);
+
+	const bool bLongTextChanged = View->ApplyBoundTextChangeForTesting(TargetText,
+		FText::FromString(TEXT("A substantially longer value changes desired size")), false);
+	TestTrue(TEXT("A changed Desired Size requests layout"), bLongTextChanged);
+	TestTrue(TEXT("Only the changed text is measure-dirty"),
+		View->IsPresentationMeasureDirtyForTesting(TargetText));
+	TestFalse(TEXT("The sibling text is not measure-dirty"),
+		View->IsPresentationMeasureDirtyForTesting(SiblingText));
+	TestTrue(TEXT("The changed text is on the layout dependency path"),
+		View->IsPresentationLayoutPathDirtyForTesting(TargetText));
+	TestTrue(TEXT("Its parent is on the layout dependency path"),
+		View->IsPresentationLayoutPathDirtyForTesting(*Target));
+	TestTrue(TEXT("Its ancestor is on the layout dependency path"),
+		View->IsPresentationLayoutPathDirtyForTesting(*Branch));
+	TestTrue(TEXT("The root is on the layout dependency path"),
+		View->IsPresentationLayoutPathDirtyForTesting(*Root));
+	TestFalse(TEXT("An unrelated sibling branch is outside the layout dependency path"),
+		View->IsPresentationLayoutPathDirtyForTesting(*Other));
+	TestFalse(TEXT("Unrelated text is outside the layout dependency path"),
+		View->IsPresentationLayoutPathDirtyForTesting(OtherText));
+
+	FWebToUEPerformanceSnapshot RichTextSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->ApplyBoundTextChangeForTesting(TargetText,
+			FText::FromString(TEXT("<strong>Rich</>")), true);
+		RichTextSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("Changing RichText mode rebuilds only its text layout"),
+		RichTextSnapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutBuilds), uint64(1));
+	TestEqual(TEXT("RichText changes do not evict the sibling cache"),
+		View->GetPresentationTextCacheIdentityForTesting(SiblingText), SiblingCache);
 	return true;
 }
 

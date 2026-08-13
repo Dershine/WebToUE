@@ -11,6 +11,8 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Text/PlainTextLayoutMarshaller.h"
 #include "Framework/Text/RichTextLayoutMarshaller.h"
+#include "Internationalization/Culture.h"
+#include "Internationalization/Internationalization.h"
 #include "Layout/Clipping.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Rendering/DrawElements.h"
@@ -137,6 +139,8 @@ void FWebToUERuntimePresentation::Reset()
 	bLayoutDirty = true;
 	Brushes.Reset();
 	TextLayouts.Reset();
+	MeasureDirtyNodes.Reset();
+	LayoutDirtyNodes.Reset();
 	LoadedResources.Reset();
 	PaintOrderNodes.Reset();
 	PaintOrderRanges.Reset();
@@ -149,6 +153,7 @@ void FWebToUERuntimePresentation::Reset()
 uint64 FWebToUERuntimePresentation::GetKnownOwnedBytesForTesting() const
 {
 	uint64 Bytes = sizeof(*this) + Brushes.GetAllocatedSize() + TextLayouts.GetAllocatedSize() +
+		MeasureDirtyNodes.GetAllocatedSize() + LayoutDirtyNodes.GetAllocatedSize() +
 		LoadedResources.GetAllocatedSize() + PaintOrderNodes.GetAllocatedSize() +
 		PaintOrderRanges.GetAllocatedSize();
 	for (const TPair<FWebToUEInstanceHandle, TSharedPtr<FSlateBrush>>& Pair : Brushes)
@@ -172,6 +177,8 @@ uint64 FWebToUERuntimePresentation::GetKnownOwnedBytesForTesting() const
 void FWebToUERuntimePresentation::RebuildCaches(bool bReloadResources)
 {
 	TextLayouts.Reset();
+	MeasureDirtyNodes.Reset();
+	LayoutDirtyNodes.Reset();
 	if (GetDocument())
 	{
 		RebuildPaintOrderCache();
@@ -187,14 +194,35 @@ void FWebToUERuntimePresentation::RebuildCaches(bool bReloadResources)
 	bLayoutDirty = true;
 }
 
-void FWebToUERuntimePresentation::InvalidateBoundText(FWebToUENode& Node)
+void FWebToUERuntimePresentation::MarkTextLayoutDependencyPath(const FWebToUENode& Node)
 {
-	if (TextLayouts.Remove(RuntimeInstance.GetHandle(&Node)) > 0)
+	MeasureDirtyNodes.Add(RuntimeInstance.GetHandle(&Node));
+	for (const FWebToUENode* Current = &Node; Current; Current = Current->Parent)
 	{
-		FWebToUEPerformanceCapture::RecordCounter(
-			EWebToUEPerformanceCounter::TextCacheInvalidations);
+		LayoutDirtyNodes.Add(RuntimeInstance.GetHandle(Current));
 	}
 	bLayoutDirty = true;
+}
+
+bool FWebToUERuntimePresentation::ApplyBoundTextChange(FWebToUENode& Node)
+{
+	TUniquePtr<FWebToUETextLayoutCache>* CachePtr =
+		TextLayouts.Find(RuntimeInstance.GetHandle(&Node));
+	if (!CachePtr || !CachePtr->IsValid() || !(*CachePtr)->bHasKey)
+	{
+		MarkTextLayoutDependencyPath(Node);
+		return true;
+	}
+
+	const FVector2f PreviousDesiredSize = (*CachePtr)->DesiredSize;
+	const float PreviousWrapWidth = (*CachePtr)->Key.WrapWidth;
+	PrepareTextLayoutInCache(Node, GetStyle(Node), PreviousWrapWidth, *CachePtr);
+	if (PreviousDesiredSize.Equals((*CachePtr)->DesiredSize, 0.01f))
+	{
+		return false;
+	}
+	MarkTextLayoutDependencyPath(Node);
+	return true;
 }
 
 void FWebToUERuntimePresentation::ApplyStyleUpdates(
@@ -231,19 +259,6 @@ void FWebToUERuntimePresentation::ApplyStyleUpdates(
 		{
 			RebuildBrush(*Node, false);
 		}
-		const bool bTextCacheChanged = Node->Type == EWebToUENodeType::Text &&
-			Update.Changes.ChangedProperties.ContainsByPredicate(
-			[](EWebToUECssProperty Property)
-			{
-				return Property == EWebToUECssProperty::Color ||
-					EnumHasAnyFlags(WebToUE::Private::GetCssPropertyMetadata(Property).Impacts,
-						EWebToUEStyleImpact::Measure | EWebToUEStyleImpact::Resource);
-			});
-		if (bTextCacheChanged && TextLayouts.Remove(Update.Target) > 0)
-		{
-			FWebToUEPerformanceCapture::RecordCounter(
-				EWebToUEPerformanceCounter::TextCacheInvalidations);
-		}
 	}
 	if (bRebuildPaintOrder)
 	{
@@ -275,12 +290,32 @@ FSlateTextBlockLayout& FWebToUERuntimePresentation::PrepareTextLayoutInCache(
 {
 	using namespace WebToUE::Runtime::Presentation::Private;
 	const bool bRichText = IsRichText(Node);
-	if (!Cache || Cache->bRichText != bRichText)
+	const float EffectiveWrapWidth = Style.WhiteSpace == TEXT("normal") &&
+		FMath::IsFinite(WrapWidth) && WrapWidth > 0.0f ? WrapWidth : 0.0f;
+	FWebToUETextLayoutCache::FKey Key;
+	Key.Text = GetDisplayText(Node).ToString();
+	Key.FontFamily = Style.FontFamily;
+	Key.FontWeight = Style.FontWeight;
+	Key.TextAlign = Style.TextAlign;
+	Key.WhiteSpace = Style.WhiteSpace;
+	Key.CultureName = FInternationalization::Get().GetCurrentCulture()->GetName();
+	Key.Color = Style.Color;
+	Key.FontSize = Style.FontSize;
+	Key.WrapWidth = EffectiveWrapWidth;
+	Key.bRichText = bRichText;
+	const bool bKeyChanged = !Cache || !Cache->bHasKey || !(Cache->Key == Key);
+	const bool bRichLayoutChanged = !Cache || !Cache->bHasKey ||
+		Cache->Key.bRichText != bRichText ||
+		(bRichText && (Cache->Key.FontFamily != Key.FontFamily ||
+			Cache->Key.FontWeight != Key.FontWeight ||
+			Cache->Key.FontSize != Key.FontSize || Cache->Key.Color != Key.Color));
+	if (!Cache || bRichLayoutChanged)
 	{
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TextLayoutBuilds);
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
+		const FVector2f PreviousDesiredSize = Cache ? Cache->DesiredSize : FVector2f::ZeroVector;
 		Cache = MakeUnique<FWebToUETextLayoutCache>();
-		Cache->bRichText = bRichText;
+		Cache->DesiredSize = PreviousDesiredSize;
 		TSharedRef<ITextLayoutMarshaller> Marshaller = FPlainTextLayoutMarshaller::Create();
 		if (bRichText)
 		{
@@ -293,14 +328,19 @@ FSlateTextBlockLayout& FWebToUERuntimePresentation::PrepareTextLayoutInCache(
 			FTextBlockStyle::GetDefault(), TOptional<ETextShapingMethod>(),
 			TOptional<ETextFlowDirection>(), FCreateSlateTextLayout(), Marshaller, nullptr);
 	}
-	const float EffectiveWrapWidth = Style.WhiteSpace == TEXT("normal") &&
-		FMath::IsFinite(WrapWidth) && WrapWidth > 0.0f ? WrapWidth : 0.0f;
+	if (!bKeyChanged && Cache->bHasKey)
+	{
+		return *Cache->Layout;
+	}
 	const FSlateTextBlockLayout::FWidgetDesiredSizeArgs DesiredSizeArgs(
 		GetDisplayText(Node), FText::GetEmpty(), EffectiveWrapWidth, false,
 		ETextWrappingPolicy::DefaultWrapping, ETextTransformPolicy::None, FMargin(), 1.0f, true,
 		ToTextJustification(Style.TextAlign));
 	FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TextLayoutComputes);
 	Cache->Layout->ComputeDesiredSize(DesiredSizeArgs, 1.0f, MakeTextBlockStyle(Style));
+	Cache->Key = MoveTemp(Key);
+	Cache->DesiredSize = FVector2f(Cache->Layout->GetDesiredSize());
+	Cache->bHasKey = true;
 	return *Cache->Layout;
 }
 
@@ -356,6 +396,8 @@ void FWebToUERuntimePresentation::Layout(const FVector2f& ViewportSize) const
 		});
 	LastViewportSize = ViewportSize;
 	bLayoutDirty = false;
+	MeasureDirtyNodes.Reset();
+	LayoutDirtyNodes.Reset();
 }
 
 int32 FWebToUERuntimePresentation::Paint(const FPaintArgs& Args, const FGeometry& Geometry,
@@ -681,6 +723,36 @@ FVector2f FWebToUERuntimePresentation::MeasureRichTextForTesting(
 	Style.WhiteSpace = bWrap ? TEXT("normal") : TEXT("nowrap");
 	TUniquePtr<FWebToUETextLayoutCache> Cache;
 	return FVector2f(PrepareTextLayoutInCache(Node, Style, Width, Cache).GetDesiredSize());
+}
+
+FVector2f FWebToUERuntimePresentation::PrepareTextLayoutForTesting(
+	const FWebToUENode& Node, const FWebToUEComputedStyle& Style, float WrapWidth) const
+{
+	return FVector2f(PrepareTextLayout(Node, Style, WrapWidth).GetDesiredSize());
+}
+
+bool FWebToUERuntimePresentation::IsMeasureDirtyForTesting(
+	const FWebToUENode& Node) const
+{
+	return MeasureDirtyNodes.Contains(RuntimeInstance.GetHandle(&Node));
+}
+
+bool FWebToUERuntimePresentation::IsLayoutPathDirtyForTesting(
+	const FWebToUENode& Node) const
+{
+	return LayoutDirtyNodes.Contains(RuntimeInstance.GetHandle(&Node));
+}
+
+FString FWebToUERuntimePresentation::GetTextCacheCultureForTesting(
+	const FWebToUENode& Node) const
+{
+	if (const TUniquePtr<FWebToUETextLayoutCache>* Cache =
+		TextLayouts.Find(RuntimeInstance.GetHandle(&Node));
+		Cache && Cache->IsValid() && (*Cache)->bHasKey)
+	{
+		return (*Cache)->Key.CultureName;
+	}
+	return FString();
 }
 
 const void* FWebToUERuntimePresentation::GetTextLayoutCacheIdentityForTesting(

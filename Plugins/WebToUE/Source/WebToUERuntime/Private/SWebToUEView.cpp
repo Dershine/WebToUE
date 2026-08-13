@@ -208,6 +208,39 @@ void SWebToUEView::SetBoundTextForTesting(FWebToUENode& Node, const FText& Text)
 	State.bHasBoundText = true;
 }
 
+bool SWebToUEView::ApplyBoundTextChangeForTesting(FWebToUENode& Node, const FText& Text,
+	bool bRichText)
+{
+	FWebToUERuntimeNodeState& State = GetRuntimeState(Node);
+	State.BoundText = Text;
+	State.bHasBoundText = true;
+	State.bHasRichTextOverride = true;
+	State.bRichTextOverride = bRichText;
+	return Presentation->ApplyBoundTextChange(Node);
+}
+
+FVector2f SWebToUEView::PrepareTextLayoutForTesting(const FWebToUENode& Node,
+	const FWebToUEComputedStyle& Style, float WrapWidth) const
+{
+	return Presentation->PrepareTextLayoutForTesting(Node, Style, WrapWidth);
+}
+
+bool SWebToUEView::IsPresentationMeasureDirtyForTesting(const FWebToUENode& Node) const
+{
+	return Presentation->IsMeasureDirtyForTesting(Node);
+}
+
+bool SWebToUEView::IsPresentationLayoutPathDirtyForTesting(const FWebToUENode& Node) const
+{
+	return Presentation->IsLayoutPathDirtyForTesting(Node);
+}
+
+FString SWebToUEView::GetPresentationTextCacheCultureForTesting(
+	const FWebToUENode& Node) const
+{
+	return Presentation->GetTextCacheCultureForTesting(Node);
+}
+
 FWebToUENode* SWebToUEView::FindRuntimeNodeByIdForTesting(const FString& Id) const
 {
 	FWebToUENode* Result = nullptr;
@@ -324,6 +357,7 @@ void SWebToUEView::RefreshBindings(UObject* DataContext, FName ChangedField)
 	TSet<FWebToUEInstanceHandle> UpdatedNodes;
 	TArray<FWebToUEInstanceHandle> StyleTargets;
 	bool bTextChanged = false;
+	bool bTextMeasureChanged = false;
 	bool bPaintChanged = false;
 	const auto ApplyField = [&](FName RootField)
 	{
@@ -393,7 +427,7 @@ void SWebToUEView::RefreshBindings(UObject* DataContext, FName ChangedField)
 				TextState.bHasRichTextOverride = true;
 				TextState.bRichTextOverride = Op.bRichText;
 				UpdatedNodes.Add(TextNode->InstanceHandle);
-				Presentation->InvalidateBoundText(*TextNode);
+				bTextMeasureChanged |= Presentation->ApplyBoundTextChange(*TextNode);
 				bTextChanged = true;
 			}
 			else
@@ -446,7 +480,7 @@ void SWebToUEView::RefreshBindings(UObject* DataContext, FName ChangedField)
 	}
 	if (bTextChanged || bPaintChanged || !StyleUpdates.IsEmpty())
 	{
-		const bool bNeedsLayout = bTextChanged || StyleUpdates.ContainsByPredicate(
+		const bool bNeedsLayout = bTextMeasureChanged || StyleUpdates.ContainsByPredicate(
 			[](const FWebToUEStyleUpdate& Update)
 			{
 				return EnumHasAnyFlags(Update.Changes.Impacts,
