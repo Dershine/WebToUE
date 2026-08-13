@@ -20,5 +20,6 @@ class FWebToUEBenchmarkScenarioGenerator
 {
 public:
 	static const TArray<FWebToUEBenchmarkScenarioDefinition>& GetStandardDefinitions();
+	static const TArray<FWebToUEBenchmarkScenarioDefinition>& GetHydrationDefinitions();
 	static FWebToUEBenchmarkScenario Generate(const FWebToUEBenchmarkScenarioDefinition& Definition);
 };

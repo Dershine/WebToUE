@@ -32,6 +32,12 @@ public:
 	void SetPressedNode(FWebToUENode* Node) { PressedNode = Node; }
 	void SetFocusedNode(FWebToUENode* Node) { FocusedNode = Node; }
 
+#if WITH_DEV_AUTOMATION_TESTS
+	uint64 GetKnownOwnedBytesForTesting() const;
+	int32 GetRuntimeNodeCountForTesting() const;
+	int32 GetRuntimeRuleCountForTesting() const;
+#endif
+
 private:
 	TSharedPtr<FWebToUEDocument> RuntimeDocument;
 	FWebToUENode* HoveredNode = nullptr;

@@ -81,6 +81,12 @@ void UWebToUEView::LayoutForTesting(const FVector2f& ViewportSize)
 		SlateView->LayoutForTesting(ViewportSize);
 	}
 }
+
+bool UWebToUEView::GetRuntimeMemoryCensusForTesting(
+	FWebToUERuntimeMemoryCensus& OutCensus) const
+{
+	return SlateView && SlateView->GetRuntimeMemoryCensusForTesting(OutCensus);
+}
 #endif
 
 void UWebToUEView::BindFieldNotifications()

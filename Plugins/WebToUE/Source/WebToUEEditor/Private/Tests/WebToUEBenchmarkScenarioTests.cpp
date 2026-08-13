@@ -115,6 +115,16 @@ bool FWebToUEBenchmarkScenarioTest::RunTest(const FString& Parameters)
 	const TArray<FWebToUEBenchmarkScenarioDefinition>& Definitions =
 		FWebToUEBenchmarkScenarioGenerator::GetStandardDefinitions();
 	TestEqual(TEXT("The benchmark corpus has three standard scales"), Definitions.Num(), 3);
+	const TArray<FWebToUEBenchmarkScenarioDefinition>& HydrationDefinitions =
+		FWebToUEBenchmarkScenarioGenerator::GetHydrationDefinitions();
+	TestEqual(TEXT("The hydration corpus has three standard scales"), HydrationDefinitions.Num(), 3);
+	if (HydrationDefinitions.Num() == 3)
+	{
+		TestEqual(TEXT("The largest hydration corpus has 10,000 nodes"),
+			HydrationDefinitions[2].NodeCount, 10000);
+		TestEqual(TEXT("The largest hydration corpus holds rules at 500"),
+			HydrationDefinitions[2].RuleCount, 500);
+	}
 
 	const int32 ExpectedNodeCounts[] = { 100, 500, 2000 };
 	const int32 ExpectedRuleCounts[] = { 50, 200, 500 };

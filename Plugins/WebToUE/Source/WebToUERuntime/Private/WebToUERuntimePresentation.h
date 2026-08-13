@@ -54,6 +54,7 @@ public:
 	uint64 GetResourceLoadAttemptsForTesting() const { return ResourceLoadAttemptsForTesting; }
 	const void* GetTextLayoutCacheIdentityForTesting(const FWebToUENode& Node) const;
 	bool IsLayoutDirtyForTesting() const { return bLayoutDirty; }
+	uint64 GetKnownOwnedBytesForTesting() const;
 #endif
 
 private:

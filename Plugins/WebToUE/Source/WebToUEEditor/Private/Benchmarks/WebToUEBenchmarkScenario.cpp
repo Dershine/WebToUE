@@ -46,6 +46,16 @@ const TArray<FWebToUEBenchmarkScenarioDefinition>& FWebToUEBenchmarkScenarioGene
 	return Definitions;
 }
 
+const TArray<FWebToUEBenchmarkScenarioDefinition>& FWebToUEBenchmarkScenarioGenerator::GetHydrationDefinitions()
+{
+	static const TArray<FWebToUEBenchmarkScenarioDefinition> Definitions = {
+		{ TEXT("Hydrate_500Nodes_200Rules"), 500, 200 },
+		{ TEXT("Hydrate_2000Nodes_500Rules"), 2000, 500 },
+		{ TEXT("Hydrate_10000Nodes_500Rules"), 10000, 500 }
+	};
+	return Definitions;
+}
+
 FWebToUEBenchmarkScenario FWebToUEBenchmarkScenarioGenerator::Generate(
 	const FWebToUEBenchmarkScenarioDefinition& Definition)
 {

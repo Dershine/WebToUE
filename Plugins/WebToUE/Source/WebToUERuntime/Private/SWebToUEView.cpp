@@ -119,6 +119,20 @@ void SWebToUEView::LayoutForTesting(const FVector2f& ViewportSize) const
 	Presentation->Layout(ViewportSize);
 }
 
+bool SWebToUEView::GetRuntimeMemoryCensusForTesting(
+	FWebToUERuntimeMemoryCensus& OutCensus) const
+{
+	if (!RuntimeInstance || !RuntimeInstance->GetDocument() || !Presentation)
+	{
+		return false;
+	}
+	OutCensus.RuntimeKnownOwnedBytes = RuntimeInstance->GetKnownOwnedBytesForTesting();
+	OutCensus.PresentationKnownOwnedBytes = Presentation->GetKnownOwnedBytesForTesting();
+	OutCensus.RuntimeNodeCount = RuntimeInstance->GetRuntimeNodeCountForTesting();
+	OutCensus.RuntimeRuleCount = RuntimeInstance->GetRuntimeRuleCountForTesting();
+	return true;
+}
+
 FVector2f SWebToUEView::GetVisualPositionForTesting(const FWebToUENode& Node) const
 {
 	return Presentation->GetVisualPosition(Node);

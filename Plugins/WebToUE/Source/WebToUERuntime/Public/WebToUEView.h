@@ -8,6 +8,21 @@
 class SWebToUEView;
 class UWebToUEDocument;
 
+#if WITH_DEV_AUTOMATION_TESTS
+struct FWebToUERuntimeMemoryCensus
+{
+	uint64 RuntimeKnownOwnedBytes = 0;
+	uint64 PresentationKnownOwnedBytes = 0;
+	int32 RuntimeNodeCount = 0;
+	int32 RuntimeRuleCount = 0;
+
+	uint64 GetTotalKnownOwnedBytes() const
+	{
+		return RuntimeKnownOwnedBytes + PresentationKnownOwnedBytes;
+	}
+};
+#endif
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FWebToUEEvent, FName, EventName, FName, ElementId);
 
 UCLASS(meta=(DisplayName="WebToUE View"))
@@ -43,6 +58,7 @@ public:
 
 #if WITH_DEV_AUTOMATION_TESTS
 	void LayoutForTesting(const FVector2f& ViewportSize);
+	bool GetRuntimeMemoryCensusForTesting(FWebToUERuntimeMemoryCensus& OutCensus) const;
 #endif
 
 #if WITH_EDITOR

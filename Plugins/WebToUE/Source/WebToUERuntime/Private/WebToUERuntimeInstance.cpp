@@ -9,6 +9,45 @@ DEFINE_LOG_CATEGORY_STATIC(LogWebToUERuntimeInstance, Log, All);
 
 namespace WebToUE::RuntimeInstance::Private
 {
+	static uint64 GetStyleValueOwnedBytes(const FWebToUEStyleValue& Value)
+	{
+		return Value.String.GetAllocatedSize();
+	}
+
+	static uint64 GetDeclarationOwnedBytes(const FWebToUEStyleDeclaration& Declaration)
+	{
+		return GetStyleValueOwnedBytes(Declaration.TypedValue) +
+			Declaration.Name.GetAllocatedSize() + Declaration.Value.GetAllocatedSize();
+	}
+
+	static uint64 GetComputedStyleOwnedBytes(const FWebToUEComputedStyle& Style)
+	{
+		return Style.FlexWrap.GetAllocatedSize() + Style.JustifyContent.GetAllocatedSize() +
+			Style.AlignItems.GetAllocatedSize() + Style.AlignSelf.GetAllocatedSize() +
+			Style.FontFamily.GetAllocatedSize() + Style.FontWeight.GetAllocatedSize() +
+			Style.TextAlign.GetAllocatedSize() + Style.WhiteSpace.GetAllocatedSize() +
+			Style.ObjectFit.GetAllocatedSize();
+	}
+
+	static uint64 GetSelectorIndexOwnedBytes(const FWebToUESelectorIndex& Index)
+	{
+		uint64 Bytes = Index.IdRules.GetAllocatedSize() + Index.ClassRules.GetAllocatedSize() +
+			Index.TagRules.GetAllocatedSize() + Index.HoverRules.GetAllocatedSize() +
+			Index.ActiveRules.GetAllocatedSize() + Index.FocusRules.GetAllocatedSize() +
+			Index.DisabledRules.GetAllocatedSize() + Index.UniversalRules.GetAllocatedSize();
+		const auto AddMapBytes = [&Bytes](const TMap<FString, TArray<int32>>& Map)
+		{
+			for (const TPair<FString, TArray<int32>>& Pair : Map)
+			{
+				Bytes += Pair.Key.GetAllocatedSize() + Pair.Value.GetAllocatedSize();
+			}
+		};
+		AddMapBytes(Index.IdRules);
+		AddMapBytes(Index.ClassRules);
+		AddMapBytes(Index.TagRules);
+		return Bytes;
+	}
+
 	static bool HydrateDeclaration(const FWebToUECompiledDeclaration& Source,
 		FWebToUEStyleDeclaration& OutDeclaration)
 	{
@@ -38,6 +77,88 @@ namespace WebToUE::RuntimeInstance::Private
 		return true;
 	}
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+uint64 FWebToUERuntimeInstance::GetKnownOwnedBytesForTesting() const
+{
+	using namespace WebToUE::RuntimeInstance::Private;
+	uint64 Bytes = sizeof(*this);
+	if (!RuntimeDocument)
+	{
+		return Bytes;
+	}
+
+	Bytes += sizeof(FWebToUEDocument);
+	Bytes += RuntimeDocument->Rules.GetAllocatedSize();
+	Bytes += RuntimeDocument->LinkedStylesheets.GetAllocatedSize();
+	Bytes += RuntimeDocument->Diagnostics.GetAllocatedSize();
+	Bytes += RuntimeDocument->RuntimeNodeStates.GetAllocatedSize();
+	Bytes += RuntimeDocument->RuntimeRenderData.GetAllocatedSize();
+	Bytes += GetSelectorIndexOwnedBytes(RuntimeDocument->SelectorIndex);
+
+	for (const FString& Stylesheet : RuntimeDocument->LinkedStylesheets)
+	{
+		Bytes += Stylesheet.GetAllocatedSize();
+	}
+	for (const FWebToUEStyleRule& Rule : RuntimeDocument->Rules)
+	{
+		Bytes += Rule.Selector.GetAllocatedSize() + Rule.Declarations.GetAllocatedSize();
+		for (const FWebToUESelectorSegment& Segment : Rule.Selector)
+		{
+			Bytes += Segment.Type.GetAllocatedSize() + Segment.Id.GetAllocatedSize() +
+				Segment.Classes.GetAllocatedSize();
+			for (const FString& ClassName : Segment.Classes)
+			{
+				Bytes += ClassName.GetAllocatedSize();
+			}
+		}
+		for (const FWebToUEStyleDeclaration& Declaration : Rule.Declarations)
+		{
+			Bytes += GetDeclarationOwnedBytes(Declaration);
+		}
+	}
+
+	RuntimeDocument->ForEachNode([&Bytes](FWebToUENode& Node)
+	{
+		Bytes += sizeof(FWebToUENode) + Node.Tag.GetAllocatedSize() + Node.Text.GetAllocatedSize() +
+			Node.Attributes.GetAllocatedSize() + Node.InlineStyleDeclarations.GetAllocatedSize() +
+			Node.Children.GetAllocatedSize() + Node.SelectorId.GetAllocatedSize() +
+			Node.SelectorClasses.GetAllocatedSize();
+		for (const TPair<FString, FString>& Attribute : Node.Attributes)
+		{
+			Bytes += Attribute.Key.GetAllocatedSize() + Attribute.Value.GetAllocatedSize();
+		}
+		for (const FWebToUEStyleDeclaration& Declaration : Node.InlineStyleDeclarations)
+		{
+			Bytes += GetDeclarationOwnedBytes(Declaration);
+		}
+		for (const FString& ClassName : Node.SelectorClasses)
+		{
+			Bytes += ClassName.GetAllocatedSize();
+		}
+	});
+	for (const FWebToUERuntimeRenderData& RenderData : RuntimeDocument->RuntimeRenderData)
+	{
+		Bytes += GetComputedStyleOwnedBytes(RenderData.ComputedStyle);
+	}
+	return Bytes;
+}
+
+int32 FWebToUERuntimeInstance::GetRuntimeNodeCountForTesting() const
+{
+	int32 NodeCount = 0;
+	if (RuntimeDocument)
+	{
+		RuntimeDocument->ForEachNode([&NodeCount](FWebToUENode&) { ++NodeCount; });
+	}
+	return NodeCount;
+}
+
+int32 FWebToUERuntimeInstance::GetRuntimeRuleCountForTesting() const
+{
+	return RuntimeDocument ? RuntimeDocument->Rules.Num() : 0;
+}
+#endif
 
 void FWebToUERuntimeInstance::Reset()
 {

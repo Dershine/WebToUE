@@ -145,6 +145,30 @@ void FWebToUERuntimePresentation::Reset()
 #endif
 }
 
+#if WITH_DEV_AUTOMATION_TESTS
+uint64 FWebToUERuntimePresentation::GetKnownOwnedBytesForTesting() const
+{
+	uint64 Bytes = sizeof(*this) + Brushes.GetAllocatedSize() + TextLayouts.GetAllocatedSize() +
+		LoadedResources.GetAllocatedSize() + PaintOrderNodes.GetAllocatedSize() +
+		PaintOrderRanges.GetAllocatedSize();
+	for (const TPair<const FWebToUENode*, TSharedPtr<FSlateBrush>>& Pair : Brushes)
+	{
+		if (Pair.Value)
+		{
+			Bytes += sizeof(FSlateBrush);
+		}
+	}
+	for (const TPair<const FWebToUENode*, TUniquePtr<FWebToUETextLayoutCache>>& Pair : TextLayouts)
+	{
+		if (Pair.Value)
+		{
+			Bytes += sizeof(FWebToUETextLayoutCache);
+		}
+	}
+	return Bytes;
+}
+#endif
+
 void FWebToUERuntimePresentation::RebuildCaches(bool bReloadResources)
 {
 	TextLayouts.Reset();

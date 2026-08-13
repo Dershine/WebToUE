@@ -8,6 +8,9 @@
 class UWebToUEDocument;
 class UWebToUEView;
 class FWebToUERuntimePresentation;
+#if WITH_DEV_AUTOMATION_TESTS
+struct FWebToUERuntimeMemoryCensus;
+#endif
 
 class SWebToUEView final : public SLeafWidget
 {
@@ -61,6 +64,7 @@ public:
 	uint64 GetPresentationResourceLoadAttemptsForTesting() const;
 	const void* GetPresentationTextCacheIdentityForTesting(const FWebToUENode& Node) const;
 	bool IsPresentationLayoutDirtyForTesting() const;
+	bool GetRuntimeMemoryCensusForTesting(FWebToUERuntimeMemoryCensus& OutCensus) const;
 #endif
 
 private:
