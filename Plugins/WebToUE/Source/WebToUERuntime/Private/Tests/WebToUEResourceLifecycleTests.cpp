@@ -7,8 +7,11 @@
 #include "WebToUEStyleProperties.h"
 
 #include "Engine/Texture2D.h"
+#include "Input/HittestGrid.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
+#include "Rendering/DrawElements.h"
+#include "Types/PaintArgs.h"
 #include "UObject/Package.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceLifecycleTest,
@@ -33,6 +36,18 @@ namespace WebToUE::ResourceLifecycle::Tests
 			Node.InlineStyleDeclarations.AddDefaulted_GetRef();
 		Declaration.Property = Parsed.Property;
 		Declaration.TypedValue = Parsed.TypedValue;
+	}
+
+	static void PaintView(const TSharedRef<SWebToUEView>& View)
+	{
+		FHittestGrid HittestGrid;
+		FSlateWindowElementList DrawElements(nullptr);
+		const FGeometry Geometry = FGeometry::MakeRoot(
+			FVector2D(640.0, 360.0), FSlateLayoutTransform());
+		const FPaintArgs PaintArgs(
+			&View.Get(), HittestGrid, FVector2D::ZeroVector, 0.0, 0.0f);
+		View->OnPaint(PaintArgs, Geometry, FSlateRect(0.0f, 0.0f, 640.0f, 360.0f),
+			DrawElements, 0, FWidgetStyle(), true);
 	}
 }
 
@@ -96,7 +111,7 @@ bool FWebToUEResourceLifecycleTest::RunTest(const FString& Parameters)
 	{
 		FWebToUEPerformanceCapture Capture;
 		FirstView->SetDocument(Document);
-		FirstView->LayoutForTesting(FVector2f(640.0f, 360.0f));
+		PaintView(FirstView);
 		ColdSnapshot = Capture.GetSnapshot();
 	}
 	TestEqual(TEXT("Cold view setup consumes all three manifest slots"),
@@ -142,7 +157,7 @@ bool FWebToUEResourceLifecycleTest::RunTest(const FString& Parameters)
 	FWebToUEPerformanceSnapshot WarmSnapshot;
 	{
 		FWebToUEPerformanceCapture Capture;
-		FirstView->LayoutForTesting(FVector2f(640.0f, 360.0f));
+		PaintView(FirstView);
 		WarmSnapshot = Capture.GetSnapshot();
 	}
 	TestEqual(TEXT("Warm layout performs no text recompute"),
@@ -200,6 +215,11 @@ bool FWebToUEResourceLifecycleTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Reset cancels the unresolved view-owned request"),
 		CancellationSnapshot.GetCounter(EWebToUEPerformanceCounter::ResourceCancellations),
 		uint64(1));
+	PendingView->SetDocument(Document);
+	const int32 RecoveredTextureHandle = PendingView->FindPresentationResourceHandleForTesting(
+		EWebToUEResourceKind::Texture, TexturePath);
+	TestNotNull(TEXT("A view can recover with a valid document after cancelling a request"),
+		PendingView->GetPresentationResourceObjectForTesting(RecoveredTextureHandle));
 	return true;
 }
 
