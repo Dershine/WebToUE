@@ -62,7 +62,13 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.resource_cache_hits"),
 		TEXT("workload.resource_failures"),
 		TEXT("workload.resource_cancellations"),
-		TEXT("workload.resource_known_owned_bytes")
+		TEXT("workload.resource_known_owned_bytes"),
+		TEXT("workload.display_list_builds"),
+		TEXT("workload.display_commands_built"),
+		TEXT("workload.display_commands_patched"),
+		TEXT("workload.display_commands_reused"),
+		TEXT("workload.paint_commands_visited"),
+		TEXT("workload.paint_draw_elements")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -273,6 +279,12 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::ResourceFailures: return TEXT("resource_failures");
 	case EWebToUEPerformanceCounter::ResourceCancellations: return TEXT("resource_cancellations");
 	case EWebToUEPerformanceCounter::ResourceKnownOwnedBytes: return TEXT("resource_known_owned_bytes");
+	case EWebToUEPerformanceCounter::DisplayListBuilds: return TEXT("display_list_builds");
+	case EWebToUEPerformanceCounter::DisplayCommandsBuilt: return TEXT("display_commands_built");
+	case EWebToUEPerformanceCounter::DisplayCommandsPatched: return TEXT("display_commands_patched");
+	case EWebToUEPerformanceCounter::DisplayCommandsReused: return TEXT("display_commands_reused");
+	case EWebToUEPerformanceCounter::PaintCommandsVisited: return TEXT("paint_commands_visited");
+	case EWebToUEPerformanceCounter::PaintDrawElements: return TEXT("paint_draw_elements");
 	default: return TEXT("unknown");
 	}
 }

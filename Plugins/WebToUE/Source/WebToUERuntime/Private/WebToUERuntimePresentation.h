@@ -4,6 +4,7 @@
 #include "WebToUECompiler.h"
 #include "WebToUEDocument.h"
 
+#include "Layout/SlateRect.h"
 #include "UObject/StrongObjectPtr.h"
 
 class FPaintArgs;
@@ -54,6 +55,46 @@ struct FWebToUEPaintOrderRange
 	int32 Num = 0;
 };
 
+enum class EWebToUEPaintCommandType : uint8
+{
+	Box,
+	Text
+};
+
+struct FWebToUEPaintBatchKey
+{
+	EWebToUEPaintCommandType Type = EWebToUEPaintCommandType::Box;
+	uint32 ResourceKey = 0;
+	uint32 ClipKey = 0;
+	uint8 DrawEffects = 0;
+
+	bool operator==(const FWebToUEPaintBatchKey& Other) const
+	{
+		return Type == Other.Type && ResourceKey == Other.ResourceKey &&
+			ClipKey == Other.ClipKey && DrawEffects == Other.DrawEffects;
+	}
+};
+
+struct FWebToUEPaintCommand
+{
+	FWebToUEInstanceHandle Owner;
+	EWebToUEPaintCommandType Type = EWebToUEPaintCommandType::Box;
+	FSlateRect Bounds = FSlateRect(0.0f, 0.0f, 0.0f, 0.0f);
+	FSlateRect ClipBounds = FSlateRect(0.0f, 0.0f, 0.0f, 0.0f);
+	FWebToUEPaintBatchKey BatchKey;
+	float Opacity = 1.0f;
+	bool bDisplayed = false;
+	bool bDrawable = false;
+	bool bEnabled = true;
+	bool bHasClip = false;
+};
+
+struct FWebToUEDisplayCommandRange
+{
+	int32 StartIndex = 0;
+	int32 Num = 0;
+};
+
 class FWebToUERuntimePresentation
 {
 public:
@@ -96,6 +137,11 @@ public:
 		const FWebToUEComputedStyle& Style, float WrapWidth) const;
 	FString GetTextCacheCultureForTesting(const FWebToUENode& Node) const;
 	uint64 GetKnownOwnedBytesForTesting() const;
+	int32 GetDisplayCommandCountForTesting() const { return DisplayCommands.Num(); }
+	const FWebToUEPaintCommand* GetDisplayCommandForTesting(
+		const FWebToUENode& Node) const;
+	const FWebToUEDisplayCommandRange* GetDisplayCommandRangeForTesting(
+		const FWebToUENode& Node) const;
 #endif
 
 private:
@@ -111,6 +157,10 @@ private:
 	mutable TSharedPtr<FStreamableHandle> PendingResourceRequest;
 	TArray<FWebToUEInstanceHandle> PaintOrderNodes;
 	TMap<FWebToUEInstanceHandle, FWebToUEPaintOrderRange> PaintOrderRanges;
+	mutable TArray<FWebToUEPaintCommand> DisplayCommands;
+	mutable TMap<FWebToUEInstanceHandle, int32> DisplayCommandIndices;
+	mutable TMap<FWebToUEInstanceHandle, FWebToUEDisplayCommandRange> DisplayCommandRanges;
+	mutable bool bDisplayListDirty = true;
 #if WITH_DEV_AUTOMATION_TESTS
 	mutable uint64 ResourceLoadAttemptsForTesting = 0;
 	mutable uint64 ResourceAsyncRequestsForTesting = 0;
@@ -142,10 +192,22 @@ private:
 	int32 FindResourceHandle(EWebToUEResourceKind Kind, const FSoftObjectPath& Path) const;
 	UObject* GetResolvedResource(EWebToUEResourceKind Kind, const FSoftObjectPath& Path) const;
 	UObject* GetResolvedFont(const FString& Family) const;
-	int32 PaintNode(const FWebToUEDocument& RuntimeDocument, const FWebToUENode& Node,
-		const FPaintArgs& Args, const FGeometry& Geometry, const FSlateRect& CullingRect,
+	void RebuildDisplayList() const;
+	void BuildDisplaySubtree(const FWebToUEDocument& RuntimeDocument,
+		const FWebToUENode& Node, float ParentOpacity, bool bParentDisplayed,
+		bool bParentEnabled,
+		const FVector2f& InheritedScrollOffset, const FSlateRect& InheritedClip,
+		bool bHasInheritedClip) const;
+	int32 PatchDisplaySubtree(const FWebToUENode& Node) const;
+	void UpdateDisplayCommand(const FWebToUEDocument& RuntimeDocument,
+		const FWebToUENode& Node, FWebToUEPaintCommand& Command,
+		float ParentOpacity, bool bParentDisplayed, bool bParentEnabled,
+		const FVector2f& InheritedScrollOffset,
+		const FSlateRect& InheritedClip, bool bHasInheritedClip) const;
+	int32 PaintCommand(const FWebToUEPaintCommand& Command, const FPaintArgs& Args,
+		const FGeometry& Geometry, const FSlateRect& CullingRect,
 		FSlateWindowElementList& Out, int32 LayerId, const FWidgetStyle& WidgetStyle,
-		float ParentOpacity, bool bParentEnabled, const FVector2f& InheritedScrollOffset) const;
+		bool bParentEnabled) const;
 	void RebuildBrushes(bool bReloadResources) const;
 	void RebuildBrush(FWebToUENode& Node) const;
 	void RebuildPaintOrderCache();

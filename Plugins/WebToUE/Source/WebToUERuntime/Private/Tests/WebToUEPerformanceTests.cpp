@@ -153,7 +153,7 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 			TelemetryMeasurements.Add(Name, Value);
 		});
 	TestEqual(TEXT("The telemetry schema has the expected version"),
-		FWebToUEPerformanceSnapshot::TelemetrySchemaVersion, 8);
+		FWebToUEPerformanceSnapshot::TelemetrySchemaVersion, 9);
 	TestEqual(TEXT("The telemetry schema exposes every phase field and workload counter"),
 		TelemetryMeasurements.Num(), FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);
 	static constexpr const TCHAR* ExpectedTelemetryNames[] = {
@@ -202,7 +202,13 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		TEXT("workload.resource_cache_hits"),
 		TEXT("workload.resource_failures"),
 		TEXT("workload.resource_cancellations"),
-		TEXT("workload.resource_known_owned_bytes")
+		TEXT("workload.resource_known_owned_bytes"),
+		TEXT("workload.display_list_builds"),
+		TEXT("workload.display_commands_built"),
+		TEXT("workload.display_commands_patched"),
+		TEXT("workload.display_commands_reused"),
+		TEXT("workload.paint_commands_visited"),
+		TEXT("workload.paint_draw_elements")
 	};
 	static_assert(UE_ARRAY_COUNT(ExpectedTelemetryNames) ==
 		FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);

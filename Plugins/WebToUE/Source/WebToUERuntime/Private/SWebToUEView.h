@@ -8,6 +8,8 @@
 class UWebToUEDocument;
 class UWebToUEView;
 class FWebToUERuntimePresentation;
+struct FWebToUEPaintCommand;
+struct FWebToUEDisplayCommandRange;
 #if WITH_DEV_AUTOMATION_TESTS
 struct FWebToUERuntimeMemoryCensus;
 #endif
@@ -87,6 +89,10 @@ public:
 		return LastPseudoInvalidationReport;
 	}
 	bool GetRuntimeMemoryCensusForTesting(FWebToUERuntimeMemoryCensus& OutCensus) const;
+	int32 GetDisplayCommandCountForTesting() const;
+	const FWebToUEPaintCommand* GetDisplayCommandForTesting(const FWebToUENode& Node) const;
+	const FWebToUEDisplayCommandRange* GetDisplayCommandRangeForTesting(
+		const FWebToUENode& Node) const;
 #endif
 
 private:

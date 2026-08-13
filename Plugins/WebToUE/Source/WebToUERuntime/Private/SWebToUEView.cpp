@@ -136,6 +136,23 @@ bool SWebToUEView::GetRuntimeMemoryCensusForTesting(
 	return true;
 }
 
+int32 SWebToUEView::GetDisplayCommandCountForTesting() const
+{
+	return Presentation->GetDisplayCommandCountForTesting();
+}
+
+const FWebToUEPaintCommand* SWebToUEView::GetDisplayCommandForTesting(
+	const FWebToUENode& Node) const
+{
+	return Presentation->GetDisplayCommandForTesting(Node);
+}
+
+const FWebToUEDisplayCommandRange* SWebToUEView::GetDisplayCommandRangeForTesting(
+	const FWebToUENode& Node) const
+{
+	return Presentation->GetDisplayCommandRangeForTesting(Node);
+}
+
 FVector2f SWebToUEView::GetVisualPositionForTesting(const FWebToUENode& Node) const
 {
 	return Presentation->GetVisualPosition(Node);
