@@ -42,7 +42,7 @@ bool FWebToUEBenchmarkStatisticsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The benchmark policy schema is stable"), FWebToUEBenchmarkSamplingPolicy::SchemaVersion, 1);
 	TestEqual(TEXT("The standard policy performs one warmup"), FWebToUEBenchmarkSamplingPolicy::WarmupCount, 1);
 	TestEqual(TEXT("The standard policy records twenty samples"), FWebToUEBenchmarkSamplingPolicy::SampleCount, 20);
-	TestEqual(TEXT("The benchmark budget policy schema is stable"), FWebToUEBenchmarkBudgetPolicy::SchemaVersion, 7);
+	TestEqual(TEXT("The benchmark budget policy schema is stable"), FWebToUEBenchmarkBudgetPolicy::SchemaVersion, 8);
 	TestEqual(TEXT("The medium single-node hover P95 target is explicit"),
 		FWebToUEBenchmarkBudgetPolicy::MediumSingleNodeHoverP95Milliseconds, 0.5);
 	TestEqual(TEXT("The medium single-FieldNotify P95 target is explicit"),
@@ -55,7 +55,7 @@ bool FWebToUEBenchmarkStatisticsTest::RunTest(const FString& Parameters)
 		FWebToUEBenchmarkBudgetPolicy::MediumUnchangedPaintMaximumTrackedAllocationPayloadBytes, uint64(0));
 	TestTrue(TEXT("The medium single-node hover target is an enforced regression gate"),
 		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumSingleNodeHoverBudget);
-	TestFalse(TEXT("The medium single-FieldNotify target remains observational until it meets budget"),
+	TestTrue(TEXT("The medium single-FieldNotify target is an enforced regression gate"),
 		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumSingleFieldNotifyBudget);
 	TestTrue(TEXT("The medium warm full-layout target is an enforced regression gate"),
 		FWebToUEBenchmarkBudgetPolicy::bEnforceMediumWarmFullLayoutBudget);

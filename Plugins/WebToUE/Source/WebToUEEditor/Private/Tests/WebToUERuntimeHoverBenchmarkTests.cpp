@@ -428,28 +428,38 @@ bool FWebToUERuntimeFieldNotifyBenchmarkTest::RunTest(const FString& Parameters)
 		TestTrue(*(Prefix + TEXT("stores the updated value")), ViewModel->BenchmarkLabel.EqualTo(UpdatedValue));
 		TestEqual(*(Prefix + TEXT("performs one binding refresh")),
 			Sample.Snapshot.Get(EWebToUEPerformancePhase::Binding).CallCount, uint64(1));
-		TestEqual(*(Prefix + TEXT("performs one style update")),
-			Sample.Snapshot.Get(EWebToUEPerformancePhase::Style).CallCount, uint64(1));
-		TestEqual(*(Prefix + TEXT("performs one full layout")),
-			Sample.Snapshot.Get(EWebToUEPerformancePhase::Layout).CallCount, uint64(1));
+		TestEqual(*(Prefix + TEXT("does not enter style resolution")),
+			Sample.Snapshot.Get(EWebToUEPerformancePhase::Style).CallCount, uint64(0));
+		TestEqual(*(Prefix + TEXT("unchanged Desired Size skips layout")),
+			Sample.Snapshot.Get(EWebToUEPerformancePhase::Layout).CallCount, uint64(0));
 		TestEqual(*(Prefix + TEXT("performs one paint build")),
 			Sample.Snapshot.Get(EWebToUEPerformancePhase::PaintBuild).CallCount, uint64(1));
 		TestEqual(*(Prefix + TEXT("does not perform a hit test")),
 			Sample.Snapshot.Get(EWebToUEPerformancePhase::HitTest).CallCount, uint64(0));
-		TestEqual(*(Prefix + TEXT("visits all 500 style nodes")),
-			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits),
-			static_cast<uint64>(Scenario.Definition.NodeCount));
-		const uint64 FullScanWork = static_cast<uint64>(Scenario.Definition.NodeCount) *
-			static_cast<uint64>(Scenario.Definition.RuleCount);
-		const uint64 CandidateCount =
-			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorCandidates);
-		TestTrue(*(Prefix + TEXT("selects fewer candidates than the 100,000-rule full scan")),
-			CandidateCount < FullScanWork);
-		TestEqual(*(Prefix + TEXT("evaluates every selector candidate exactly once")),
-			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), CandidateCount);
-		TestEqual(*(Prefix + TEXT("rebuilds one Yoga node per runtime node")),
-			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt),
-			static_cast<uint64>(Scenario.Definition.NodeCount));
+		TestEqual(*(Prefix + TEXT("reads exactly one root field")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::BindingFieldsRead), uint64(1));
+		TestEqual(*(Prefix + TEXT("executes exactly one direct binding op")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::BindingOpsExecuted), uint64(1));
+		TestEqual(*(Prefix + TEXT("updates exactly one direct node")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::BindingNodesUpdated), uint64(1));
+		TestEqual(*(Prefix + TEXT("does not visit style nodes")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::StyleNodeVisits), uint64(0));
+		TestEqual(*(Prefix + TEXT("does not select style candidates")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorCandidates), uint64(0));
+		TestEqual(*(Prefix + TEXT("does not evaluate selectors")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::SelectorEvaluations), uint64(0));
+		TestEqual(*(Prefix + TEXT("does not rebuild Yoga nodes")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::YogaNodesBuilt), uint64(0));
+		TestEqual(*(Prefix + TEXT("recomputes only the changed text")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(1));
+		TestEqual(*(Prefix + TEXT("does not rebuild the text layout object")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutBuilds), uint64(0));
+		TestEqual(*(Prefix + TEXT("does not evict text caches")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::TextCacheInvalidations), uint64(0));
+		TestEqual(*(Prefix + TEXT("does not rebuild brushes")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds), uint64(0));
+		TestEqual(*(Prefix + TEXT("does not rebuild paint order")),
+			Sample.Snapshot.GetCounter(EWebToUEPerformanceCounter::PaintOrderCacheBuilds), uint64(0));
 		TestTrue(*(Prefix + TEXT("records a positive end-to-end duration")),
 			Sample.InclusiveMilliseconds > 0.0);
 
@@ -495,6 +505,11 @@ bool FWebToUERuntimeFieldNotifyBenchmarkTest::RunTest(const FString& Parameters)
 		FWebToUEBenchmarkStatistics::TryCalculate(InclusiveSamples, InclusiveDistribution));
 	const bool bMeetsTarget = InclusiveDistribution.P95 <
 		FWebToUEBenchmarkBudgetPolicy::MediumSingleFieldNotifyP95Milliseconds;
+	if (FWebToUEBenchmarkBudgetPolicy::bEnforceMediumSingleFieldNotifyBudget)
+	{
+		TestTrue(TEXT("The runtime FieldNotify P95 stays below the enforced budget"),
+			bMeetsTarget);
+	}
 	const FString SummaryContext = MakeRuntimeTelemetryContext(Environment,
 		Scenario.Definition, TEXT("runtime_field_notify_summary"));
 	AddTelemetryData(TEXT("benchmark.schema_version"), FWebToUEBenchmarkSamplingPolicy::SchemaVersion,
