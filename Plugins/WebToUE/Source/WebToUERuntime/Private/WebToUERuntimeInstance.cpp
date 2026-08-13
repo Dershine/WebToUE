@@ -94,6 +94,7 @@ uint64 FWebToUERuntimeInstance::GetKnownOwnedBytesForTesting() const
 	Bytes += RuntimeDocument->Diagnostics.GetAllocatedSize();
 	Bytes += RuntimeDocument->RuntimeNodeStates.GetAllocatedSize();
 	Bytes += RuntimeDocument->RuntimeRenderData.GetAllocatedSize();
+	Bytes += RuntimeDocument->RuntimeNodesBySlot.GetAllocatedSize();
 	Bytes += GetSelectorIndexOwnedBytes(RuntimeDocument->SelectorIndex);
 
 	for (const FString& Stylesheet : RuntimeDocument->LinkedStylesheets)
@@ -160,12 +161,48 @@ int32 FWebToUERuntimeInstance::GetRuntimeRuleCountForTesting() const
 }
 #endif
 
+FWebToUERuntimeInstance::FWebToUERuntimeInstance()
+	: OwnerId(AllocateWebToUEInstanceOwnerId())
+{
+}
+
+void FWebToUERuntimeInstance::AdoptDocumentForTesting(TSharedRef<FWebToUEDocument> InDocument)
+{
+	Reset();
+	RuntimeDocument = MoveTemp(InDocument);
+	RuntimeDocument->InitializeRuntimeData(OwnerId, Generation);
+}
+
+FWebToUEInstanceHandle FWebToUERuntimeInstance::GetHandle(const FWebToUENode* Node) const
+{
+	if (!Node || !RuntimeDocument || RuntimeDocument->ResolveNode(Node->InstanceHandle) != Node)
+	{
+		return {};
+	}
+	return Node->InstanceHandle;
+}
+
+FWebToUENode* FWebToUERuntimeInstance::ResolveNode(FWebToUEInstanceHandle Handle)
+{
+	return RuntimeDocument ? RuntimeDocument->ResolveNode(Handle) : nullptr;
+}
+
+const FWebToUENode* FWebToUERuntimeInstance::ResolveNode(FWebToUEInstanceHandle Handle) const
+{
+	return RuntimeDocument ? RuntimeDocument->ResolveNode(Handle) : nullptr;
+}
+
 void FWebToUERuntimeInstance::Reset()
 {
+	++Generation;
+	if (Generation == 0)
+	{
+		++Generation;
+	}
 	RuntimeDocument.Reset();
-	HoveredNode = nullptr;
-	PressedNode = nullptr;
-	FocusedNode = nullptr;
+	HoveredNode = {};
+	PressedNode = {};
+	FocusedNode = {};
 }
 
 bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
@@ -189,10 +226,12 @@ bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 	}
 	Nodes.Reserve(CompiledNodes.Num());
-	for (const FWebToUECompiledNode& Source : CompiledNodes)
+	for (int32 CompiledNodeIndex = 0; CompiledNodeIndex < CompiledNodes.Num(); ++CompiledNodeIndex)
 	{
+		const FWebToUECompiledNode& Source = CompiledNodes[CompiledNodeIndex];
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TrackedAllocations);
 		TSharedPtr<FWebToUENode> Node = MakeShared<FWebToUENode>();
+		Node->TemplateNodeId = FWebToUETemplateNodeId::FromIndex(CompiledNodeIndex);
 		Node->Type = static_cast<EWebToUENodeType>(Source.Type);
 		Node->Tag = Source.Tag;
 		Node->Text = Source.Text;
@@ -269,7 +308,7 @@ bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 		RuntimeDocument->Rules.Add(MoveTemp(Rule));
 	}
 
-	RuntimeDocument->InitializeRuntimeData();
+	RuntimeDocument->InitializeRuntimeData(OwnerId, Generation);
 	FWebToUEStyleResolver::Resolve(*RuntimeDocument);
 	return true;
 }

@@ -1,6 +1,14 @@
 #include "WebToUECoreTypes.h"
 #include "WebToUEPerformance.h"
 
+#include "Templates/Atomic.h"
+
+uint64 AllocateWebToUEInstanceOwnerId()
+{
+	static TAtomic<uint64> NextOwnerId(1);
+	return NextOwnerId++;
+}
+
 FString FWebToUENode::GetAttribute(const FString& Name) const
 {
 	if (const FString* Value = Attributes.Find(Name.ToLower()))
@@ -60,16 +68,20 @@ bool FWebToUEDocument::HasErrors() const
 	});
 }
 
-void FWebToUEDocument::InitializeRuntimeData()
+void FWebToUEDocument::InitializeRuntimeData(uint64 InOwnerId, uint32 InGeneration)
 {
+	RuntimeInstanceOwnerId = InOwnerId != 0 ? InOwnerId : AllocateWebToUEInstanceOwnerId();
+	RuntimeInstanceGeneration = InGeneration != 0 ? InGeneration : 1;
 	RuntimeNodeStates.Reset();
 	RuntimeRenderData.Reset();
+	RuntimeNodesBySlot.Reset();
 	int32 NodeCount = 0;
 	ForEachNode([&NodeCount](FWebToUENode&) { ++NodeCount; });
 	if (NodeCount > 0)
 	{
 		RuntimeNodeStates.Reserve(NodeCount);
 		RuntimeRenderData.Reserve(NodeCount);
+		RuntimeNodesBySlot.Reserve(NodeCount);
 		FWebToUEPerformanceCapture::RecordAllocationPayload(
 			static_cast<uint64>(NodeCount) * sizeof(FWebToUERuntimeNodeState));
 		FWebToUEPerformanceCapture::RecordAllocationPayload(
@@ -185,9 +197,34 @@ int32 FWebToUEDocument::ForEachSelectorCandidate(const FWebToUENode& Node,
 
 void FWebToUEDocument::AddRuntimeNodeData(FWebToUENode& Node)
 {
-	Node.RuntimeDataIndex = RuntimeNodeStates.AddDefaulted();
+	const int32 RuntimeDataIndex = RuntimeNodeStates.AddDefaulted();
 	const int32 RenderDataIndex = RuntimeRenderData.AddDefaulted();
-	check(Node.RuntimeDataIndex == RenderDataIndex);
+	const int32 NodeSlot = RuntimeNodesBySlot.Add(&Node);
+	check(RuntimeDataIndex == RenderDataIndex && RuntimeDataIndex == NodeSlot);
+	Node.InstanceHandle = FWebToUEInstanceHandle::Create(
+		RuntimeInstanceOwnerId, RuntimeInstanceGeneration, RuntimeDataIndex);
+}
+
+FWebToUENode* FWebToUEDocument::ResolveNode(FWebToUEInstanceHandle Handle)
+{
+	if (!Handle.IsValid() || Handle.GetOwnerId() != RuntimeInstanceOwnerId ||
+		Handle.GetGeneration() != RuntimeInstanceGeneration ||
+		!RuntimeNodesBySlot.IsValidIndex(Handle.GetSlot()))
+	{
+		return nullptr;
+	}
+	return RuntimeNodesBySlot[Handle.GetSlot()];
+}
+
+const FWebToUENode* FWebToUEDocument::ResolveNode(FWebToUEInstanceHandle Handle) const
+{
+	if (!Handle.IsValid() || Handle.GetOwnerId() != RuntimeInstanceOwnerId ||
+		Handle.GetGeneration() != RuntimeInstanceGeneration ||
+		!RuntimeNodesBySlot.IsValidIndex(Handle.GetSlot()))
+	{
+		return nullptr;
+	}
+	return RuntimeNodesBySlot[Handle.GetSlot()];
 }
 
 bool FWebToUEDocument::IsDisplayed(const FWebToUENode& Node) const

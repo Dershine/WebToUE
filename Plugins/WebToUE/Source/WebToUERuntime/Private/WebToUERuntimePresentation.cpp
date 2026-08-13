@@ -151,14 +151,14 @@ uint64 FWebToUERuntimePresentation::GetKnownOwnedBytesForTesting() const
 	uint64 Bytes = sizeof(*this) + Brushes.GetAllocatedSize() + TextLayouts.GetAllocatedSize() +
 		LoadedResources.GetAllocatedSize() + PaintOrderNodes.GetAllocatedSize() +
 		PaintOrderRanges.GetAllocatedSize();
-	for (const TPair<const FWebToUENode*, TSharedPtr<FSlateBrush>>& Pair : Brushes)
+	for (const TPair<FWebToUEInstanceHandle, TSharedPtr<FSlateBrush>>& Pair : Brushes)
 	{
 		if (Pair.Value)
 		{
 			Bytes += sizeof(FSlateBrush);
 		}
 	}
-	for (const TPair<const FWebToUENode*, TUniquePtr<FWebToUETextLayoutCache>>& Pair : TextLayouts)
+	for (const TPair<FWebToUEInstanceHandle, TUniquePtr<FWebToUETextLayoutCache>>& Pair : TextLayouts)
 	{
 		if (Pair.Value)
 		{
@@ -199,8 +199,17 @@ FText FWebToUERuntimePresentation::GetDisplayText(const FWebToUENode& Node) cons
 FSlateTextBlockLayout& FWebToUERuntimePresentation::PrepareTextLayout(
 	const FWebToUENode& Node, const FWebToUEComputedStyle& Style, float WrapWidth) const
 {
+	const FWebToUEInstanceHandle Handle = RuntimeInstance.GetHandle(&Node);
+	check(Handle.IsValid());
+	TUniquePtr<FWebToUETextLayoutCache>& Cache = TextLayouts.FindOrAdd(Handle);
+	return PrepareTextLayoutInCache(Node, Style, WrapWidth, Cache);
+}
+
+FSlateTextBlockLayout& FWebToUERuntimePresentation::PrepareTextLayoutInCache(
+	const FWebToUENode& Node, const FWebToUEComputedStyle& Style, float WrapWidth,
+	TUniquePtr<FWebToUETextLayoutCache>& Cache) const
+{
 	using namespace WebToUE::Runtime::Presentation::Private;
-	TUniquePtr<FWebToUETextLayoutCache>& Cache = TextLayouts.FindOrAdd(&Node);
 	const bool bRichText = IsRichText(Node);
 	if (!Cache || Cache->bRichText != bRichText)
 	{
@@ -263,7 +272,7 @@ FVector2f FWebToUERuntimePresentation::MeasureNodeWithStyle(const FWebToUENode& 
 	}
 	if (Node.Tag == TEXT("img"))
 	{
-		if (const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(&Node))
+		if (const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(RuntimeInstance.GetHandle(&Node)))
 		{
 			return (*Brush)->ImageSize;
 		}
@@ -318,7 +327,7 @@ int32 FWebToUERuntimePresentation::PaintNode(const FWebToUEDocument& RuntimeDocu
 
 	if (Node.Type == EWebToUENodeType::Element)
 	{
-		if (const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(&Node))
+		if (const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(RuntimeInstance.GetHandle(&Node)))
 		{
 			if (Node.Tag == TEXT("img"))
 			{
@@ -378,8 +387,10 @@ int32 FWebToUERuntimePresentation::PaintNode(const FWebToUEDocument& RuntimeDocu
 		Out.PushClip(FSlateClippingZone(ClipGeometry));
 		bPushedClip = true;
 	}
-	for (const FWebToUENode* Child : GetPaintOrder(Node))
+	for (const FWebToUEInstanceHandle ChildHandle : GetPaintOrder(Node))
 	{
+		const FWebToUENode* Child = RuntimeInstance.ResolveNode(ChildHandle);
+		if (!Child) continue;
 		const FVector2f ChildScrollOffset = InheritedScrollOffset +
 			(RuntimeDocument.IsScrollable(Node)
 				? RuntimeDocument.GetRuntimeNodeState(Node).ScrollOffset
@@ -420,7 +431,7 @@ void FWebToUERuntimePresentation::RebuildBrushes(bool bReloadResources) const
 				Brush->DrawAs = ESlateBrushDrawType::Image;
 				Brush->SetResourceObject(Texture);
 				Brush->ImageSize = FVector2f(Texture->GetSizeX(), Texture->GetSizeY());
-				Brushes.Add(&Node, MoveTemp(Brush));
+				Brushes.Add(RuntimeInstance.GetHandle(&Node), MoveTemp(Brush));
 			}
 		}
 		else if (Node.Type == EWebToUENodeType::Element)
@@ -428,7 +439,7 @@ void FWebToUERuntimePresentation::RebuildBrushes(bool bReloadResources) const
 			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
 			FWebToUEPerformanceCapture::RecordCounter(
 				EWebToUEPerformanceCounter::TrackedAllocations);
-			Brushes.Add(&Node, MakeShared<FSlateRoundedBoxBrush>(Style.BackgroundColor,
+			Brushes.Add(RuntimeInstance.GetHandle(&Node), MakeShared<FSlateRoundedBoxBrush>(Style.BackgroundColor,
 				Style.BorderRadius, Style.BorderColor, Style.BorderWidth, FVector2f(32.0f, 32.0f)));
 		}
 	});
@@ -438,7 +449,7 @@ void FWebToUERuntimePresentation::RebuildBrushes(bool bReloadResources) const
 const void* FWebToUERuntimePresentation::GetBrushIdentityForTesting(
 	const FWebToUENode& Node) const
 {
-	const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(&Node);
+	const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(RuntimeInstance.GetHandle(&Node));
 	return Brush ? Brush->Get() : nullptr;
 }
 #endif
@@ -466,24 +477,27 @@ void FWebToUERuntimePresentation::RebuildPaintOrderCache()
 		const int32 StartIndex = PaintOrderNodes.Num();
 		for (const TSharedPtr<FWebToUENode>& Child : Node.Children)
 		{
-			PaintOrderNodes.Add(Child.Get());
+			PaintOrderNodes.Add(RuntimeInstance.GetHandle(Child.Get()));
 		}
 		const int32 Num = PaintOrderNodes.Num() - StartIndex;
-		TArrayView<FWebToUENode*> Children(PaintOrderNodes.GetData() + StartIndex, Num);
-		Algo::StableSort(Children, [this](const FWebToUENode* A, const FWebToUENode* B)
+		TArrayView<FWebToUEInstanceHandle> Children(PaintOrderNodes.GetData() + StartIndex, Num);
+		Algo::StableSort(Children, [this](FWebToUEInstanceHandle A, FWebToUEInstanceHandle B)
 		{
-			return GetStyle(*A).ZIndex < GetStyle(*B).ZIndex;
+			const FWebToUENode* NodeA = RuntimeInstance.ResolveNode(A);
+			const FWebToUENode* NodeB = RuntimeInstance.ResolveNode(B);
+			check(NodeA && NodeB);
+			return GetStyle(*NodeA).ZIndex < GetStyle(*NodeB).ZIndex;
 		});
-		PaintOrderRanges.Add(&Node, { StartIndex, Num });
+		PaintOrderRanges.Add(RuntimeInstance.GetHandle(&Node), { StartIndex, Num });
 	});
 }
 
-TConstArrayView<FWebToUENode*> FWebToUERuntimePresentation::GetPaintOrder(
+TConstArrayView<FWebToUEInstanceHandle> FWebToUERuntimePresentation::GetPaintOrder(
 	const FWebToUENode& Parent) const
 {
-	if (const FWebToUEPaintOrderRange* Range = PaintOrderRanges.Find(&Parent))
+	if (const FWebToUEPaintOrderRange* Range = PaintOrderRanges.Find(RuntimeInstance.GetHandle(&Parent)))
 	{
-		return TConstArrayView<FWebToUENode*>(
+		return TConstArrayView<FWebToUEInstanceHandle>(
 			PaintOrderNodes.GetData() + Range->StartIndex, Range->Num);
 	}
 	return {};
@@ -579,10 +593,8 @@ FVector2f FWebToUERuntimePresentation::MeasureTextForTesting(
 	Node.Text = Text;
 	FWebToUEComputedStyle Style;
 	Style.WhiteSpace = bWrap ? TEXT("normal") : TEXT("nowrap");
-	FWebToUELayoutEngine::FMeasureConstraints Constraints;
-	Constraints.Width = Width;
-	Constraints.WidthMode = FWebToUELayoutEngine::EMeasureMode::AtMost;
-	return MeasureNodeWithStyle(Node, Style, Constraints);
+	TUniquePtr<FWebToUETextLayoutCache> Cache;
+	return FVector2f(PrepareTextLayoutInCache(Node, Style, Width, Cache).GetDesiredSize());
 }
 
 FVector2f FWebToUERuntimePresentation::MeasureRichTextForTesting(
@@ -595,16 +607,15 @@ FVector2f FWebToUERuntimePresentation::MeasureRichTextForTesting(
 	Node.bRichText = true;
 	FWebToUEComputedStyle Style;
 	Style.WhiteSpace = bWrap ? TEXT("normal") : TEXT("nowrap");
-	FWebToUELayoutEngine::FMeasureConstraints Constraints;
-	Constraints.Width = Width;
-	Constraints.WidthMode = FWebToUELayoutEngine::EMeasureMode::AtMost;
-	return MeasureNodeWithStyle(Node, Style, Constraints);
+	TUniquePtr<FWebToUETextLayoutCache> Cache;
+	return FVector2f(PrepareTextLayoutInCache(Node, Style, Width, Cache).GetDesiredSize());
 }
 
 const void* FWebToUERuntimePresentation::GetTextLayoutCacheIdentityForTesting(
 	const FWebToUENode& Node) const
 {
-	if (const TUniquePtr<FWebToUETextLayoutCache>* Cache = TextLayouts.Find(&Node))
+	if (const TUniquePtr<FWebToUETextLayoutCache>* Cache =
+		TextLayouts.Find(RuntimeInstance.GetHandle(&Node)))
 	{
 		return Cache->Get();
 	}

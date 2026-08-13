@@ -72,11 +72,14 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Hydrate);
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Hydrate);
 	DocumentAsset = InDocument;
-	RuntimeInstance->Reset();
 	Presentation->Reset();
 	if (InDocument)
 	{
 		RuntimeInstance->Hydrate(*InDocument);
+	}
+	else
+	{
+		RuntimeInstance->Reset();
 	}
 	CachePseudoStateImpacts();
 	RebuildStylesAndBrushes();
@@ -138,9 +141,44 @@ FVector2f SWebToUEView::GetVisualPositionForTesting(const FWebToUENode& Node) co
 	return Presentation->GetVisualPosition(Node);
 }
 
-TConstArrayView<FWebToUENode*> SWebToUEView::GetPaintOrderForTesting(const FWebToUENode& Parent) const
+TConstArrayView<FWebToUEInstanceHandle> SWebToUEView::GetPaintOrderForTesting(
+	const FWebToUENode& Parent) const
 {
-	return GetPaintOrder(Parent);
+	return Presentation->GetPaintOrder(Parent);
+}
+
+FWebToUEInstanceHandle SWebToUEView::GetInstanceHandleForTesting(
+	const FWebToUENode& Node) const
+{
+	return RuntimeInstance->GetHandle(&Node);
+}
+
+FWebToUETemplateNodeId SWebToUEView::GetTemplateNodeIdForTesting(
+	const FWebToUENode& Node) const
+{
+	return Node.TemplateNodeId;
+}
+
+FWebToUENode* SWebToUEView::ResolveInstanceHandleForTesting(
+	FWebToUEInstanceHandle Handle) const
+{
+	return const_cast<FWebToUENode*>(RuntimeInstance->ResolveNode(Handle));
+}
+
+FWebToUENode* SWebToUEView::AddDynamicTextNodeForTesting(FWebToUENode& Parent)
+{
+	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
+	if (!RuntimeDocument || !RuntimeInstance->GetHandle(&Parent).IsValid())
+	{
+		return nullptr;
+	}
+	TSharedPtr<FWebToUENode> TextNode = MakeShared<FWebToUENode>();
+	TextNode->Type = EWebToUENodeType::Text;
+	TextNode->Tag = TEXT("#text");
+	TextNode->Parent = &Parent;
+	RuntimeDocument->AddRuntimeNodeData(*TextNode);
+	Parent.Children.Add(TextNode);
+	return TextNode.Get();
 }
 
 const FWebToUERuntimeNodeState& SWebToUEView::GetRuntimeStateForTesting(const FWebToUENode& Node) const
@@ -255,11 +293,6 @@ void SWebToUEView::CachePseudoStateImpacts()
 				WebToUE::Private::GetCssPropertyMetadata(Declaration.Property).Impacts;
 		}
 	}
-}
-
-TConstArrayView<FWebToUENode*> SWebToUEView::GetPaintOrder(const FWebToUENode& Parent) const
-{
-	return Presentation->GetPaintOrder(Parent);
 }
 
 static bool ReadPropertyAsText(UObject* Context, const FString& Field, FText& Out)

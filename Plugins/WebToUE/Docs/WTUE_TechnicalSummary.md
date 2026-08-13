@@ -8,7 +8,7 @@
 >
 > 当前里程碑：M2——增量原生运行时
 >
-> 最近核验：2026-08-13，当前 HEAD + working tree 建立 Hydration/多 View 内存基线；33 / 33 Automation 和 UE 5.8 Win64 Editor Development 编译通过，发布 Runtime/资产基线仍为 `61dcb0a`
+> 最近核验：2026-08-13，当前 HEAD + working tree 建立稳定 Template/Instance 身份；34 / 34 Automation 和 UE 5.8 Win64 Editor Development 编译通过，发布 Runtime/资产基线仍为 `61dcb0a`
 >
 > 统一术语：[CONTEXT.md](../../../CONTEXT.md) · 历史证据：[WTUE_EvidenceLedger.md](WTUE_EvidenceLedger.md) · 精确支持边界：[WTUE_SupportMatrix.md](WTUE_SupportMatrix.md)
 
@@ -63,11 +63,11 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 自动化测试 | 33 / 33 通过（2026-08-13，当前 HEAD + working tree） |
+| 自动化测试 | 34 / 34 通过（2026-08-13，当前 HEAD + working tree） |
 | 当前编译 | 当前 HEAD + working tree 的 UE 5.8 Win64 Editor Development 通过；Game Development 最近通过基线为 `61dcb0a`（2026-08-13） |
-| 当前发布 | Runtime/资产基线 `61dcb0a` 的 Win64 Development BuildCookRun 通过：Cook 0 errors、Stage/Pak/IoStore 成功，569 包写入 2,226 个 IoStore chunks；本次 Hydration 基线不改变资产、序列化或发布边界，未重跑 |
+| 当前发布 | Runtime/资产基线 `61dcb0a` 的 Win64 Development BuildCookRun 通过：Cook 0 errors、Stage/Pak/IoStore 成功，569 包写入 2,226 个 IoStore chunks；本次稳定身份切片不改变资产、序列化或发布边界，未重跑 |
 | 历史发布 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 曾通过；发布前须在当前提交重跑 |
-| Git 基线 | 当前 HEAD `124d315c3ac400967492f9a530f0e992b48a3da0` + working tree；Hydration 基线的源码、测试和文档尚未提交，不外推新的发布结论 |
+| Git 基线 | 当前 HEAD `dda125b67c55ffd6c1d04725be115cacfde1cad3` + working tree；稳定身份的源码、测试和文档尚未提交，不外推新的发布结论 |
 | 发布级别 | Developer Preview |
 
 ### 2.3 宏观里程碑
@@ -136,13 +136,13 @@ flowchart LR
 | --- | --- | --- |
 | Compiler | Parser/CSS 前端、RichText lowering、Property ID/Typed Value、Property Metadata、固定槽位 Typed Cascade、Property 应用和 Yoga Adapter 已拆分 | old/new Property change set 与失效依赖 |
 | Asset/IR | 私有扁平 CompiledNodes/Rules、类型化样式声明、自定义版本、原子提交 | 不可变、依赖完备、可迁移 |
-| Runtime Instance | 每视图 Hydration、Selector Index、连续 NodeState、连续 Computed Style/Layout | Dirty Graph 和依赖图 |
-| Presentation | 每视图 Layout Dirty、Text、Paint Order、Brush、Resource Cache | 持久缓存与局部失效 |
+| Runtime Instance | 每视图 Hydration、修订内 Template Node ID、Owner + Generation + Slot Handle、Selector Index、连续 NodeState、连续 Computed Style/Layout | 共享静态模板、Dirty Graph 和依赖图 |
+| Presentation | 每视图 Layout Dirty、Handle-keyed Text/Paint Order/Brush/Resource Cache | 持久缓存与局部失效 |
 | Layout/Text | 脏布局重建 Yoga Tree；节点级 Text Layout Cache | Persistent Yoga、约束感知 Text Cache、局部 Measure/Layout |
 | Paint/Input | 递归 Paint/Hit Test；Paint Order 已缓存 | Display List、局部重绘、分层命中 |
 | Tooling | 导入诊断、热重载、Automation、Stat/Trace/Telemetry | Inspector、Profiler、Source Map、可选 MCP |
 
-`UWebToUEDocument` 保存共享 Compiled payload；`FWebToUERuntimeInstance` 独占 Hydration、Selector Index、NodeState 和 Render Data；`FWebToUERuntimePresentation` 独占 Layout/Text/Paint/Resource Cache。双 View 专项已验证状态、Style/Layout 和 Presentation Cache 互不污染。Selector Index 已作为每视图 Runtime Document 的一次性派生缓存建立，Typed Cascade 在每节点固定 Property slots 中选择 winner；下一阶段先裁决共享静态模板与稳定身份，再让 Dirty Graph 利用这些边界。
+`UWebToUEDocument` 保存共享 Compiled payload；`FWebToUERuntimeInstance` 独占 Hydration、Instance Handle 代次、Selector Index、NodeState 和 Render Data；`FWebToUERuntimePresentation` 独占 Handle-keyed Layout/Text/Paint/Resource Cache。双 View 专项已验证状态、Style/Layout 和 Presentation Cache 互不污染；`RuntimeIdentity` 进一步证明同一模板节点跨 View 的 Template Node ID 一致，而 Instance Handle 不能跨 View 或代次解析。Selector Index 已作为每视图 Runtime Document 的一次性派生缓存建立，Typed Cascade 在每节点固定 Property slots 中选择 winner；下一阶段裁决哪些静态节点/规则/Selector Metadata 应共享，再让 Dirty Graph、Yoga 和 Display List 复用同一身份模型。
 
 ### 4.1 模块边界
 
@@ -192,9 +192,9 @@ Cooked 游戏保留 Compiled Nodes/Rules、Root、纹理/String Table 引用、�
 | Compile Style 100/50 | 0.097000 ms | 比较基线 | Observe |
 | Compile Style 500/200 | 0.901200 ms | 比较基线 | Observe |
 | Compile Style 2,000/500 | 6.689500 ms | 比较基线 | Observe |
-| Hydrate 500/200 | 2.423998 ms | 比较基线 | Observe |
-| Hydrate 2,000/500 | 14.574900 ms | 比较基线 | Observe |
-| Hydrate 10,000/500 | 75.649202 ms | 比较基线 | Observe |
+| Hydrate 500/200 | 2.256501 ms | 比较基线 | Observe |
+| Hydrate 2,000/500 | 16.173001 ms | 比较基线 | Observe |
+| Hydrate 10,000/500 | 78.366399 ms | 比较基线 | Observe |
 | 500/200 单节点 Hover | 5.415700 ms | < 0.5 ms | Observe / 未达标 |
 | 500/200 单 FieldNotify | 6.068401 ms | < 0.5 ms | Observe / 未达标 |
 | 500 节点暖布局 | 0.765499 ms | < 2.0 ms | Enforced / 通过 |
@@ -206,7 +206,7 @@ Cooked 游戏保留 Compiled Nodes/Rules、Root、纹理/String Table 引用、�
 
 Property ID/Typed Value 已消除版本 4 正常 Runtime 路径的属性名和值字符串解析；52 项 Property Metadata 现在统一提供稳定名称、继承性和 Style/Measure/Layout/Paint/HitTest/Resource 影响分类，Style Resolver 的显式继承也从该表驱动。Selector ID/Class identity 与候选桶在每视图 Runtime Document 初始化时一次性派生，热路径不组装或去重候选数组。Typed Cascade 将匹配声明直接竞争到固定 Property winner slots，并将受支持 shorthand 展开到规范 longhand slots，移除了每节点 `Matches.Sort + TMap`；三节点集成语料三轮 Style Resolve 的标记分配从 20 降为 17。固定 Corpus 的单轮时间有上下波动，因此本工作包不宣称耗时改善；Dirty 粒度和 payload 紧凑度也未改变。
 
-单次显式 `SetDocument` 的 Hydration Corpus 现覆盖 500/200、2,000/500、10,000/500；同一采样政策下 P50/P95 分别为 `2.258901/2.423998`、`14.250049/14.574900`、`73.993750/75.649202 ms`。每个首 View 与第二 View 的可归因 known-owned 容量分别为 `895,678`、`3,227,058`、`13,966,944 B`，证明当前深拷贝成本随节点规模增长且第二 View 不共享该容量。4-View Editor 进程 RSS 放大斜率约为 `3,072`、`1,110,016`、`7,009,280 B/View`；前两档受 allocator 缓存和页粒度明显影响，只作为原始观测，不替代可归因容量或 Packaged RSS/LLM。
+单次显式 `SetDocument` 的 Hydration Corpus 覆盖 500/200、2,000/500、10,000/500；稳定身份实施前→候选完整回归，同一环境与采样政策的 P50/P95 分别为 `2.258901/2.423998→2.187399/2.256501`、`14.250049/14.574900→15.556302/16.173001`、`73.993750/75.649202→76.497801/78.366399 ms`。每个首 View 与第二 View 的可归因 known-owned 容量分别由 `895,678→916,030`、`3,227,058→3,308,234`、`13,966,944→14,373,224 B`；Handle 字段与 Slot Table 带来容量增长，当前深拷贝仍随节点规模增长且第二 View 不共享该容量。Editor RSS 继续受 allocator 缓存和页粒度明显影响，只作为原始观测，不替代可归因容量或 Packaged RSS/LLM；本切片不宣称性能改善。
 
 `tracked_allocations` 和已知 payload 字节只覆盖 WebToUE 标注点，不代表进程 allocator、完整常驻内存或 Slate/Yoga 内部分配。完整采样历史、阶段数据和 schema 演进见 [WTUE_EvidenceLedger.md](WTUE_EvidenceLedger.md)。
 
@@ -245,13 +245,13 @@ M2 不以模糊的“达到 Gameface”作为验收。性能合同分为三类�
 | R-02 | Yoga Tree 每次布局重建 | High | 暖布局重建 500 Yoga；P95 0.765499 ms | M2.6 Persistent Yoga、局部 Dirty | ⬜ M2 |
 | R-03 | Compiled 数据与 Runtime 生命周期混合 | Medium | 四项边界/双实例专项通过 | 后续 IR/Dirty/Cache 保持边界 | ✅ Mitigated |
 | R-04 | 状态变化可能同步加载纹理 | High | Paint-only Pseudo 不再加载纹理或重建无关图片；Resource/完整刷新仍可进入 `LoadObject` | M2.6 Resource Manifest、稳定 Handle、异步策略 | 🚧 M2 |
-| R-05 | Compiler/View 职责集中 | Low | Core 服务和 Presentation 已拆分，33/33 通过 | 后续能力进入对应服务 | ✅ Mitigated |
+| R-05 | Compiler/View 职责集中 | Low | Core 服务和 Presentation 已拆分，34/34 通过 | 后续能力进入对应服务 | ✅ Mitigated |
 | R-06 | 性能证据和硬门仍不完整 | Critical | 两项硬门与 Selector 工作量门继续通过，Hydration 已建立 Observe 基线；Hover/FieldNotify 未达标，Packaged RSS/LLM 仍缺失 | M2.7 真实渲染证据、M2.9 预算门禁 | 🚧 M2 |
-| R-07 | Map 声明丢失重复属性顺序 | Medium | Core、Compiled IR 与 Hydration 已使用有序声明；当前 33/33、历史 Win64 Development BuildCookRun 通过 | 保持 Ordered Declaration 专项与资产版本门 | ✅ Mitigated |
+| R-07 | Map 声明丢失重复属性顺序 | Medium | Core、Compiled IR 与 Hydration 已使用有序声明；当前 34/34、历史 Win64 Development BuildCookRun 通过 | 保持 Ordered Declaration 专项与资产版本门 | ✅ Mitigated |
 | R-08 | 仅 Win64 | Medium | `.uplugin` 平台限制 | M2.9 第二平台可行性 Spike；M6 完整构建矩阵 | ⬜ M2/M6 |
 | R-09 | MCP Experimental 且通用 Python 权限高 | Medium | 本地 Editor 环境已验证 | 回环/受信任/Editor-only/最小权限 | ⬜ M5 |
 | R-10 | Sandbox 或宿主超时可使 UE 子进程脱离观察 | High | 曾复现；Preflight、互斥、发布进程树 PID/日志和持久状态已有 Pester 5/5 | 生命周期 Skill 与 [ADR-0001](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md) | ✅ Mitigated |
-| R-11 | 每 View 深拷贝静态节点/规则且缓存依赖 raw pointer | High | 500/2,000/10,000 Hydrate P95 为 `2.424/14.575/75.649 ms`；每 View known-owned 为 `0.90/3.23/13.97 MB`，第二 View 等量复制 | M2.3 裁决共享模板、TemplateNodeId、Instance Handle | 🚧 M2 |
+| R-11 | 每 View 深拷贝静态节点/规则 | High | 稳定 Template Node ID、generation-safe Instance Handle 及 Handle-keyed View Cache 已建立；500/2,000/10,000 每 View known-owned 增至 `0.92/3.31/14.37 MB`，第二 View 仍等量复制 | M2.3 继续裁决共享节点/规则/Selector Metadata 与 Hydration 取舍 | 🚧 M2 |
 | R-12 | Game Thread Paint 微基准无法代表 Slate Renderer/RT/GPU | Critical | 当前基准手动生成 Draw Elements；无 Batch、RT、GPU、首帧和 VRAM 门 | M2.7 指标扩展、真实 Packaged Corpus 与 A/B | 🚧 M2 |
 | R-13 | 同步 Presentation Resource 不只包含纹理 | High | 图片路径可 `LoadObject`；字体解析可 `LoadSynchronous` | 编译 Resource Manifest、预载/异步解析、热路径稳定 Handle | 🚧 M2 |
 | R-14 | 单 Slate Leaf 内部语义节点对焦点/IME/无障碍不可见 | High | 当前仅宿主控件获得 Slate 焦点 | M2.8 先定义 Semantic/Focus Node 接口，再分阶段补平台能力 | ⬜ M2 |
@@ -355,10 +355,10 @@ M2.0～M2.2 保留已经形成的可观测性、生命周期和类型化样式�
 
 中途门：先锁定正确性；资产 payload 改变时先完成迁移闭环；索引完成后立即验证工作量。Hover `<0.5 ms` 属 M2.4，因为没有失效依赖时仍可能访问全树节点。Property Metadata 已证明 Paint-only Pseudo 变化不会同步加载纹理或重建无关图片；完整 Resource Manifest/Cache 属 M2.6。
 
-### M2.3——共享模板与稳定身份裁决 🚧 1 / 6
+### M2.3——共享模板与稳定身份裁决 🚧 2 / 6
 
 - [x] 测量 500/2,000/10,000 节点 Hydrate P50/P95、单 View 常驻内存和第二 View 增量内存：P95 `2.423998/14.574900/75.649202 ms`；首/第二 View known-owned 均为 `895,678/3,227,058/13,966,944 B`。Editor RSS 另行原样记录，不外推 Packaged 内存。
-- [ ] 为 Compiled Template 定义稳定 `TemplateNodeId`，为动态实例定义 generation-safe Instance Handle；缓存不再以无法校验生命周期的 raw pointer 作为长期身份合同。
+- [x] 为 Compiled Template 定义修订内稳定 `TemplateNodeId`，为静态/动态实例定义 Owner + Generation + Slot Handle；交互状态及 Text/Brush/Paint Order Cache 不再以无法校验生命周期的 raw pointer 作为长期身份合同。身份范围与替代方案见 [ADR-0002](ADRs/ADR-0002-Template-And-Instance-Identity.md)。
 - [ ] 裁决节点/规则/Selector Metadata 哪些保持共享不可变，哪些必须按 View 存在；以数据决定保留或替换当前深拷贝 Hydration。
 - [ ] Dirty、Yoga、Text、Brush、Display List 和后续 Stable Key 使用同一身份模型。
 - [ ] 结构变化、重导入和 View 销毁不会让旧 Handle 命中新实例；建立专项测试。
@@ -433,12 +433,12 @@ M2 先建设与传输协议无关的 Compiler、Diagnostics、Inspection 和 Ben
 
 ## 11. 测试与发布门禁
 
-### 11.1 当前 Automation（33 / 33）
+### 11.1 当前 Automation（34 / 34）
 
 | 层 | 测试 |
 | --- | --- |
 | Core | `HtmlCss`、`OrderedDeclarations`、`TypedProperties`、`PropertyMetadata`、`SelectorIndex`、`TypedCascade`、`FlexLayout`、`ConstrainedMeasure`、`RichTextCompile`、`ScrollLayout`、`CssDiagnostics` |
-| Runtime | `AssetVersion`、`CompiledDocumentBoundary`、`OrderedDeclarationHydration`、`RuntimeInstanceIsolation`、`RuntimeCacheSeparation`、`RuntimePresentationIsolation`、`PaintOnlyPseudoResourceSafety`、`TypedCascadeSlateOutput`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`PerformanceInstrumentation`、`PaintOrderCache` |
+| Runtime | `AssetVersion`、`CompiledDocumentBoundary`、`OrderedDeclarationHydration`、`RuntimeIdentity`、`RuntimeInstanceIsolation`、`RuntimeCacheSeparation`、`RuntimePresentationIsolation`、`PaintOnlyPseudoResourceSafety`、`TypedCascadeSlateOutput`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`PerformanceInstrumentation`、`PaintOrderCache` |
 | Editor | `BenchmarkScenarios`、`BenchmarkStatistics`、`RuntimeHoverBenchmark`、`RuntimeFieldNotifyBenchmark`、`RuntimeHydrationBenchmark`、`RuntimeWarmLayoutBenchmark`、`RuntimeUnchangedPaintBenchmark`、`LocalizationImport`、`OrderedDeclarationImport` |
 
 Editor 生命周期另有 Pester 5 / 5，不计入 UE Automation；`SafeBuildCookAndLaunch` 的首次真实 UAT→Editor 重启集成证据仍待实际发布门生成。

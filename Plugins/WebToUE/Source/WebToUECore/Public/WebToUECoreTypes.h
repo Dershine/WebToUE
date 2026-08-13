@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WebToUEIdentity.h"
 #include "WebToUECoreTypes.generated.h"
 
 enum class EWebToUEDiagnosticSeverity : uint8
@@ -337,7 +338,8 @@ struct WEBTOUECORE_API FWebToUENode : public TSharedFromThis<FWebToUENode>
 	TArray<FWebToUEStyleDeclaration> InlineStyleDeclarations;
 	TArray<TSharedPtr<FWebToUENode>> Children;
 	FWebToUENode* Parent = nullptr;
-	int32 RuntimeDataIndex = INDEX_NONE;
+	FWebToUETemplateNodeId TemplateNodeId;
+	FWebToUEInstanceHandle InstanceHandle;
 	FString SelectorId;
 	TArray<FString> SelectorClasses;
 	bool bSelectorIdentityInitialized = false;
@@ -395,44 +397,57 @@ struct WEBTOUECORE_API FWebToUEDocument
 	TArray<FWebToUEDiagnostic> Diagnostics;
 	TArray<FWebToUERuntimeNodeState> RuntimeNodeStates;
 	TArray<FWebToUERuntimeRenderData> RuntimeRenderData;
+	TArray<FWebToUENode*> RuntimeNodesBySlot;
 	FWebToUESelectorIndex SelectorIndex;
 
 	bool HasErrors() const;
-	void InitializeRuntimeData();
+	void InitializeRuntimeData(uint64 InOwnerId = 0, uint32 InGeneration = 1);
 	void InitializeSelectorIndex();
 	void AddRuntimeNodeData(FWebToUENode& Node);
 	int32 ForEachSelectorCandidate(const FWebToUENode& Node,
 		TFunctionRef<void(const FWebToUEStyleRule&)> Visitor) const;
 	FORCEINLINE bool IsValidRuntimeNodeStateIndex(const FWebToUENode& Node) const
 	{
-		return RuntimeNodeStates.IsValidIndex(Node.RuntimeDataIndex);
+		return ResolveNode(Node.InstanceHandle) == &Node;
 	}
 	FORCEINLINE FWebToUERuntimeNodeState& GetRuntimeNodeState(FWebToUENode& Node)
 	{
-		return RuntimeNodeStates[Node.RuntimeDataIndex];
+		check(IsValidRuntimeNodeStateIndex(Node));
+		return RuntimeNodeStates[Node.InstanceHandle.GetSlot()];
 	}
 	FORCEINLINE const FWebToUERuntimeNodeState& GetRuntimeNodeState(const FWebToUENode& Node) const
 	{
-		return RuntimeNodeStates[Node.RuntimeDataIndex];
+		check(IsValidRuntimeNodeStateIndex(Node));
+		return RuntimeNodeStates[Node.InstanceHandle.GetSlot()];
 	}
 	FORCEINLINE FWebToUEComputedStyle& GetComputedStyle(FWebToUENode& Node)
 	{
-		return RuntimeRenderData[Node.RuntimeDataIndex].ComputedStyle;
+		check(IsValidRuntimeNodeStateIndex(Node));
+		return RuntimeRenderData[Node.InstanceHandle.GetSlot()].ComputedStyle;
 	}
 	FORCEINLINE const FWebToUEComputedStyle& GetComputedStyle(const FWebToUENode& Node) const
 	{
-		return RuntimeRenderData[Node.RuntimeDataIndex].ComputedStyle;
+		check(IsValidRuntimeNodeStateIndex(Node));
+		return RuntimeRenderData[Node.InstanceHandle.GetSlot()].ComputedStyle;
 	}
 	FORCEINLINE FWebToUERuntimeLayoutResult& GetLayoutResult(FWebToUENode& Node)
 	{
-		return RuntimeRenderData[Node.RuntimeDataIndex].LayoutResult;
+		check(IsValidRuntimeNodeStateIndex(Node));
+		return RuntimeRenderData[Node.InstanceHandle.GetSlot()].LayoutResult;
 	}
 	FORCEINLINE const FWebToUERuntimeLayoutResult& GetLayoutResult(const FWebToUENode& Node) const
 	{
-		return RuntimeRenderData[Node.RuntimeDataIndex].LayoutResult;
+		check(IsValidRuntimeNodeStateIndex(Node));
+		return RuntimeRenderData[Node.InstanceHandle.GetSlot()].LayoutResult;
 	}
+	FWebToUENode* ResolveNode(FWebToUEInstanceHandle Handle);
+	const FWebToUENode* ResolveNode(FWebToUEInstanceHandle Handle) const;
 	bool IsDisplayed(const FWebToUENode& Node) const;
 	bool ClipsOverflow(const FWebToUENode& Node) const;
 	bool IsScrollable(const FWebToUENode& Node) const;
 	void ForEachNode(TFunctionRef<void(FWebToUENode&)> Visitor) const;
+
+private:
+	uint64 RuntimeInstanceOwnerId = 0;
+	uint32 RuntimeInstanceGeneration = 0;
 };

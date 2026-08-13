@@ -49,7 +49,11 @@ public:
 	FWebToUENode* HitTestForTesting(const FVector2f& LocalPosition) const { return HitTest(LocalPosition); }
 	bool ScrollAtForTesting(const FVector2f& LocalPosition, float WheelDelta) { return ScrollAt(LocalPosition, WheelDelta); }
 	FVector2f GetVisualPositionForTesting(const FWebToUENode& Node) const;
-	TConstArrayView<FWebToUENode*> GetPaintOrderForTesting(const FWebToUENode& Parent) const;
+	TConstArrayView<FWebToUEInstanceHandle> GetPaintOrderForTesting(const FWebToUENode& Parent) const;
+	FWebToUEInstanceHandle GetInstanceHandleForTesting(const FWebToUENode& Node) const;
+	FWebToUETemplateNodeId GetTemplateNodeIdForTesting(const FWebToUENode& Node) const;
+	FWebToUENode* ResolveInstanceHandleForTesting(FWebToUEInstanceHandle Handle) const;
+	FWebToUENode* AddDynamicTextNodeForTesting(FWebToUENode& Parent);
 	void SetHoveredNodeForTesting(FWebToUENode* Node) { SetHoveredNode(Node); }
 	void SetFocusedNodeForTesting(FWebToUENode* Node) { SetFocusedNode(Node); }
 	void SetBoundTextForTesting(FWebToUENode& Node, const FText& Text);
@@ -87,7 +91,6 @@ private:
 	void RebuildStylesAndBrushes(
 		EWebToUEStyleImpact Impacts = EWebToUEStyleImpact::Resource);
 	void CachePseudoStateImpacts();
-	TConstArrayView<FWebToUENode*> GetPaintOrder(const FWebToUENode& Parent) const;
 	FText GetDisplayText(const FWebToUENode& Node) const;
 	FWebToUENode* HitTest(const FVector2f& LocalPosition) const;
 	bool ScrollAt(const FVector2f& LocalPosition, float WheelDelta);

@@ -42,7 +42,7 @@ public:
 		const FWidgetStyle& WidgetStyle, bool bParentEnabled) const;
 	FWebToUENode* HitTest(const FVector2f& LocalPosition) const;
 	FVector2f GetVisualPosition(const FWebToUENode& Node) const;
-	TConstArrayView<FWebToUENode*> GetPaintOrder(const FWebToUENode& Parent) const;
+	TConstArrayView<FWebToUEInstanceHandle> GetPaintOrder(const FWebToUENode& Parent) const;
 	FText GetDisplayText(const FWebToUENode& Node) const;
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -62,11 +62,11 @@ private:
 	FWebToUERuntimeInstance& RuntimeInstance;
 	mutable FVector2f LastViewportSize = FVector2f(-1.0f, -1.0f);
 	mutable bool bLayoutDirty = true;
-	mutable TMap<const FWebToUENode*, TSharedPtr<FSlateBrush>> Brushes;
-	mutable TMap<const FWebToUENode*, TUniquePtr<FWebToUETextLayoutCache>> TextLayouts;
+	mutable TMap<FWebToUEInstanceHandle, TSharedPtr<FSlateBrush>> Brushes;
+	mutable TMap<FWebToUEInstanceHandle, TUniquePtr<FWebToUETextLayoutCache>> TextLayouts;
 	mutable TArray<TStrongObjectPtr<UObject>> LoadedResources;
-	TArray<FWebToUENode*> PaintOrderNodes;
-	TMap<const FWebToUENode*, FWebToUEPaintOrderRange> PaintOrderRanges;
+	TArray<FWebToUEInstanceHandle> PaintOrderNodes;
+	TMap<FWebToUEInstanceHandle, FWebToUEPaintOrderRange> PaintOrderRanges;
 #if WITH_DEV_AUTOMATION_TESTS
 	mutable uint64 ResourceLoadAttemptsForTesting = 0;
 #endif
@@ -81,6 +81,9 @@ private:
 	bool IsRichText(const FWebToUENode& Node) const;
 	FSlateTextBlockLayout& PrepareTextLayout(const FWebToUENode& Node,
 		const FWebToUEComputedStyle& Style, float WrapWidth) const;
+	FSlateTextBlockLayout& PrepareTextLayoutInCache(const FWebToUENode& Node,
+		const FWebToUEComputedStyle& Style, float WrapWidth,
+		TUniquePtr<FWebToUETextLayoutCache>& Cache) const;
 	FVector2f MeasureNode(const FWebToUENode& Node,
 		const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
 	FVector2f MeasureNodeWithStyle(const FWebToUENode& Node, const FWebToUEComputedStyle& Style,

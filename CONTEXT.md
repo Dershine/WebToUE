@@ -30,6 +30,14 @@ _Avoid_: 网页、DOM Document、HTML 文件
 WTUE Document 在一个实际界面视图中的实例，拥有独立的交互、绑定和滚动状态。
 _Avoid_: Runtime Document、网页实例
 
+**Template Node ID（模板节点 ID）**:
+节点在一个不可变 Compiled UI IR 修订中的稳定位置身份；同一模板节点在不同 Runtime UI Instance 中保持一致，但不作为跨重编译的语义身份。
+_Avoid_: Node Pointer、DOM Node ID、跨版本语义 ID
+
+**Instance Handle（实例句柄）**:
+可验证 Runtime UI Instance 所有者、代次与节点槽位的短期身份；旧代次或其他实例的句柄不能解析为当前节点。
+_Avoid_: Runtime Node Pointer、永久 Node ID、UObject Handle
+
 **Runtime State（运行时状态）**:
 只属于 Runtime UI Instance 的可变状态，例如焦点、伪状态、滚动位置和绑定值。
 _Avoid_: Compiled Node、资产状态

@@ -264,3 +264,4 @@ This project-specific section lives outside the generated VibeUE block and overr
 - `UAssetManagerSettings` is `config=Game` in UE 5.8; put the required `GameFeatureData` `AlwaysCook` rule in `DefaultGame.ini`, not `DefaultEngine.ini`, or Cook silently ignores it and reports the rule missing.
 - A healthy Editor owns MCP port 8000; keep it open during source-current `-skipbuild` Cook by passing `-AdditionalCookerOptions=-ModelContextProtocolPort=8001`, or close it through the lifecycle safety gate before a full Game build.
 - Development Game targets define `WITH_DEV_AUTOMATION_TESTS` without `WITH_EDITOR`; any EditorContext test using editor-only APIs must guard on both macros or it can break the Game receipt build despite Editor builds passing.
+- Standalone text-measurement test helpers construct unregistered nodes; keep them on explicit transient layout caches instead of routing them through Instance Handle-keyed production caches.

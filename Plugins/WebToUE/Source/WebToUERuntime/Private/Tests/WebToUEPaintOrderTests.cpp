@@ -36,7 +36,7 @@ bool FWebToUEPaintOrderCacheTest::RunTest(const FString& Parameters)
 
 	auto TestOrder = [this, &View, Root](const TCHAR* Context, std::initializer_list<const TCHAR*> Expected)
 	{
-		const TConstArrayView<FWebToUENode*> Order = View->GetPaintOrderForTesting(*Root);
+		const TConstArrayView<FWebToUEInstanceHandle> Order = View->GetPaintOrderForTesting(*Root);
 		TestEqual(*FString::Printf(TEXT("%s has the expected child count"), Context),
 			Order.Num(), static_cast<int32>(Expected.size()));
 		int32 Index = 0;
@@ -46,8 +46,13 @@ bool FWebToUEPaintOrderCacheTest::RunTest(const FString& Parameters)
 			{
 				break;
 			}
-			TestEqual(*FString::Printf(TEXT("%s child %d preserves paint order"), Context, Index),
-				Order[Index]->GetAttribute(TEXT("id")), FString(ExpectedId));
+			const FWebToUENode* OrderedNode = View->ResolveInstanceHandleForTesting(Order[Index]);
+			TestNotNull(*FString::Printf(TEXT("%s child %d resolves"), Context, Index), OrderedNode);
+			if (OrderedNode)
+			{
+				TestEqual(*FString::Printf(TEXT("%s child %d preserves paint order"), Context, Index),
+					OrderedNode->GetAttribute(TEXT("id")), FString(ExpectedId));
+			}
 			++Index;
 		}
 	};
