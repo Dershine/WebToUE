@@ -223,7 +223,7 @@ bool FWebToUEBenchmarkCorpusSlateOutputTest::RunTest(const FString& Parameters)
 				const FPointerEvent MoveEvent(0, ScreenCenter, FVector2D::ZeroVector,
 					TSet<FKey>(), FKey(), 0.0f, FModifierKeysState());
 				Capture.Reset();
-				SlateWidget->OnMouseMove(Geometry, MoveEvent);
+				View->OnMouseMoveForTesting(Geometry, MoveEvent);
 				const FWebToUEPerformanceSnapshot Interaction = Capture.GetSnapshot();
 				TestTrue(TEXT("MainMenu trajectory queries spatial hit candidates"),
 					Interaction.GetCounter(

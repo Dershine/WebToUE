@@ -3,6 +3,7 @@
 #include "SWebToUEView.h"
 #include "WebToUEDocument.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Widgets/Layout/SSafeZone.h"
 
 UWebToUEView::UWebToUEView(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -12,16 +13,23 @@ UWebToUEView::UWebToUEView(const FObjectInitializer& ObjectInitializer)
 TSharedRef<SWidget> UWebToUEView::RebuildWidget()
 {
 	SlateView = SNew(SWebToUEView).Owner(this);
+	SafeZone = SNew(SSafeZone)
+		.IsTitleSafe(false)
+		.SafeAreaScale(bRespectSafeZone ? FMargin(1.0f) : FMargin(0.0f))
+		[
+			SlateView.ToSharedRef()
+		];
 	if (!DocumentChangedHandle.IsValid())
 	{
 		DocumentChangedHandle = UWebToUEDocument::OnDocumentChanged().AddUObject(this, &UWebToUEView::HandleDocumentChanged);
 	}
-	return SlateView.ToSharedRef();
+	return SafeZone.ToSharedRef();
 }
 
 void UWebToUEView::SynchronizeProperties()
 {
 	Super::SynchronizeProperties();
+	ApplySafeZoneSetting();
 	if (SlateView)
 	{
 		SlateView->SetDocument(Document);
@@ -34,6 +42,7 @@ void UWebToUEView::ReleaseSlateResources(bool bReleaseChildren)
 {
 	Super::ReleaseSlateResources(bReleaseChildren);
 	UnbindFieldNotifications();
+	SafeZone.Reset();
 	SlateView.Reset();
 	if (DocumentChangedHandle.IsValid())
 	{
@@ -66,6 +75,21 @@ void UWebToUEView::SetDataContext(UObject* InDataContext)
 void UWebToUEView::RefreshBindings()
 {
 	if (SlateView) SlateView->RefreshBindings(DataContext);
+}
+
+void UWebToUEView::SetRespectSafeZone(bool bInRespectSafeZone)
+{
+	if (bRespectSafeZone == bInRespectSafeZone) return;
+	bRespectSafeZone = bInRespectSafeZone;
+	ApplySafeZoneSetting();
+}
+
+void UWebToUEView::ApplySafeZoneSetting()
+{
+	if (!SafeZone) return;
+	SafeZone->SetSafeAreaScale(
+		bRespectSafeZone ? FMargin(1.0f) : FMargin(0.0f));
+	SafeZone->Invalidate(EInvalidateWidgetReason::Layout);
 }
 
 void UWebToUEView::HandleRuntimeEvent(FName EventName, FName ElementId)
@@ -168,12 +192,36 @@ void UWebToUEView::SetHoveredNodeForTesting(FWebToUENode* Node)
 	}
 }
 
+FReply UWebToUEView::OnMouseMoveForTesting(
+	const FGeometry& Geometry, const FPointerEvent& PointerEvent)
+{
+	return SlateView
+		? SlateView->OnMouseMove(Geometry, PointerEvent)
+		: FReply::Unhandled();
+}
+
 const FWebToUERuntimeLayoutResult& UWebToUEView::GetLayoutResultForTesting(
 	const FWebToUENode& Node) const
 {
 	check(SlateView);
 	return SlateView->GetLayoutResultForTesting(Node);
 }
+
+#if WITH_EDITOR
+void UWebToUEView::SetSafeZoneOverrideForTesting(
+	FVector2D ScreenSize, float DPIScale)
+{
+	if (SafeZone)
+	{
+		SafeZone->SetOverrideScreenInformation(ScreenSize, DPIScale);
+	}
+}
+
+FMargin UWebToUEView::GetSafeZoneMarginForTesting(float LayoutScale) const
+{
+	return SafeZone ? SafeZone->GetSafeMargin(LayoutScale) : FMargin();
+}
+#endif
 #endif
 
 void UWebToUEView::BindFieldNotifications()

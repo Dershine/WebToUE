@@ -8,6 +8,7 @@
 #include "WebToUEView.generated.h"
 
 class SWebToUEView;
+class SSafeZone;
 class UWebToUEDocument;
 struct FWebToUERuntimeLayoutResult;
 enum class EWebToUEPseudoState : uint8;
@@ -46,6 +47,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="WebToUE", meta=(ExposeOnSpawn=true))
 	TObjectPtr<UObject> DataContext;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="WebToUE", meta=(ExposeOnSpawn=true))
+	bool bRespectSafeZone = true;
+
 	UPROPERTY(BlueprintAssignable, Category="WebToUE")
 	FWebToUEEvent OnUIEvent;
 
@@ -57,6 +61,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="WebToUE")
 	void RefreshBindings();
+
+	UFUNCTION(BlueprintCallable, Category="WebToUE")
+	void SetRespectSafeZone(bool bInRespectSafeZone);
 
 	void HandleRuntimeEvent(FName EventName, FName ElementId);
 	virtual void GetSemanticNodes(TArray<FWebToUESemanticNode>& OutNodes) const override;
@@ -79,8 +86,16 @@ public:
 	FWebToUEInstanceHandle GetInstanceHandleForTesting(const FWebToUENode& Node) const;
 	FWebToUENode* ResolveInstanceHandleForTesting(FWebToUEInstanceHandle Handle) const;
 	void SetHoveredNodeForTesting(FWebToUENode* Node);
+	FReply OnMouseMoveForTesting(
+		const FGeometry& Geometry, const FPointerEvent& PointerEvent);
 	const FWebToUERuntimeLayoutResult& GetLayoutResultForTesting(
 		const FWebToUENode& Node) const;
+	TSharedPtr<SWebToUEView> GetSlateViewForTesting() const { return SlateView; }
+#if WITH_EDITOR
+	void SetSafeZoneOverrideForTesting(FVector2D ScreenSize, float DPIScale);
+	FMargin GetSafeZoneMarginForTesting(float LayoutScale) const;
+	TSharedPtr<SSafeZone> GetSafeZoneForTesting() const { return SafeZone; }
+#endif
 #endif
 
 #if WITH_EDITOR
@@ -92,8 +107,10 @@ protected:
 
 private:
 	TSharedPtr<SWebToUEView> SlateView;
+	TSharedPtr<SSafeZone> SafeZone;
 	FDelegateHandle DocumentChangedHandle;
 
+	void ApplySafeZoneSetting();
 	void BindFieldNotifications();
 	void UnbindFieldNotifications();
 	void HandleFieldValueChanged(UObject* Object, UE::FieldNotification::FFieldId FieldId);
