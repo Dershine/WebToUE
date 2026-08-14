@@ -167,7 +167,7 @@ bool FWebToUERuntimeHoverBenchmarkTest::RunTest(const FString& Parameters)
 		FWebToUEBenchmarkSamplingPolicy::SampleCount;
 	for (int32 Iteration = 0; Iteration < TotalIterations; ++Iteration)
 	{
-		SlateView->OnMouseLeave(FPointerEvent());
+		RuntimeView->SetHoveredNodeForTesting(nullptr);
 		PaintRuntimeView(SlateView, Geometry);
 
 		FRuntimeUpdateSample Sample;
@@ -176,7 +176,7 @@ bool FWebToUERuntimeHoverBenchmarkTest::RunTest(const FString& Parameters)
 		{
 			FWebToUEPerformanceCapture Capture;
 			const double StartSeconds = FPlatformTime::Seconds();
-			SlateView->OnMouseMove(Geometry, HoverEvent);
+			RuntimeView->OnMouseMoveForTesting(Geometry, HoverEvent);
 			PaintRuntimeView(SlateView, Geometry, TimedHittestGrid, TimedDrawElements);
 			Sample.InclusiveMilliseconds = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
 			Sample.Snapshot = Capture.GetSnapshot();
