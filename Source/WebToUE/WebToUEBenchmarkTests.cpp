@@ -234,6 +234,11 @@ bool FWebToUEBenchmarkCorpusSlateOutputTest::RunTest(const FString& Parameters)
 				const FChildren* HostChildren = SlateWidget->GetChildren();
 				TestEqual(TEXT("Production SafeZone host owns one WebToUE leaf"),
 					HostChildren->Num(), 1);
+				const TSharedPtr<SWidget> InputTarget =
+					WebToUE::Benchmark::ResolvePointerTarget(SlateWidget);
+				TestTrue(TEXT("Benchmark resolves the production WebToUE leaf"),
+					HostChildren->Num() == 1 && InputTarget.IsValid() &&
+					InputTarget.Get() == &HostChildren->GetChildAt(0).Get());
 				const TSharedRef<SWindow> InputWindow = SNew(SWindow)
 					.ClientSize(FVector2D(1280.0, 720.0))
 					[
@@ -242,10 +247,9 @@ bool FWebToUEBenchmarkCorpusSlateOutputTest::RunTest(const FString& Parameters)
 				TArray<FWidgetAndPointer> InputWidgets;
 				InputWidgets.Emplace(FArrangedWidget(InputWindow, Geometry));
 				InputWidgets.Emplace(FArrangedWidget(SlateWidget, Geometry));
-				if (HostChildren->Num() == 1)
+				if (InputTarget.IsValid())
 				{
-					InputWidgets.Emplace(FArrangedWidget(
-						ConstCastSharedRef<SWidget>(HostChildren->GetChildAt(0)),
+					InputWidgets.Emplace(FArrangedWidget(InputTarget.ToSharedRef(),
 						Geometry));
 				}
 				const FWidgetPath InputPath(InputWidgets);

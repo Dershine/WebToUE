@@ -17,6 +17,9 @@ class UWebToUEDocument;
 
 namespace WebToUE::Benchmark
 {
+	/** Resolve the single WebToUE leaf hosted by the production SafeZone wrapper. */
+	TSharedPtr<SWidget> ResolvePointerTarget(const TSharedRef<SWidget>& HostWidget);
+
 	/** Route benchmark input through the same leaf path used by real Slate input. */
 	bool RoutePointerMove(FSlateApplication& Slate, const FWidgetPath& InputPath,
 		const FPointerEvent& PointerEvent);

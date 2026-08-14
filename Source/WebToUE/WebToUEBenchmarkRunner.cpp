@@ -274,6 +274,15 @@ bool WebToUE::Benchmark::RoutePointerMove(FSlateApplication& Slate,
 		Slate.RoutePointerMoveEvent(InputPath, PointerEvent, false);
 }
 
+TSharedPtr<SWidget> WebToUE::Benchmark::ResolvePointerTarget(
+	const TSharedRef<SWidget>& HostWidget)
+{
+	const FChildren* Children = HostWidget->GetChildren();
+	return Children && Children->Num() == 1
+		? ConstCastSharedRef<SWidget>(Children->GetChildAt(0))
+		: HostWidget;
+}
+
 FWebToUEBenchmarkRunner::FWebToUEBenchmarkRunner()
 {
 	FParse::Value(FCommandLine::Get(), TEXT("WTUEBenchmark="), Mode);
@@ -486,7 +495,6 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 		BuiltTargetWidget = View->TakeWidget();
 		ColdTakeWidgetMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
 			TakeWidgetStartCycles, FPlatformTime::Cycles64());
-		InputTargetWidget = BuiltTargetWidget;
 	}
 	else
 	{
@@ -513,7 +521,15 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 		return false;
 	}
 	TargetWidget = BuiltTargetWidget;
-	if (!InputTargetWidget.IsValid()) InputTargetWidget = BuiltTargetWidget;
+	if (Mode == TEXT("WebToUE"))
+	{
+		InputTargetWidget = WebToUE::Benchmark::ResolvePointerTarget(
+			BuiltTargetWidget.ToSharedRef());
+	}
+	else if (!InputTargetWidget.IsValid())
+	{
+		InputTargetWidget = BuiltTargetWidget;
+	}
 	const uint64 PrepassStartCycles = FPlatformTime::Cycles64();
 	BuiltTargetWidget->SlatePrepass(1.0f);
 	ColdPrepassMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
@@ -750,16 +766,7 @@ void FWebToUEBenchmarkRunner::ApplyTrajectory()
 		OutPath = FWidgetPath(WidgetsAndPointers);
 		return OutPath.IsValid();
 	};
-	if (Mode == TEXT("WebToUE"))
-	{
-		if (const TSharedPtr<SWindow> Window = TargetWindow.Pin())
-		{
-			TArray<TSharedRef<SWindow>> Windows;
-			Windows.Add(Window.ToSharedRef());
-			InputPath = Slate.LocateWindowUnderMouse(Position, Windows, false);
-		}
-	}
-	else if (InputTargetWidget.IsValid())
+	if (InputTargetWidget.IsValid())
 	{
 		GeneratePointerPath(InputTargetWidget.ToSharedRef(), InputPath);
 	}
