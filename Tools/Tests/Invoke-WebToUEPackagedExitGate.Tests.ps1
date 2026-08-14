@@ -109,6 +109,8 @@ Describe "WebToUE packaged exit gate" {
 
         $scriptSource = Get-Content -Raw -LiteralPath $ScriptUnderTest
         $scriptSource | Should Not Match "-WindowStyle Hidden"
+        ($scriptSource -match '\$script:ColdTrialSamples = 60') | Should Be $true
+        ($scriptSource -match '\$script:ColdTrialWarmupFrames = 10') | Should Be $true
     }
 
     It "accepts a complete Development matrix and preserves Shipping LLM semantics" {

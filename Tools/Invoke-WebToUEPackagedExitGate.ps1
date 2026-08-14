@@ -33,6 +33,8 @@ $script:MaximumDevelopmentLlmDeltaMiB = 64.0
 $script:MaximumCompiledResources = 0
 $script:ResolutionX = 1920
 $script:ResolutionY = 1080
+$script:ColdTrialSamples = 60
+$script:ColdTrialWarmupFrames = 10
 $script:BatchCaps = @{
     MainMenu = 12
     HUD = 6
@@ -193,7 +195,8 @@ function Invoke-BenchmarkMatrix {
             for ($trial = 2; $trial -le $RequestedColdTrials; $trial++) {
                 $coldDirectory = Get-CaseDirectory -Root $Root -Mode $mode -Corpus $corpus -Trial $trial
                 Invoke-BenchmarkCase -ExecutablePath $ExecutablePath -CaseDirectory $coldDirectory `
-                    -Mode $mode -Corpus $corpus -CaseSamples 30 -CaseWarmupFrames 10 `
+                    -Mode $mode -Corpus $corpus -CaseSamples $script:ColdTrialSamples `
+                    -CaseWarmupFrames $script:ColdTrialWarmupFrames `
                     -CaseConfiguration $MatrixConfiguration
             }
         }
@@ -425,6 +428,8 @@ function Test-PackagedResults {
             maximum_development_llm_delta_mib = $script:MaximumDevelopmentLlmDeltaMiB
             maximum_compiled_resources = $script:MaximumCompiledResources
             resolution = "$($script:ResolutionX)x$($script:ResolutionY)"
+            cold_trial_samples = $script:ColdTrialSamples
+            cold_trial_warmup_frames = $script:ColdTrialWarmupFrames
             raw_rss_enforced = $false
             slate_batch_caps = $script:BatchCaps
             slate_vertex_caps = $script:VertexCaps
