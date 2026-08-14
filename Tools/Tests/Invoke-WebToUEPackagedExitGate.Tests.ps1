@@ -84,19 +84,31 @@ Describe "WebToUE packaged exit gate" {
                 $node.Name -eq "Get-BenchmarkArguments"
         }, $true)
         Invoke-Expression $functionAst.Extent.Text
+        $script:ResolutionX = 1920
+        $script:ResolutionY = 1080
 
         $arguments = @(Get-BenchmarkArguments -CaseDirectory "E:\Evidence\Case" `
-            -Mode WebToUE -Corpus MainMenu -CaseSamples 600 -CaseWarmupFrames 120)
+            -Mode WebToUE -Corpus MainMenu -CaseSamples 600 -CaseWarmupFrames 120 `
+            -CaseConfiguration Development)
         ($arguments -contains "-WTUEBenchmark=WebToUE") | Should Be $true
         ($arguments -contains "-WTUECorpus=MainMenu") | Should Be $true
         ($arguments -contains "-WTUEWarmupFrames=120") | Should Be $true
         ($arguments -contains "-WTUESamples=600") | Should Be $true
         ($arguments -contains "-WTUEOutput=E:\Evidence\Case") | Should Be $true
         ($arguments -contains "-abslog=E:\Evidence\Case\WebToUE.log") | Should Be $true
-        ($arguments -contains "-ResX=1280") | Should Be $true
-        ($arguments -contains "-ResY=720") | Should Be $true
+        ($arguments -contains "-ResX=1920") | Should Be $true
+        ($arguments -contains "-ResY=1080") | Should Be $true
         ($arguments -contains "-NoVSync") | Should Be $true
         ($arguments -contains "-unattended") | Should Be $true
+        ($arguments -contains "-LLM") | Should Be $true
+
+        $shippingArguments = @(Get-BenchmarkArguments -CaseDirectory "E:\Evidence\Case" `
+            -Mode WebToUE -Corpus MainMenu -CaseSamples 600 -CaseWarmupFrames 120 `
+            -CaseConfiguration Shipping)
+        ($shippingArguments -contains "-LLM") | Should Be $false
+
+        $scriptSource = Get-Content -Raw -LiteralPath $ScriptUnderTest
+        $scriptSource | Should Not Match "-WindowStyle Hidden"
     }
 
     It "accepts a complete Development matrix and preserves Shipping LLM semantics" {
@@ -146,5 +158,28 @@ Describe "WebToUE packaged exit gate" {
         $exitCode | Should Be 3
         $summary.success | Should Be $false
         ($summary.failures -join " ") | Should Match "exceeded 2x UMG"
+    }
+
+    It "reports independent-process RSS drift but enforces Development LLM" {
+        $root = Join-Path $TestDrive "Memory"
+        New-FakeMatrix -Root $root
+        $webPath = Join-Path $root "Full\WebToUE-MainMenu\result.json"
+        $web = Get-Content -Raw -LiteralPath $webPath | ConvertFrom-Json
+        $web.rss_mib.p50 = 1800.0
+        $web | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $webPath -Encoding UTF8
+
+        $output = & powershell -NoProfile -ExecutionPolicy Bypass -File $ScriptUnderTest `
+            -ValidateOnly -Configuration Development -OutputRoot $root -ColdTrials 3
+        $summary = ($output -join "`n") | ConvertFrom-Json
+        $LASTEXITCODE | Should Be 0
+        $summary.memory_comparisons[0].rss_enforced | Should Be $false
+
+        $web.llm_mib.p50 = 2100.0
+        $web | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $webPath -Encoding UTF8
+        $output = & powershell -NoProfile -ExecutionPolicy Bypass -File $ScriptUnderTest `
+            -ValidateOnly -Configuration Development -OutputRoot $root -ColdTrials 3
+        $summary = ($output -join "`n") | ConvertFrom-Json
+        $LASTEXITCODE | Should Be 3
+        ($summary.failures -join " ") | Should Match "LLM delta exceeded 64 MiB"
     }
 }

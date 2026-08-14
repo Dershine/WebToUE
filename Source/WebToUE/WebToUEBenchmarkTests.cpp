@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
 
 #include "WebToUEBenchmarkUserWidget.h"
+#include "WebToUEBenchmarkRunner.h"
 #include "WebToUEPackagedBenchmarkPolicy.h"
 
 #include "WebToUEDocument.h"
@@ -13,11 +14,14 @@
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Input/HittestGrid.h"
+#include "Layout/WidgetPath.h"
 #include "Misc/AutomationTest.h"
 #include "Rendering/DrawElements.h"
 #include "Types/PaintArgs.h"
 #include "Widgets/SWidget.h"
+#include "Widgets/SWindow.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEBenchmarkCorpusContractTest,
 	"WebToUE.Benchmark.CorpusContract",
@@ -227,8 +231,28 @@ bool FWebToUEBenchmarkCorpusSlateOutputTest::RunTest(const FString& Parameters)
 				const FVector2D ScreenCenter = Geometry.LocalToAbsolute(LocalCenter);
 				const FPointerEvent MoveEvent(0, ScreenCenter, FVector2D::ZeroVector,
 					TSet<FKey>(), FKey(), 0.0f, FModifierKeysState());
+				const FChildren* HostChildren = SlateWidget->GetChildren();
+				TestEqual(TEXT("Production SafeZone host owns one WebToUE leaf"),
+					HostChildren->Num(), 1);
+				const TSharedRef<SWindow> InputWindow = SNew(SWindow)
+					.ClientSize(FVector2D(1280.0, 720.0))
+					[
+						SlateWidget
+					];
+				TArray<FWidgetAndPointer> InputWidgets;
+				InputWidgets.Emplace(FArrangedWidget(InputWindow, Geometry));
+				InputWidgets.Emplace(FArrangedWidget(SlateWidget, Geometry));
+				if (HostChildren->Num() == 1)
+				{
+					InputWidgets.Emplace(FArrangedWidget(
+						ConstCastSharedRef<SWidget>(HostChildren->GetChildAt(0)),
+						Geometry));
+				}
+				const FWidgetPath InputPath(InputWidgets);
 				Capture.Reset();
-				View->OnMouseMoveForTesting(Geometry, MoveEvent);
+				TestTrue(TEXT("Benchmark routes pointer move through the production leaf path"),
+					WebToUE::Benchmark::RoutePointerMove(
+						FSlateApplication::Get(), InputPath, MoveEvent));
 				const FWebToUEPerformanceSnapshot Interaction = Capture.GetSnapshot();
 				TestTrue(TEXT("MainMenu trajectory queries spatial hit candidates"),
 					Interaction.GetCounter(
