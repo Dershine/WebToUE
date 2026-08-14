@@ -9,6 +9,7 @@
 
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
+#include "Framework/Application/SlateApplication.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "UObject/UnrealType.h"
 
@@ -964,6 +965,7 @@ bool SWebToUEView::RequestSemanticFocus(FWebToUEInstanceHandle Handle)
 	FWebToUENode* Node = RuntimeInstance->ResolveNode(Handle);
 	if (!Node || !IsSemanticFocusable(*Node)) return false;
 	SetFocusedNode(Node);
+	if (Presentation->ScrollIntoView(*Node)) Invalidate(EInvalidateWidgetReason::Paint);
 	return true;
 }
 
@@ -1014,11 +1016,11 @@ FReply SWebToUEView::OnMouseWheel(const FGeometry& MyGeometry, const FPointerEve
 	return ScrollAt(LocalPosition, MouseEvent.GetWheelDelta()) ? FReply::Handled() : FReply::Unhandled();
 }
 
-void SWebToUEView::MoveFocus(int32 Direction)
+bool SWebToUEView::MoveFocusSequential(int32 Direction, bool bWrap)
 {
 	TArray<FWebToUENode*> Nodes;
 	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
-	if (!RuntimeDocument) return;
+	if (!RuntimeDocument) return false;
 	RuntimeDocument->ForEachNode([this, &Nodes](FWebToUENode& Node)
 	{
 		const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
@@ -1031,10 +1033,84 @@ void SWebToUEView::MoveFocus(int32 Direction)
 	{
 		return GetLayoutResult(A).PaintOrder < GetLayoutResult(B).PaintOrder;
 	});
-	if (Nodes.IsEmpty()) return;
+	if (Nodes.IsEmpty()) return false;
 	int32 Index = Nodes.IndexOfByKey(RuntimeInstance->GetFocusedNode());
-	Index = Index == INDEX_NONE ? (Direction > 0 ? 0 : Nodes.Num() - 1) : (Index + Direction + Nodes.Num()) % Nodes.Num();
-	SetFocusedNode(Nodes[Index]);
+	if (Index == INDEX_NONE)
+	{
+		Index = Direction > 0 ? 0 : Nodes.Num() - 1;
+	}
+	else
+	{
+		const int32 NextIndex = Index + Direction;
+		if (!Nodes.IsValidIndex(NextIndex))
+		{
+			if (!bWrap) return false;
+			Index = Direction > 0 ? 0 : Nodes.Num() - 1;
+		}
+		else
+		{
+			Index = NextIndex;
+		}
+	}
+	return RequestSemanticFocus(RuntimeInstance->GetHandle(Nodes[Index]));
+}
+
+bool SWebToUEView::MoveFocusSpatial(EUINavigation Direction)
+{
+	if (Direction != EUINavigation::Left && Direction != EUINavigation::Right &&
+		Direction != EUINavigation::Up && Direction != EUINavigation::Down)
+	{
+		return false;
+	}
+	TArray<FWebToUENode*> Candidates;
+	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
+	if (!RuntimeDocument) return false;
+	RuntimeDocument->ForEachNode([this, &Candidates](FWebToUENode& Node)
+	{
+		if (IsSemanticFocusable(Node)) Candidates.Add(&Node);
+	});
+	Candidates.Sort([this](const FWebToUENode& A, const FWebToUENode& B)
+	{
+		return GetLayoutResult(A).PaintOrder < GetLayoutResult(B).PaintOrder;
+	});
+	if (Candidates.IsEmpty()) return false;
+	FWebToUENode* Current = RuntimeInstance->GetFocusedNode();
+	if (!Current)
+	{
+		return RequestSemanticFocus(RuntimeInstance->GetHandle(
+			(Direction == EUINavigation::Left || Direction == EUINavigation::Up)
+				? Candidates.Last() : Candidates[0]));
+	}
+	const FVector2f CurrentCenter = Presentation->GetVisualPosition(*Current) +
+		GetLayoutResult(*Current).Size * 0.5f;
+	FWebToUENode* Best = nullptr;
+	float BestScore = TNumericLimits<float>::Max();
+	for (FWebToUENode* Candidate : Candidates)
+	{
+		if (Candidate == Current) continue;
+		const FVector2f Center = Presentation->GetVisualPosition(*Candidate) +
+			GetLayoutResult(*Candidate).Size * 0.5f;
+		const FVector2f Delta = Center - CurrentCenter;
+		float Primary = 0.0f;
+		float Secondary = 0.0f;
+		switch (Direction)
+		{
+		case EUINavigation::Left: Primary = -Delta.X; Secondary = FMath::Abs(Delta.Y); break;
+		case EUINavigation::Right: Primary = Delta.X; Secondary = FMath::Abs(Delta.Y); break;
+		case EUINavigation::Up: Primary = -Delta.Y; Secondary = FMath::Abs(Delta.X); break;
+		case EUINavigation::Down: Primary = Delta.Y; Secondary = FMath::Abs(Delta.X); break;
+		default: break;
+		}
+		if (Primary <= KINDA_SMALL_NUMBER) continue;
+		const float Score = Primary + Secondary * 2.0f +
+			(Secondary * Secondary) / FMath::Max(Primary, 1.0f);
+		if (Score < BestScore)
+		{
+			BestScore = Score;
+			Best = Candidate;
+		}
+	}
+	return Best && RequestSemanticFocus(RuntimeInstance->GetHandle(Best));
 }
 
 void SWebToUEView::ActivateFocusedNode()
@@ -1047,10 +1123,17 @@ FReply SWebToUEView::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& Key
 {
 	if (KeyEvent.GetKey() == EKeys::Tab)
 	{
-		MoveFocus(KeyEvent.IsShiftDown() ? -1 : 1);
+		MoveFocusSequential(KeyEvent.IsShiftDown() ? -1 : 1, true);
 		return FReply::Handled();
 	}
-	if (KeyEvent.GetKey() == EKeys::Enter || KeyEvent.GetKey() == EKeys::SpaceBar)
+	const FKey Key = KeyEvent.GetKey();
+	const bool bAccept = Key == EKeys::Enter || Key == EKeys::SpaceBar ||
+		Key == EKeys::Gamepad_FaceButton_Bottom ||
+		Key == EKeys::Virtual_Gamepad_Accept.GetVirtualKey() ||
+		(FSlateApplication::IsInitialized() &&
+			FSlateApplication::Get().GetNavigationActionFromKey(KeyEvent) ==
+				EUINavigationAction::Accept);
+	if (bAccept)
 	{
 		ActivateFocusedNode();
 		return FReply::Handled();
@@ -1058,9 +1141,22 @@ FReply SWebToUEView::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& Key
 	return FReply::Unhandled();
 }
 
+FNavigationReply SWebToUEView::OnNavigation(const FGeometry& MyGeometry,
+	const FNavigationEvent& InNavigationEvent)
+{
+	const EUINavigation Direction = InNavigationEvent.GetNavigationType();
+	if (Direction == EUINavigation::Next || Direction == EUINavigation::Previous)
+	{
+		return MoveFocusSequential(Direction == EUINavigation::Next ? 1 : -1, false)
+			? FNavigationReply::Stop() : FNavigationReply::Escape();
+	}
+	return MoveFocusSpatial(Direction)
+		? FNavigationReply::Stop() : FNavigationReply::Escape();
+}
+
 FReply SWebToUEView::OnFocusReceived(const FGeometry& MyGeometry, const FFocusEvent& InFocusEvent)
 {
-	if (!RuntimeInstance->GetFocusedNode()) MoveFocus(1);
+	if (!RuntimeInstance->GetFocusedNode()) MoveFocusSequential(1, false);
 	return FReply::Handled();
 }
 

@@ -140,6 +140,7 @@ public:
 		const FWidgetStyle& WidgetStyle, bool bParentEnabled) const;
 	FWebToUENode* HitTest(const FVector2f& LocalPosition) const;
 	bool ScrollAt(const FVector2f& LocalPosition, float WheelDelta);
+	bool ScrollIntoView(const FWebToUENode& Node);
 	void ApplyScrollOffsetChange(const FWebToUENode& Node);
 	FVector2f GetVisualPosition(const FWebToUENode& Node) const;
 	TConstArrayView<FWebToUEInstanceHandle> GetPaintOrder(const FWebToUENode& Parent) const;

@@ -44,6 +44,8 @@ public:
 	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& KeyEvent) override;
+	virtual FNavigationReply OnNavigation(const FGeometry& MyGeometry,
+		const FNavigationEvent& InNavigationEvent) override;
 	virtual FReply OnFocusReceived(const FGeometry& MyGeometry, const FFocusEvent& InFocusEvent) override;
 	virtual void OnFocusLost(const FFocusEvent& InFocusEvent) override;
 
@@ -133,7 +135,8 @@ private:
 		EWebToUEPseudoState Flag, bool bIncludeAncestors);
 	void CollectPseudoDependencyTargets(FWebToUENode& ReasonNode,
 		EWebToUEPseudoState Flag, TArray<FWebToUEInstanceHandle>& OutTargets) const;
-	void MoveFocus(int32 Direction);
+	bool MoveFocusSequential(int32 Direction, bool bWrap);
+	bool MoveFocusSpatial(EUINavigation Direction);
 	void ActivateFocusedNode();
 	bool IsSemanticFocusable(const FWebToUENode& Node) const;
 	FText BuildSemanticLabel(const FWebToUENode& Node) const;

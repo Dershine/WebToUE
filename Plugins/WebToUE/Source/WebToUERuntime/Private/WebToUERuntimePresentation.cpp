@@ -1594,6 +1594,55 @@ bool FWebToUERuntimePresentation::ScrollAt(
 	return false;
 }
 
+bool FWebToUERuntimePresentation::ScrollIntoView(const FWebToUENode& Node)
+{
+	const FWebToUEDocument* RuntimeDocument = GetDocument();
+	if (!RuntimeDocument) return false;
+	bool bChanged = false;
+	constexpr float NavigationPadding = 4.0f;
+	for (FWebToUENode* Ancestor = Node.Parent; Ancestor; Ancestor = Ancestor->Parent)
+	{
+		if (!RuntimeDocument->IsScrollable(*Ancestor)) continue;
+		FWebToUERuntimeNodeState& State = GetState(*Ancestor);
+		const FVector2f TargetPosition = GetVisualPosition(Node);
+		const FVector2f TargetSize = GetLayout(Node).Size;
+		const FVector2f ViewPosition = GetVisualPosition(*Ancestor);
+		const FVector2f ViewSize = GetLayout(*Ancestor).Size;
+		FVector2f Delta = FVector2f::ZeroVector;
+		if (TargetPosition.X < ViewPosition.X + NavigationPadding)
+		{
+			Delta.X = TargetPosition.X - (ViewPosition.X + NavigationPadding);
+		}
+		else if (TargetPosition.X + TargetSize.X >
+			ViewPosition.X + ViewSize.X - NavigationPadding)
+		{
+			Delta.X = TargetPosition.X + TargetSize.X -
+				(ViewPosition.X + ViewSize.X - NavigationPadding);
+		}
+		if (TargetPosition.Y < ViewPosition.Y + NavigationPadding)
+		{
+			Delta.Y = TargetPosition.Y - (ViewPosition.Y + NavigationPadding);
+		}
+		else if (TargetPosition.Y + TargetSize.Y >
+			ViewPosition.Y + ViewSize.Y - NavigationPadding)
+		{
+			Delta.Y = TargetPosition.Y + TargetSize.Y -
+				(ViewPosition.Y + ViewSize.Y - NavigationPadding);
+		}
+		const FVector2f PreviousOffset = State.ScrollOffset;
+		State.ScrollOffset.X = FMath::Clamp(
+			State.ScrollOffset.X + Delta.X, 0.0f, State.MaxScrollOffset.X);
+		State.ScrollOffset.Y = FMath::Clamp(
+			State.ScrollOffset.Y + Delta.Y, 0.0f, State.MaxScrollOffset.Y);
+		if (!PreviousOffset.Equals(State.ScrollOffset, 0.1f))
+		{
+			ApplyScrollOffsetChange(*Ancestor);
+			bChanged = true;
+		}
+	}
+	return bChanged;
+}
+
 void FWebToUERuntimePresentation::ApplyScrollOffsetChange(const FWebToUENode& Node)
 {
 	if (bDisplayListDirty) return;
