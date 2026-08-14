@@ -15,7 +15,6 @@ TSharedRef<SWidget> UWebToUEView::RebuildWidget()
 	{
 		DocumentChangedHandle = UWebToUEDocument::OnDocumentChanged().AddUObject(this, &UWebToUEView::HandleDocumentChanged);
 	}
-	SynchronizeProperties();
 	return SlateView.ToSharedRef();
 }
 

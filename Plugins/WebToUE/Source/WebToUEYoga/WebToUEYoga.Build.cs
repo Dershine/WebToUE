@@ -8,6 +8,9 @@ public class WebToUEYoga : ModuleRules
         Type = ModuleType.CPlusPlus;
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         CppStandard = CppStandardVersion.Cpp20;
+        // Yoga represents undefined dimensions with NaN. MSVC's Game/Client/Server default
+        // is /fp:fast, which may assume NaNs do not exist and collapse packaged layouts to zero.
+        FPSemantics = FPSemanticsMode.Precise;
         bUseUnity = false;
         IWYUSupport = IWYUSupport.None;
         PublicDependencyModuleNames.Add("Core");

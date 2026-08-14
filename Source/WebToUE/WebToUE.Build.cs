@@ -12,7 +12,9 @@ public class WebToUE : ModuleRules
 			"Core", "CoreUObject", "Engine", "InputCore", "UMG", "ModelViewViewModel", "WebToUERuntime"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] {  });
+		PrivateDependencyModuleNames.AddRange(new string[] {
+			"ApplicationCore", "Json", "RenderCore", "RHI", "Slate", "SlateCore", "WebToUECore"
+		});
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

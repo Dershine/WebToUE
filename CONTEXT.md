@@ -42,6 +42,18 @@ _Avoid_: Runtime Node Pointer、永久 Node ID、UObject Handle
 只属于 Runtime UI Instance 的可变状态，例如焦点、伪状态、滚动位置和绑定值。
 _Avoid_: Compiled Node、资产状态
 
+**Display List（显示列表）**:
+由一个 Runtime UI Instance 派生、按绘制顺序排列且可局部更新的渲染意图集合；它属于 View 的 Render Data，不写回 Compiled UI IR。
+_Avoid_: Slate Widget Tree、浏览器 Display List、资产数据
+
+**Paint Command（绘制命令）**:
+Display List 中由 Instance Handle 拥有的最小绘制单元，携带范围、边界、裁剪和合批兼容信息；它不是独立 UObject 或 Slate Widget。
+_Avoid_: Draw Call、Widget、Compiled Node
+
+**Dirty Region（脏区域）**:
+局部状态或布局变化后需要重新提交绘制的旧/新可见边界并集；它描述失效范围，不承诺底层 GPU 只重绘该像素区域。
+_Avoid_: GPU Partial Present、全局刷新、Dirty Node
+
 **Data Context（数据上下文）**:
 向 Runtime UI Instance 提供可观察游戏状态与命令的宿主对象。
 _Avoid_: JavaScript Model、全局变量

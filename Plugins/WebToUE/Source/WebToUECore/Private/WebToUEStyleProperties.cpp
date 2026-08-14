@@ -135,11 +135,11 @@ namespace WebToUE::Private
 			if (!FChar::IsHexDigit(Char)) return false;
 		}
 		const uint32 RGBA = static_cast<uint32>(FCString::Strtoui64(*Hex, nullptr, 16));
-		OutColor = FLinearColor(
-			((RGBA >> 24) & 0xff) / 255.0f,
-			((RGBA >> 16) & 0xff) / 255.0f,
-			((RGBA >> 8) & 0xff) / 255.0f,
-			(RGBA & 0xff) / 255.0f);
+		OutColor = FLinearColor::FromSRGBColor(FColor(
+			static_cast<uint8>((RGBA >> 24) & 0xff),
+			static_cast<uint8>((RGBA >> 16) & 0xff),
+			static_cast<uint8>((RGBA >> 8) & 0xff),
+			static_cast<uint8>(RGBA & 0xff)));
 		return true;
 	}
 

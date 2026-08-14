@@ -71,6 +71,10 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.paint_draw_elements"),
 		TEXT("workload.display_spatial_index_builds"),
 		TEXT("workload.display_spatial_index_patches"),
+		TEXT("workload.display_commands_spatially_indexed"),
+		TEXT("workload.display_commands_rejected_hidden"),
+		TEXT("workload.display_commands_rejected_unusable_bounds"),
+		TEXT("workload.display_commands_rejected_inert"),
 		TEXT("workload.dirty_rects_added"),
 		TEXT("workload.paint_commands_culled"),
 		TEXT("workload.hit_test_candidates"),
@@ -295,6 +299,10 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::PaintDrawElements: return TEXT("paint_draw_elements");
 	case EWebToUEPerformanceCounter::DisplaySpatialIndexBuilds: return TEXT("display_spatial_index_builds");
 	case EWebToUEPerformanceCounter::DisplaySpatialIndexPatches: return TEXT("display_spatial_index_patches");
+	case EWebToUEPerformanceCounter::DisplayCommandsSpatiallyIndexed: return TEXT("display_commands_spatially_indexed");
+	case EWebToUEPerformanceCounter::DisplayCommandsRejectedHidden: return TEXT("display_commands_rejected_hidden");
+	case EWebToUEPerformanceCounter::DisplayCommandsRejectedUnusableBounds: return TEXT("display_commands_rejected_unusable_bounds");
+	case EWebToUEPerformanceCounter::DisplayCommandsRejectedInert: return TEXT("display_commands_rejected_inert");
 	case EWebToUEPerformanceCounter::DirtyRectsAdded: return TEXT("dirty_rects_added");
 	case EWebToUEPerformanceCounter::PaintCommandsCulled: return TEXT("paint_commands_culled");
 	case EWebToUEPerformanceCounter::HitTestCandidates: return TEXT("hit_test_candidates");

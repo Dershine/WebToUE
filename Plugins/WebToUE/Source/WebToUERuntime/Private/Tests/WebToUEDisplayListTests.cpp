@@ -139,6 +139,14 @@ bool FWebToUEDisplayListOwnershipTest::RunTest(const FString& Parameters)
 		BuildSnapshot.GetCounter(EWebToUEPerformanceCounter::DisplayCommandsBuilt), uint64(5));
 	TestEqual(TEXT("The command build creates one spatial index"),
 		BuildSnapshot.GetCounter(EWebToUEPerformanceCounter::DisplaySpatialIndexBuilds), uint64(1));
+	TestTrue(TEXT("Drawable commands are admitted to the spatial index"),
+		BuildSnapshot.GetCounter(EWebToUEPerformanceCounter::DisplayCommandsSpatiallyIndexed) > 0);
+	TestEqual(TEXT("Valid layout produces no unusable command bounds"),
+		BuildSnapshot.GetCounter(EWebToUEPerformanceCounter::DisplayCommandsRejectedUnusableBounds),
+		uint64(0));
+	TestEqual(TEXT("The visible corpus produces no hidden command rejection"),
+		BuildSnapshot.GetCounter(EWebToUEPerformanceCounter::DisplayCommandsRejectedHidden),
+		uint64(0));
 	TestEqual(TEXT("The display list contains one command per runtime node"),
 		View->GetDisplayCommandCountForTesting(), 5);
 	TestTrue(TEXT("Visible paint or input commands populate spatial cells"),

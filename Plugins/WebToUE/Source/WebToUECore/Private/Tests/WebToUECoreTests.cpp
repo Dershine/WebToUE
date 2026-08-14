@@ -398,6 +398,13 @@ bool FWebToUETypedPropertiesTest::RunTest(const FString& Parameters)
 	}
 	TestEqual(TEXT("Every supported property has one typed parser case"),
 		SeenPropertyIds.Num(), static_cast<int32>(UE_ARRAY_COUNT(Cases)));
+	FWebToUEStyleDeclaration SrgbColor;
+	TestTrue(TEXT("CSS hexadecimal color parses for Slate rendering"),
+		WebToUE::Private::TryParseCssDeclaration(
+			TEXT("color"), TEXT("#12345678"), SrgbColor));
+	TestEqual(TEXT("CSS hexadecimal RGB channels convert from sRGB to linear space"),
+		SrgbColor.TypedValue.Color,
+		FLinearColor::FromSRGBColor(FColor(0x12, 0x34, 0x56, 0x78)));
 	FWebToUEStyleDeclaration InvalidDeclaration;
 	TestFalse(TEXT("Unsupported properties do not receive an ID"),
 		WebToUE::Private::TryParseCssDeclaration(TEXT("made-up-property"), TEXT("1px"), InvalidDeclaration));

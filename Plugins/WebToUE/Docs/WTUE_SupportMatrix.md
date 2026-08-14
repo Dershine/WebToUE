@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-13，M2.5 closure。
+> 当前基线：2026-08-14，M2.7 closure。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -85,6 +85,14 @@ Flex：
 
 图片：`src` 使用 Unreal 软对象路径，例如 `/Game/UI/T_Logo.T_Logo`；不支持磁盘图片和 HTTP 下载。编译资产生成 Texture/Font/String Table 类型化 Resource Manifest，并按 `(Kind, Path)` 去重；清单数组索引是单个资产修订内的稳定资源 Handle。每个 View 按清单建立强 UObject 槽位：已驻留对象直接解析，未驻留路径在 View 创建/Resource 重建边界批量异步请求，完成后以弱 Slate 引用触发失效；多个 View 共享引擎拥有的 UObject，但不共享 View-owned 请求/句柄数组。Presentation、文本与状态更新只查稳定槽位，生产 Runtime 不调用 `LoadObject` 或 `LoadSynchronous`；解析失败使用无图片 Brush/默认字体并记录失败，重置或销毁 View 取消未完成请求。仅影响 Paint 的 Pseudo State 变化仍只更新受影响目标并保留无关 Brush、Text Cache 与 Paint Order；根字段 text/visible/enabled 绑定不会发起资源请求。网络、磁盘文件、动态 URL、重试/下载策略和资源流送优先级不在当前边界。
 
+Runtime 绘制与命中：
+
+- 一个 `SWebToUEView` Leaf 持有 View-owned、Instance Handle 寻址的 Display List；每个命令记录 Owner、节点/子树 Command Range、Bounds、Visible Bounds、Clip、Depth、交互/滚动状态与 Batch Key。文本命令以 Owner Handle 引用 View-owned Text Layout/Run Cache，不在 Display List 内复制文本或创建独立 Slate Widget。
+- Style、Binding、Focus/Pseudo 和 Scroll 的局部变化 patch 对应命令/子树，记录旧/新 Dirty Rect 与 Dirty Command；`WebToUE.Debug.DisplayList=1/2/3` 分别可视化 Dirty Rect、Dirty Command 和全部命令边界。布局或文档结构改变仍可合法重建完整 Display List。
+- 128px 空间网格索引 drawable/interactive/scrollable 命令；单命令跨越超过 256 个 Cell 时进入独立 large-entry 列表。Paint 先以 Culling Rect 查候选，Hit Test/Scroll 以点查询候选，再做 Visible Bounds/Clip/Depth 精确判断；该索引只承诺当前固定命令集合的候选缩减，不是 M3 虚拟列表实现。
+- 相邻 Rounded Box 只有在 Type、Resource/Shader、Clip、Draw Effect 和圆角/边框几何兼容时才复用 LayerId；颜色不进入 Slate Rounded Box 的几何兼容键。文本和不兼容 Clip/Geometry 会断开 run，保留 Slate 最终 batching 的正确性。
+- Packaged benchmark schema `5` 记录 probe-child Draw Elements/几何覆盖率、全窗口最终 Slate Batches/Vertices、GT/RT/GPU、RSS、VRAM 与输入派发到最终 backbuffer-ready 的时间。Development 可记录 LLM；UE 默认 Shipping 未编译 LLM 时显式输出 `llm_compiled_in=false`/`not_compiled_for_configuration`，不得把 0 当成已测内存。
+
 ## 4. 诊断与资产行为
 
 当前诊断覆盖：
@@ -97,7 +105,7 @@ Flex：
 
 第一次导入错误不会产生有效运行数据；已有资产重导入失败（包括 UI Source 缺失）保留上次成功运行数据并更新诊断。
 
-WTUE Document 使用自定义版本 GUID，当前版本 `CompiledResourceManifest`（6）包含初始 Compiled Document、本地化富文本、有序声明、类型化样式声明、根字段 Binding Op 和类型化 Resource Manifest 演进。已加载旧资产会请求源文件重编译；版本 3 声明在无法立刻重编译时可于 Hydration 一次性解析兼容 payload，版本 4～6 writer 不再写入旧 Name/Value 字符串。项目内 MainMenu/HUD 已从保留的 UI Source 重编译为版本 6；全局未加载资产扫描和完整字段级迁移仍属于 M6。
+WTUE Document 使用自定义版本 GUID，当前版本 `CssSrgbColors`（7）包含初始 Compiled Document、本地化富文本、有序声明、类型化样式声明、根字段 Binding Op、类型化 Resource Manifest 和 CSS sRGB 颜色演进。Hex CSS 颜色在编译时由 sRGB 字节转换为 Slate 使用的线性色；已加载旧资产会请求源文件重编译。版本 3 声明在无法立刻重编译时可于 Hydration 一次性解析兼容 payload，版本 4～7 writer 不再写入旧 Name/Value 字符串。项目内 MainMenu/HUD/ScrollableSettings 已从保留的 UI Source 重编译为版本 7；全局未加载资产扫描和完整字段级迁移仍属于 M6。
 
 ## 5. 明确尚未支持
 

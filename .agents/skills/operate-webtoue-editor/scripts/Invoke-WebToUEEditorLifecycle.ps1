@@ -392,6 +392,23 @@ function ConvertTo-PowerShellSingleQuotedLiteral {
     return "'" + $Value.Replace("'", "''") + "'"
 }
 
+function Get-AutomationToolExitCodeFromOutput {
+    param([string[]]$OutputLines)
+
+    $reportedExitCodes = @(
+        $OutputLines |
+            ForEach-Object {
+                $match = [regex]::Match($_.ToString(), 'AutomationTool exiting with ExitCode=(\d+)')
+                if ($match.Success) {
+                    [int]$match.Groups[1].Value
+                }
+            })
+    if ($reportedExitCodes.Count -eq 0) {
+        return $null
+    }
+    return [int]$reportedExitCodes[-1]
+}
+
 function Get-StatusResult {
     param([string]$Root, [string]$ProjectFile, [string]$Endpoint)
 
@@ -673,12 +690,19 @@ if ($isReleaseAction) {
         Write-OperationState -State $script:OperationState -Path $script:OperationStatePath
     }
     $releaseProcess.Refresh()
-    $releaseExitCode = [int]$releaseProcess.ExitCode
+    $releaseOutput = @(Get-Content -LiteralPath $script:OperationState.ReleaseOutputPath -ErrorAction SilentlyContinue)
+    $releaseErrors = @(Get-Content -LiteralPath $script:OperationState.ReleaseErrorPath -ErrorAction SilentlyContinue)
+	$releaseHostExitCode = [int]$releaseProcess.ExitCode
+	$reportedAutomationToolExitCode = Get-AutomationToolExitCodeFromOutput -OutputLines $releaseOutput
+	$releaseExitCode = if ($null -ne $reportedAutomationToolExitCode) {
+		[int]$reportedAutomationToolExitCode
+	}
+	else {
+		$releaseHostExitCode
+	}
     $script:OperationState.AutomationToolExitCode = $releaseExitCode
     Write-OperationState -State $script:OperationState -Path $script:OperationStatePath
 
-    $releaseOutput = @(Get-Content -LiteralPath $script:OperationState.ReleaseOutputPath -ErrorAction SilentlyContinue)
-    $releaseErrors = @(Get-Content -LiteralPath $script:OperationState.ReleaseErrorPath -ErrorAction SilentlyContinue)
     Write-Host "BuildCookRun output: $($script:OperationState.ReleaseOutputPath)" -ForegroundColor Cyan
     $releaseOutput | Select-Object -Last 80 | ForEach-Object { Write-Host $_ }
     $releaseErrors | Select-Object -Last 80 | ForEach-Object { Write-Host $_ -ForegroundColor Red }
@@ -692,6 +716,7 @@ if ($isReleaseAction) {
         CookerMcpPort = $CookerMcpPort
         ReleaseHostPid = $releaseProcess.Id
         ReleaseProcessPids = @($script:OperationState.ReleaseProcessPids)
+        ReleaseHostExitCode = $releaseHostExitCode
         ExitCode = $releaseExitCode
         OutputPath = $script:OperationState.ReleaseOutputPath
         ErrorPath = $script:OperationState.ReleaseErrorPath

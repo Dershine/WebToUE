@@ -130,6 +130,25 @@ Describe "WebToUE Editor lifecycle preflight" {
         (ConvertTo-PowerShellSingleQuotedLiteral -Value "C:\It's Here") | Should Be "'C:\It''s Here'"
     }
 
+    It "uses the final AutomationTool log exit code instead of a false-zero host" {
+        $scriptAst = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path $ScriptUnderTest), [ref]$null, [ref]$null)
+        $functionAst = $scriptAst.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq "Get-AutomationToolExitCodeFromOutput"
+        }, $true)
+        Invoke-Expression $functionAst.Extent.Text
+
+        Get-AutomationToolExitCodeFromOutput -OutputLines @(
+            "AutomationTool exiting with ExitCode=0 (Success)",
+            "AutomationTool exiting with ExitCode=6 (6)") | Should Be 6
+        Get-AutomationToolExitCodeFromOutput -OutputLines @(
+            "BUILD SUCCESSFUL",
+            "AutomationTool exiting with ExitCode=0 (Success)") | Should Be 0
+        Get-AutomationToolExitCodeFromOutput -OutputLines @("no marker") | Should BeNullOrEmpty
+    }
+
     It "limits MCP startup recovery to one delayed recheck" {
         $scriptAst = [System.Management.Automation.Language.Parser]::ParseFile(
             (Resolve-Path $ScriptUnderTest), [ref]$null, [ref]$null)

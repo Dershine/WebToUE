@@ -994,9 +994,22 @@ void FWebToUERuntimePresentation::AddDisplayCommandToSpatialIndex(
 	Command.bSpatiallyIndexed = false;
 	Command.bLargeSpatialEntry = false;
 	Command.SpatialCells = FWebToUESpatialCellRange();
-	if (!Command.bDisplayed || !IsUsableRect(Command.VisibleBounds) ||
-		(!Command.bDrawable && !Command.bInteractive && !Command.bScrollable))
+	if (!Command.bDisplayed)
 	{
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::DisplayCommandsRejectedHidden);
+		return;
+	}
+	if (!IsUsableRect(Command.VisibleBounds))
+	{
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::DisplayCommandsRejectedUnusableBounds);
+		return;
+	}
+	if (!Command.bDrawable && !Command.bInteractive && !Command.bScrollable)
+	{
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::DisplayCommandsRejectedInert);
 		return;
 	}
 	Command.SpatialCells.MinX = FMath::FloorToInt(Command.VisibleBounds.Left / SpatialCellSize);
@@ -1004,6 +1017,8 @@ void FWebToUERuntimePresentation::AddDisplayCommandToSpatialIndex(
 	Command.SpatialCells.MaxX = FMath::FloorToInt(Command.VisibleBounds.Right / SpatialCellSize);
 	Command.SpatialCells.MaxY = FMath::FloorToInt(Command.VisibleBounds.Bottom / SpatialCellSize);
 	Command.bSpatiallyIndexed = true;
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::DisplayCommandsSpatiallyIndexed);
 	if (Command.SpatialCells.GetCellCount() > MaxCellsPerCommand)
 	{
 		Command.bLargeSpatialEntry = true;
@@ -1351,11 +1366,13 @@ int32 FWebToUERuntimePresentation::PaintCommand(
 				Out.PushClip(FSlateClippingZone(
 					Geometry.MakeChild(Size, FSlateLayoutTransform(Position))));
 			}
+			FLinearColor DrawTint = (*Brush)->GetTint(WidgetStyle);
+			DrawTint.A *= DrawOpacity;
 			FSlateDrawElement::MakeBox(Out, LayerId++,
 				Geometry.ToPaintGeometry(DrawSize, FSlateLayoutTransform(DrawPosition)),
 				Brush->Get(), bParentEnabled && Command.bEnabled
 					? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect,
-				FLinearColor(1.0f, 1.0f, 1.0f, DrawOpacity));
+				DrawTint);
 			if (bClipImage) Out.PopClip();
 			FWebToUEPerformanceCapture::RecordCounter(
 				EWebToUEPerformanceCounter::PaintDrawElements);

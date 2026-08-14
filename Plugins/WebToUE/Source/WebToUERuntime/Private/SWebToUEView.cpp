@@ -75,7 +75,15 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	Presentation->Reset();
 	if (InDocument)
 	{
-		RuntimeInstance->Hydrate(*InDocument);
+		if (!RuntimeInstance->Hydrate(*InDocument))
+		{
+			UE_LOG(LogWebToUE, Error,
+				TEXT("Failed to hydrate WebToUE document '%s' (nodes=%d, rules=%d, binding_ops=%d, resources=%d, root=%d)."),
+				*InDocument->GetPathName(), InDocument->GetCompiledNodes().Num(),
+				InDocument->GetCompiledRules().Num(),
+				InDocument->GetCompiledBindingOps().Num(),
+				InDocument->GetResourceManifest().Num(), InDocument->GetRootNodeIndex());
+		}
 	}
 	else
 	{
