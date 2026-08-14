@@ -7,9 +7,6 @@
 #include "WebToUEPerformance.h"
 
 class FSlateWindowElementList;
-class FSlateApplication;
-struct FPointerEvent;
-class FWidgetPath;
 class ISlateViewportProvider;
 class SWidget;
 class SWindow;
@@ -19,10 +16,6 @@ namespace WebToUE::Benchmark
 {
 	/** Resolve the single WebToUE leaf hosted by the production SafeZone wrapper. */
 	TSharedPtr<SWidget> ResolvePointerTarget(const TSharedRef<SWidget>& HostWidget);
-
-	/** Route benchmark input through the same leaf path used by real Slate input. */
-	bool RoutePointerMove(FSlateApplication& Slate, const FWidgetPath& InputPath,
-		const FPointerEvent& PointerEvent);
 }
 
 struct FWebToUEBenchmarkFrameSample

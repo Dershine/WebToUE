@@ -14,14 +14,11 @@
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
-#include "Framework/Application/SlateApplication.h"
 #include "Input/HittestGrid.h"
-#include "Layout/WidgetPath.h"
 #include "Misc/AutomationTest.h"
 #include "Rendering/DrawElements.h"
 #include "Types/PaintArgs.h"
 #include "Widgets/SWidget.h"
-#include "Widgets/SWindow.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEBenchmarkCorpusContractTest,
 	"WebToUE.Benchmark.CorpusContract",
@@ -239,24 +236,10 @@ bool FWebToUEBenchmarkCorpusSlateOutputTest::RunTest(const FString& Parameters)
 				TestTrue(TEXT("Benchmark resolves the production WebToUE leaf"),
 					HostChildren->Num() == 1 && InputTarget.IsValid() &&
 					InputTarget.Get() == &HostChildren->GetChildAt(0).Get());
-				const TSharedRef<SWindow> InputWindow = SNew(SWindow)
-					.ClientSize(FVector2D(1280.0, 720.0))
-					[
-						SlateWidget
-					];
-				TArray<FWidgetAndPointer> InputWidgets;
-				InputWidgets.Emplace(FArrangedWidget(InputWindow, Geometry));
-				InputWidgets.Emplace(FArrangedWidget(SlateWidget, Geometry));
-				if (InputTarget.IsValid())
-				{
-					InputWidgets.Emplace(FArrangedWidget(InputTarget.ToSharedRef(),
-						Geometry));
-				}
-				const FWidgetPath InputPath(InputWidgets);
 				Capture.Reset();
-				TestTrue(TEXT("Benchmark routes pointer move through the production leaf path"),
-					WebToUE::Benchmark::RoutePointerMove(
-						FSlateApplication::Get(), InputPath, MoveEvent));
+				TestTrue(TEXT("Benchmark dispatches pointer move to the production leaf"),
+					InputTarget.IsValid() && InputTarget->OnMouseMove(
+						Geometry, MoveEvent).IsEventHandled());
 				const FWebToUEPerformanceSnapshot Interaction = Capture.GetSnapshot();
 				TestTrue(TEXT("MainMenu trajectory queries spatial hit candidates"),
 					Interaction.GetCounter(

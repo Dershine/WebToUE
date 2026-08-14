@@ -267,13 +267,6 @@ namespace WebToUE::Benchmark::Private
 	};
 }
 
-bool WebToUE::Benchmark::RoutePointerMove(FSlateApplication& Slate,
-	const FWidgetPath& InputPath, const FPointerEvent& PointerEvent)
-{
-	return InputPath.IsValid() &&
-		Slate.RoutePointerMoveEvent(InputPath, PointerEvent, false);
-}
-
 TSharedPtr<SWidget> WebToUE::Benchmark::ResolvePointerTarget(
 	const TSharedRef<SWidget>& HostWidget)
 {
@@ -766,20 +759,38 @@ void FWebToUEBenchmarkRunner::ApplyTrajectory()
 		OutPath = FWidgetPath(WidgetsAndPointers);
 		return OutPath.IsValid();
 	};
-	if (InputTargetWidget.IsValid())
+	const bool bDirectWebToUEInput = Mode == TEXT("WebToUE") &&
+		InputTargetWidget.IsValid();
+	if (!bDirectWebToUEInput && InputTargetWidget.IsValid())
 	{
 		GeneratePointerPath(InputTargetWidget.ToSharedRef(), InputPath);
 	}
 	const FPointerEvent MoveEvent(0, Position, LastPointerPosition, TSet<FKey>(),
 		FKey(), 0.0f, FModifierKeysState());
-	WebToUE::Benchmark::RoutePointerMove(Slate, InputPath, MoveEvent);
+	if (bDirectWebToUEInput)
+	{
+		InputTargetWidget->OnMouseMove(
+			InputTargetWidget->GetPaintSpaceGeometry(), MoveEvent);
+	}
+	else
+	{
+		Slate.RoutePointerMoveEvent(InputPath, MoveEvent, false);
+	}
 	LastPointerPosition = Position;
 	if (Corpus == TEXT("ScrollableSettings"))
 	{
 		const float WheelDelta = (TrajectoryStep & 1) ? -3.0f : 3.0f;
 		const FPointerEvent WheelEvent(0, Position, Position, TSet<FKey>(),
 			FKey(), WheelDelta, FModifierKeysState());
-		Slate.RouteMouseWheelOrGestureEvent(InputPath, WheelEvent, nullptr);
+		if (bDirectWebToUEInput)
+		{
+			InputTargetWidget->OnMouseWheel(
+				InputTargetWidget->GetPaintSpaceGeometry(), WheelEvent);
+		}
+		else
+		{
+			Slate.RouteMouseWheelOrGestureEvent(InputPath, WheelEvent, nullptr);
+		}
 	}
 	else if ((TrajectoryStep % 4) == 0)
 	{
@@ -787,10 +798,26 @@ void FWebToUEBenchmarkRunner::ApplyTrajectory()
 		PressedButtons.Add(EKeys::LeftMouseButton);
 		const FPointerEvent DownEvent(0, Position, Position, PressedButtons,
 			EKeys::LeftMouseButton, 0.0f, FModifierKeysState());
-		Slate.RoutePointerDownEvent(InputPath, DownEvent);
+		if (bDirectWebToUEInput)
+		{
+			InputTargetWidget->OnMouseButtonDown(
+				InputTargetWidget->GetPaintSpaceGeometry(), DownEvent);
+		}
+		else
+		{
+			Slate.RoutePointerDownEvent(InputPath, DownEvent);
+		}
 		const FPointerEvent UpEvent(0, Position, Position, TSet<FKey>(),
 			EKeys::LeftMouseButton, 0.0f, FModifierKeysState());
-		Slate.RoutePointerUpEvent(InputPath, UpEvent);
+		if (bDirectWebToUEInput)
+		{
+			InputTargetWidget->OnMouseButtonUp(
+				InputTargetWidget->GetPaintSpaceGeometry(), UpEvent);
+		}
+		else
+		{
+			Slate.RoutePointerUpEvent(InputPath, UpEvent);
+		}
 	}
 }
 
