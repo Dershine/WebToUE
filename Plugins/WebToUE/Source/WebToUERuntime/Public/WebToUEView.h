@@ -4,6 +4,7 @@
 #include "Components/Widget.h"
 #include "INotifyFieldValueChanged.h"
 #include "WebToUEIdentity.h"
+#include "WebToUESemantics.h"
 #include "WebToUEView.generated.h"
 
 class SWebToUEView;
@@ -32,7 +33,7 @@ struct FWebToUERuntimeMemoryCensus
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FWebToUEEvent, FName, EventName, FName, ElementId);
 
 UCLASS(meta=(DisplayName="WebToUE View"))
-class WEBTOUERUNTIME_API UWebToUEView : public UWidget
+class WEBTOUERUNTIME_API UWebToUEView : public UWidget, public IWebToUESemanticFocusSource
 {
 	GENERATED_BODY()
 
@@ -58,6 +59,10 @@ public:
 	void RefreshBindings();
 
 	void HandleRuntimeEvent(FName EventName, FName ElementId);
+	virtual void GetSemanticNodes(TArray<FWebToUESemanticNode>& OutNodes) const override;
+	virtual FWebToUEInstanceHandle GetFocusedSemanticNode() const override;
+	virtual bool RequestSemanticFocus(FWebToUEInstanceHandle Handle) override;
+	virtual bool ActivateSemanticNode(FWebToUEInstanceHandle Handle) override;
 
 	virtual void SynchronizeProperties() override;
 	virtual void ReleaseSlateResources(bool bReleaseChildren) override;

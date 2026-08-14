@@ -897,6 +897,84 @@ void SWebToUEView::SetFocusedNode(FWebToUENode* Node)
 	RuntimeInstance->SetFocusedNode(Node);
 }
 
+bool SWebToUEView::IsSemanticFocusable(const FWebToUENode& Node) const
+{
+	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
+	return RuntimeDocument && Node.IsInteractive() && RuntimeDocument->IsDisplayed(Node) &&
+		GetComputedStyle(Node).bEnabled && GetRuntimeState(Node).bRuntimeEnabled;
+}
+
+FText SWebToUEView::BuildSemanticLabel(const FWebToUENode& Node) const
+{
+	FString Label;
+	const auto AppendText = [this, &Label](const auto& Self, const FWebToUENode& Current) -> void
+	{
+		if (Current.Type == EWebToUENodeType::Text)
+		{
+			FString Text = GetDisplayText(Current).ToString();
+			Text.TrimStartAndEndInline();
+			if (!Text.IsEmpty())
+			{
+				if (!Label.IsEmpty()) Label += TEXT(" ");
+				Label += Text;
+			}
+		}
+		for (const TSharedPtr<FWebToUENode>& Child : Current.Children)
+		{
+			if (Child) Self(Self, *Child);
+		}
+	};
+	AppendText(AppendText, Node);
+	return FText::FromString(Label);
+}
+
+void SWebToUEView::GetSemanticNodes(TArray<FWebToUESemanticNode>& OutNodes) const
+{
+	OutNodes.Reset();
+	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
+	if (!RuntimeDocument) return;
+	RuntimeDocument->ForEachNode([this, RuntimeDocument, &OutNodes](FWebToUENode& Node)
+	{
+		if (!Node.IsInteractive()) return;
+		const FWebToUERuntimeLayoutResult& Layout = GetLayoutResult(Node);
+		const FVector2f Position = Presentation->GetVisualPosition(Node);
+		const FWebToUERuntimeNodeState& State = GetRuntimeState(Node);
+		const FWebToUEComputedStyle& Style = GetComputedStyle(Node);
+		FWebToUESemanticNode& Semantic = OutNodes.AddDefaulted_GetRef();
+		Semantic.Handle = RuntimeInstance->GetHandle(&Node);
+		Semantic.ElementId = FName(*Node.GetAttribute(TEXT("id")));
+		Semantic.Label = BuildSemanticLabel(Node);
+		Semantic.Bounds = FSlateRect(Position.X, Position.Y,
+			Position.X + Layout.Size.X, Position.Y + Layout.Size.Y);
+		Semantic.Role = Node.Tag == TEXT("button")
+			? EWebToUESemanticRole::Button : EWebToUESemanticRole::GenericAction;
+		Semantic.bVisible = RuntimeDocument->IsDisplayed(Node) && State.bRuntimeVisible;
+		Semantic.bEnabled = Style.bEnabled && State.bRuntimeEnabled;
+		Semantic.bFocusable = IsSemanticFocusable(Node);
+	});
+}
+
+FWebToUEInstanceHandle SWebToUEView::GetFocusedSemanticNode() const
+{
+	return RuntimeInstance->GetHandle(RuntimeInstance->GetFocusedNode());
+}
+
+bool SWebToUEView::RequestSemanticFocus(FWebToUEInstanceHandle Handle)
+{
+	FWebToUENode* Node = RuntimeInstance->ResolveNode(Handle);
+	if (!Node || !IsSemanticFocusable(*Node)) return false;
+	SetFocusedNode(Node);
+	return true;
+}
+
+bool SWebToUEView::ActivateSemanticNode(FWebToUEInstanceHandle Handle)
+{
+	FWebToUENode* Node = RuntimeInstance->ResolveNode(Handle);
+	if (!Node || !IsSemanticFocusable(*Node)) return false;
+	DispatchClick(*Node);
+	return true;
+}
+
 FReply SWebToUEView::OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
 {
 	SetHoveredNode(HitTest(FVector2f(MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()))));
@@ -944,8 +1022,7 @@ void SWebToUEView::MoveFocus(int32 Direction)
 	RuntimeDocument->ForEachNode([this, &Nodes](FWebToUENode& Node)
 	{
 		const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
-		if (RuntimeDocument && Node.IsInteractive() && RuntimeDocument->IsDisplayed(Node) &&
-			GetComputedStyle(Node).bEnabled)
+		if (RuntimeDocument && IsSemanticFocusable(Node))
 		{
 			Nodes.Add(&Node);
 		}

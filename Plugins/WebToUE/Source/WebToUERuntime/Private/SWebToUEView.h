@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "WebToUERuntimeInstance.h"
+#include "WebToUESemantics.h"
 #include "WebToUEStyleProperties.h"
 #include "Widgets/SLeafWidget.h"
 
@@ -27,6 +28,10 @@ public:
 	void SetDocument(UWebToUEDocument* InDocument);
 	void RefreshBindings(UObject* DataContext, FName ChangedField = NAME_None);
 	TSet<FName> GetBoundFields() const;
+	void GetSemanticNodes(TArray<FWebToUESemanticNode>& OutNodes) const;
+	FWebToUEInstanceHandle GetFocusedSemanticNode() const;
+	bool RequestSemanticFocus(FWebToUEInstanceHandle Handle);
+	bool ActivateSemanticNode(FWebToUEInstanceHandle Handle);
 
 	virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override;
 	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
@@ -130,6 +135,8 @@ private:
 		EWebToUEPseudoState Flag, TArray<FWebToUEInstanceHandle>& OutTargets) const;
 	void MoveFocus(int32 Direction);
 	void ActivateFocusedNode();
+	bool IsSemanticFocusable(const FWebToUENode& Node) const;
+	FText BuildSemanticLabel(const FWebToUENode& Node) const;
 	void DispatchClick(FWebToUENode& Node) const;
 	void ReportBindingErrorOnce(const FString& Field, const FString& Message);
 };

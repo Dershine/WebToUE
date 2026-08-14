@@ -2,6 +2,7 @@
 
 #include "SWebToUEView.h"
 #include "WebToUEDocument.h"
+#include "Framework/Application/SlateApplication.h"
 
 UWebToUEView::UWebToUEView(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -70,6 +71,32 @@ void UWebToUEView::RefreshBindings()
 void UWebToUEView::HandleRuntimeEvent(FName EventName, FName ElementId)
 {
 	OnUIEvent.Broadcast(EventName, ElementId);
+}
+
+void UWebToUEView::GetSemanticNodes(TArray<FWebToUESemanticNode>& OutNodes) const
+{
+	if (SlateView) SlateView->GetSemanticNodes(OutNodes);
+	else OutNodes.Reset();
+}
+
+FWebToUEInstanceHandle UWebToUEView::GetFocusedSemanticNode() const
+{
+	return SlateView ? SlateView->GetFocusedSemanticNode() : FWebToUEInstanceHandle();
+}
+
+bool UWebToUEView::RequestSemanticFocus(FWebToUEInstanceHandle Handle)
+{
+	if (!SlateView || !SlateView->RequestSemanticFocus(Handle)) return false;
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().SetKeyboardFocus(SlateView, EFocusCause::SetDirectly);
+	}
+	return true;
+}
+
+bool UWebToUEView::ActivateSemanticNode(FWebToUEInstanceHandle Handle)
+{
+	return SlateView && SlateView->ActivateSemanticNode(Handle);
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
