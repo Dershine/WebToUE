@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-14，M2.8 closure。
+> 当前基线：2026-08-14，M2.9 closure。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -92,7 +92,7 @@ Runtime 绘制与命中：
 - Style、Binding、Focus/Pseudo 和 Scroll 的局部变化 patch 对应命令/子树，记录旧/新 Dirty Rect 与 Dirty Command；`WebToUE.Debug.DisplayList=1/2/3` 分别可视化 Dirty Rect、Dirty Command 和全部命令边界。布局或文档结构改变仍可合法重建完整 Display List。
 - 128px 空间网格索引 drawable/interactive/scrollable 命令；单命令跨越超过 256 个 Cell 时进入独立 large-entry 列表。Paint 先以 Culling Rect 查候选，Hit Test/Scroll 以点查询候选，再做 Visible Bounds/Clip/Depth 精确判断；该索引只承诺当前固定命令集合的候选缩减，不是 M3 虚拟列表实现。
 - 相邻 Rounded Box 只有在 Type、Resource/Shader、Clip、Draw Effect 和圆角/边框几何兼容时才复用 LayerId；颜色不进入 Slate Rounded Box 的几何兼容键。文本和不兼容 Clip/Geometry 会断开 run，保留 Slate 最终 batching 的正确性。
-- Packaged benchmark schema `5` 记录 probe-child Draw Elements/几何覆盖率、全窗口最终 Slate Batches/Vertices、GT/RT/GPU、RSS、VRAM 与输入派发到最终 backbuffer-ready 的时间。Development 可记录 LLM；UE 默认 Shipping 未编译 LLM 时显式输出 `llm_compiled_in=false`/`not_compiled_for_configuration`，不得把 0 当成已测内存。
+- Packaged benchmark schema `6` 在既有 probe-child Draw Elements/几何覆盖率、全窗口 Slate Batches/Vertices、GT/RT/GPU、RSS、VRAM 与 input-to-backbuffer-ready 上，增加 Asset Load/UI Object Construction/TakeWidget/Prepass/Attach/Renderer Wait 冷启动归因、首/第二 View 进程内存点、Development known-owned Runtime/Presentation 与共享 Style Template census，以及 K=1 Style/Selector/Binding/Resource 工作量政策。`Tools/Invoke-WebToUEPackagedExitGate.ps1` 固定 1920×1080、120 warmup/600 samples、三次冷启动中位数、WTUE/UMG `≤2×`、Batch/Vertex 上限、Development LLM `≤64 MiB` 和同进程第二 View 门。独立进程原始 RSS 只报告；Development 可记录 LLM，UE 默认 Shipping 未编译 LLM 时显式输出 `llm_compiled_in=false`/`not_compiled_for_configuration`，不得把 0 当成已测内存。
 - 目标专用 Golden 覆盖 MainMenu/HUD/ScrollableSettings 的 1280×720 逻辑视口，在 1x/2x 分别渲染实际 framebuffer PNG，并以规范化 32×18 RGBA 签名守住跨 DPI 视觉；这是冻结 Corpus 的回归门，不是通用 Screenshot/Golden 工具链。
 
 ## 4. 诊断与资产行为

@@ -6,11 +6,11 @@
 >
 > 引擎/平台：Unreal Engine 5.8 / Win64
 >
-> 当前里程碑：M2——增量原生运行时
+> 当前里程碑：M2——增量原生运行时已完成；M3 尚未启动
 >
 > 当前交付 Profile：PersonalGame-ready 0.5——Win64 项目内生产使用；通用商业 1.0 延后
 >
-> 最近核验：2026-08-14，`31c2bc3`～`03ff4d2` + closure working tree 完成 M2.8 核心生产宿主基础；59 / 59 Automation 零失败/零警告、UE 5.8 Win64 Editor Strict Development、Game Development/Shipping BuildCookRun、跨 DPI Golden、发布后 Editor readiness/MCP/Python/World 通过
+> 最近核验：2026-08-14，`8d26643`～`7df6832` + M2.9 closure working tree 完成 PersonalGame-ready 0.5 的 M2 退出门；60 / 60 Automation、Pester 5 / 5、UE 5.8 Win64 Editor Strict Development、Game Development/Shipping BuildCookRun、schema 6 Packaged Development/Shipping 出口矩阵、可见结果与发布后 Editor readiness/MCP/Python/World 均通过
 >
 > 统一术语：[CONTEXT.md](../../../CONTEXT.md) · 历史证据：[WTUE_EvidenceLedger.md](WTUE_EvidenceLedger.md) · 精确支持边界：[WTUE_SupportMatrix.md](WTUE_SupportMatrix.md)
 
@@ -57,19 +57,19 @@
 | 原生形态 | 编译资产 + C++ Runtime Instance + Yoga + 单 Slate 控件 | ✅ |
 | 生命周期 | Compiled IR、Runtime State、持久 Yoga/Layout、Text/Resource Handle 与 View-owned Display List/空间索引已分离 | ✅ |
 | 功能成熟度 | 可覆盖固定 MainMenu/HUD/ScrollableSettings 原型，具备局部 Display patch、语义焦点/手柄导航、DPI/Safe Zone、重导入恢复和跨 DPI Golden；尚非完整生产 UI 框架 | 🟡 |
-| 性能成熟度 | 无默认 Tick；局部更新硬门与 Packaged Development/Shipping 的 GT/RT/GPU/Batch/RSS/VRAM/输入基线已建立；MainMenu 冷首帧离群和完整每 View/第二 View 内存仍待 M2.9 收口 | 🟡 |
-| 当前最大风险 | Display/Paint/Hit Test 与核心生产宿主已有证据；冷启动、零售 Shipping 无 LLM、每 View/第二 View 内存和最终 Go/No-Go 仍开放 | 🟡 |
-| 当前策略 | 先完成 M2 增量运行时，再只实现 PersonalGame-ready 0.5 的 M3/M4 必需切片；外部通用 1.0 能力延后 | 🚧 |
+| 性能成熟度 | 无默认 Tick；局部更新、K=1 工作量、Packaged Development/Shipping GT/RT/GPU/input、Batch/Vertex、冷启动、Development LLM 与第二 View 硬门已建立并通过 | ✅ |
+| 当前最大风险 | M2 风险已降至当前 Win64 项目内 0.5 可接受等级；Shipping LLM、硬件扫描延迟、Gameface、第二平台和外部不受控输入仍保持明确边界 | 🟡 |
+| 当前策略 | 保持 M2 出口门；M3 尚未启动，仅在新 Goal 中实现 PersonalGame-ready 0.5 的必需切片，外部通用 1.0 能力继续延后 | ✅ |
 
 ### 2.2 验证快照
 
 | 项目 | 当前值 |
 | --- | --- |
-| 自动化测试 | 59 / 59 通过、0 warnings、0 skipped（2026-08-14，M2.8 发布后 closure；7.953 秒，`StartsWith:WebToUE`） |
-| 当前编译 | M2.8 closure 的 UE 5.8 Win64 Editor Strict Development 通过：Operation `65eae2f1d24c44fc928c866381afb779`，71 actions、warnings-as-errors；Editor PID `17432` readiness/MCP 通过 |
-| 当前发布 | tracked Win64 Development/Shipping BuildCookRun 均通过：Operations `5cac76a275324c9f823a6dca2ef0ca45` / `ccda0164c5364273b09ece159147864e`，各 584 packages、2,250 chunks、250.22 MiB、UAT `BUILD SUCCESSFUL`/ExitCode 0；该发布门本身不替代 M2.7 Packaged Runtime 或 M2.8 视觉/输入证据 |
+| 自动化测试 | 60 / 60 通过、0 failed、0 skipped（2026-08-14，M2.9 Shipping 门后；7.708 秒，`StartsWith:WebToUE`） |
+| 当前编译 | M2.9 冻结源码的 UE 5.8 Win64 Editor Strict Development 通过：Operation `4c5dfe0db49344f59e584a9f4fe5778e`，70 actions、warnings-as-errors；Editor PID `29084` readiness/MCP 通过 |
+| 当前发布 | tracked Win64 Development/Shipping BuildCookRun 均通过：Operations `89c747f8f99c4b61988e16add1532184` / `a798956729594f8ea0877017034fb783`，各 584 packages、2,250 chunks、250.22 MiB、AutomationTool 最终 ExitCode 0；相邻 schema 6 Packaged gate 分别位于 `Development-ExitGate-20260814T1344Z` / `Shipping-ExitGate-20260814T1347Z` 且均 `success=true` |
 | 历史发布 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 曾通过；发布前须在当前提交重跑 |
-| Git 基线 | M2.8 检查点为 `31c2bc3`、`3331380`、`2ac6e15`、`f0dbaec`、`cfef614`、`03ff4d2`；closure 文档在当前工作树中 |
+| Git 基线 | M2.9 检查点为 `8d26643`、`36fc522`、`e8ac686`、`e524997`、`64c2f7e`、`7df6832`；closure 文档在当前工作树中 |
 | 发布级别 | Developer Preview |
 
 ### 2.3 宏观里程碑
@@ -78,13 +78,13 @@
 | --- | --- | --- | --- |
 | M0 技术闭环 | ✅ | 8 / 8 | HTML/CSS 到 Cooked 原生 UI 的端到端闭环 |
 | M1 UI 基础语义 | ✅ | 10 / 10 | 受控菜单/HUD 原型的排版、交互、本地化和诊断基础 |
-| M2 增量原生运行时 | 🚧 | 8 / 9 退出门 | 可度量、共享样式模板、稳定身份、持久 Layout/Resource、局部失效、真实渲染可扩展的 Runtime |
+| M2 增量原生运行时 | ✅ | 9 / 9 退出门 | 可度量、共享样式模板、稳定身份、持久 Layout/Resource、局部失效、真实渲染与 Win64 0.5 Go/No-Go 已完成 |
 | M3 响应式与组件 | ⬜ | 0 / 8 | UE MVVM 驱动的组件、列表与结构复用 |
 | M4 动画与响应式视觉 | ⬜ | 0 / 7 | 游戏级动效而不引入浏览器合成器 |
 | M5 工具链与 MCP | ⬜ | 0 / 7 | 可检查、可分析、可由受控工具驱动 |
 | M6 1.0 产品化 | ⬜ | 0 / 7 | 可被外部项目稳定依赖的插件 |
 
-M2 已具备性能可观测性与代表性硬门、完整生命周期分离、类型化样式/选择器/Cascade、共享 Style Template 与稳定身份、Paint-only Pseudo、根字段 FieldNotify/Text 局部失效、持久 Yoga/异步 Resource Handle、可 patch Display List/空间命中、真实 Packaged 渲染基线，以及核心生产宿主。M2.9 的最终预算/发布 Go/No-Go 仍是合并退出门，因此里程碑保持 `8 / 9`；该数字不是工时比例，也不表示 M2 已完成。
+M2 已完成性能可观测性与硬门、完整生命周期分离、类型化样式/选择器/Cascade、共享 Style Template 与稳定身份、Paint-only Pseudo、根字段 FieldNotify/Text 局部失效、持久 Yoga/异步 Resource Handle、可 patch Display List/空间命中、真实 Packaged 渲染、核心生产宿主和最终预算/发布 Go/No-Go。里程碑为 `9 / 9`；M3 仍是 `0 / 8`，不会因本次收口自动开始。
 
 ### 2.4 当前交付 Profile：PersonalGame-ready 0.5
 
@@ -200,9 +200,9 @@ Cooked 游戏保留 Compiled Nodes/Rules、Root、Texture/Font/String Table Reso
 
 已验证能力包括 HTML/CSS 导入与失败回退、受控 Selector/Pseudo State、Flex/Wrap/Gap/绝对定位、约束文本与 RichText、本地化身份、滚动裁剪与命中、鼠标/键盘、内部语义焦点、手柄/CommonUI 最小导航、DPI/Safe Zone、根属性绑定/FieldNotify、语义点击事件、自定义资产版本和固定 Benchmark/Golden Corpus。
 
-当前仍缺触摸/惯性、完整文本编辑/IME、无障碍适配、组件/列表、动画、复杂 CSS、Inspector、跨平台和 M2.9 最终发布矩阵。逐项支持、限制和诊断行为以 [WTUE_SupportMatrix.md](WTUE_SupportMatrix.md) 为唯一精确来源。
+当前仍缺触摸/惯性、完整文本编辑/IME、无障碍适配、组件/列表、动画、复杂 CSS、Inspector 和跨平台能力；这些属于尚未启动的 M3～M6，不因 M2 完成而被视为已支持。逐项支持、限制和诊断行为以 [WTUE_SupportMatrix.md](WTUE_SupportMatrix.md) 为唯一精确来源。
 
-仍需工程化证据：高频 Pseudo/FieldNotify 的 Packaged 峰值、MainMenu 冷首帧离群归因、每 View 与第二 View RSS/LLM、恶意输入以及 M2.9 的最终当前提交发布门。M2.7 已建立三类固定 Corpus 的 Packaged GT/RT/GPU/Batch/Vertices/RSS/VRAM/输入基线和 UMG 对照，M2.8 已建立生产宿主输入与跨 DPI Golden；这些单轮样本不等于产品性能对等。UE 默认 Shipping 未编译 LLM，Development LLM 与 Shipping RSS 分开原样记录。BuildPlugin 是后续外部分发门，不阻塞 PersonalGame-ready 0.5。
+M2.9 已把三类固定 Corpus 的 Packaged GT/RT/GPU/Batch/Vertices/RSS/Development LLM/输入基线、UMG 对照、三次冷启动中位数与分阶段归因、同进程第二 View 内存和 K=1 工作量固化为 schema 6 与可复现出口门。M2.8 的生产宿主输入、失败重导入恢复与跨 DPI Golden 继续守住正确性；外部不受控输入的通用安全加固仍属 M6。这些证据只支持当前 Win64 PersonalGame Profile，不等于 Gameface 对等或硬件扫描出像素延迟。UE 默认 Shipping 未编译 LLM，Development LLM 与 Shipping RSS 分开原样记录。BuildPlugin 是后续外部分发门，不阻塞 PersonalGame-ready 0.5。
 
 ---
 
@@ -230,9 +230,11 @@ Cooked 游戏保留 Compiled Nodes/Rules、Root、Texture/Font/String Table Reso
 
 Paint-only Pseudo 已由编译的 Reason→Target 依赖、实例 Target Index 和 old/new Typed Cascade change set 驱动，只更新旧/新状态路径及实际 Dirty Target；根字段 FieldNotify 由版本 5 Binding Ops 直接定位 Instance Handle，文本键命中复用 Desired Size，visible/enabled 只更新其精确 Style/Pseudo 目标。M2.6 后 Yoga Node 与 Runtime Instance 同生命周期，change set 只写变化属性，Layout Result 只记录实际变化节点；500 节点暖布局不重建 Yoga、不重算 249 个文本。2,000/500 的 K=1 Layout 样本固定为 1 Style visit、104 Selector evaluation、1 Yoga style write、0 Yoga build、3 Layout Result changes、0 Text compute、0 sync resource load。M2.6 时资源热路径只查 Manifest 稳定槽位，但 Paint/Hit Test 仍全树递归；该放大路径由下述 M2.7 结果收口。
 
-M2.7 后 View-owned Display List 以 Instance Handle 持有 Command Range、Bounds/Clip、Batch Key 与 Text Layout 引用；局部 Pseudo/Binding/Scroll 变化 patch 命令并记录 Dirty Rect，不相交命令复用。128px 空间网格先缩小 Paint/Hit/Scroll 候选，再做精确 Visible Bounds/Clip/Depth 判断；超大命令进入独立列表，为未来虚拟列表保留查询边界而不实施 M3 能力。固定 Corpus 的 600 帧窗口中，MainMenu/HUD/ScrollableSettings 均为 K=1 hydrate（`15/13/21` 节点），测量期资源加载均为 0；三者局部 command patch 为 `12/20/170`（Development）与 `11/20/170`（Shipping），不重建 Yoga Tree。
+M2.7 后 View-owned Display List 以 Instance Handle 持有 Command Range、Bounds/Clip、Batch Key 与 Text Layout 引用；局部 Pseudo/Binding/Scroll 变化 patch 命令并记录 Dirty Rect，不相交命令复用。128px 空间网格先缩小 Paint/Hit/Scroll 候选，再做精确 Visible Bounds/Clip/Depth 判断；超大命令进入独立列表，为未来虚拟列表保留查询边界而不实施 M3 能力。固定 Corpus 的 600 帧窗口中，MainMenu/HUD/ScrollableSettings 均为 K=1 hydrate（`15/13/21` 节点），测量期资源加载均为 0；M2.9 最终 Development/Shipping 三者局部 command patch 均为 `12/20/170`，不重建 Yoga Tree。10 次测量轨迹的 Style visit/Selector evaluation/Binding node update 分别为 `15/75/0`、`10/10/20`、`20/80/0`，即每轨迹不超过 `2/8/2`，低于产品门 `4/16/2`，没有随总节点 N 放大的 Style/Binding/Resource 工作。
 
-Packaged Development 的 WebToUE 三类 Corpus GT/RT/GPU P95 范围为 `5.092～5.383 / 10.993～11.862 / 8.831～8.866 ms`，Shipping 为 `2.415～5.011 / 3.961～9.625 / 8.132～8.638 ms`；同合同 UMG 分别为 `5.191～5.462 / 10.985～12.191 / 8.753～8.841 ms` 与 `2.267～3.503 / 3.820～6.490 / 8.023～8.419 ms`。WebToUE/UMG 的 Draw Elements 为 MainMenu `13/13`、HUD `5/5`、ScrollableSettings `15/18`；Shipping 最终 Slate Batches 为 `11/5`、`5/2`、`13/7`。WebToUE MainMenu 单次冷首帧在 Development/Shipping 为 `40.948/379.468 ms`，UMG 为 `37.996/21.146 ms`；Shipping 样本是需在 M2.9 归因的开放离群，所有 cold 值都只是单次原始观测。这些数据不能支撑“Gameface/UMG 性能对等”结论。
+M2.9 schema 6 的 Packaged Development WebToUE GT/RT/GPU P95 范围为 `4.7092～5.0603 / 10.1633～10.6842 / 9.0072～9.1845 ms`，Shipping 为 `2.4223～2.8172 / 4.2872～5.3615 / 8.8435～9.2832 ms`；input-to-backbuffer-ready P95 分别为 `34.1510～35.1382` 与 `39.1234～50.7093 ms`。同画面/轨迹 UMG 的全部 24 个稳态关键维度比较均通过 `≤2×` 出口门，Development/Shipping 最大比值分别为 `1.064/1.366`。WebToUE 最终 Slate Batch/Vertex 为 Development `12/492、6/136、14/384`，Shipping `11/492、5/136、13/384`，均不超过冻结上限。
+
+冷启动采用每模式/Corpus 三次独立进程中位数而不是单个样本：Development 三类 WTUE/UMG 最大比值 `1.132`，Shipping 最大 `1.347`，均通过 `≤2×`；每个完整样本另记录 Asset Load、UI Object Construction、TakeWidget、Prepass、Attach、Other Setup 和首个匹配 Renderer Wait，并与总时间对账。Development 的第二 View RSS 增量最大 `0.0117 MiB`、LLM 增量均为负、known-owned Runtime+Presentation 比值均为 `1.0`；跨独立进程的 WTUE/UMG LLM 差值最大 `1.935 MiB`，低于 `64 MiB`。Shipping 明确记录 `not_compiled_for_configuration`，不把 LLM 0 当成内存证明。独立进程原始 RSS 因 allocator/driver 基线漂移只报告、不作硬门；同进程第二 View 的正向 RSS/LLM `≤32 MiB` 和 Development known-owned `≤1.10×` 仍是硬门。这些结果不能外推为 Gameface 对等或硬件扫描延迟。
 
 Property ID/Typed Value 已消除版本 4 正常 Runtime 路径的属性名和值字符串解析；52 项 Property Metadata 现在统一提供稳定名称、继承性和 Style/Measure/Layout/Paint/HitTest/Resource 影响分类，Style Resolver 的显式继承也从该表驱动。Selector ID/Class identity 与候选桶在每个文档修订的共享 Runtime Style Template 中一次性派生，热路径不组装或去重候选数组。Typed Cascade 将匹配声明直接竞争到固定 Property winner slots，并将受支持 shorthand 展开到规范 longhand slots，移除了每节点 `Matches.Sort + TMap`；三节点集成语料三轮 Style Resolve 的标记分配从 20 降为 17。固定 Corpus 的单轮时间有上下波动，因此本工作包不宣称耗时改善；Dirty 粒度和 payload 紧凑度也未改变。
 
@@ -271,19 +273,19 @@ M2 不以模糊的“达到 Gameface”作为验收。性能合同分为三类�
 
 | ID | 风险 | 等级 | 当前证据 | 缓解路线 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| R-01 | Pseudo/Binding 导致全树刷新 | Medium | Hover 为 1 Style 节点、43 Selector 求值、0 Yoga；FieldNotify 为 1 字段/1 Op/1 节点、0 Style/Selector/Yoga；M2.7 固定 Corpus 只 patch 受影响 Display Command/子树并复用其余命令 | M2.4～M2.7 局部切片已完成；M2.9 保持 K=1 门 | ✅ Mitigated |
-| R-02 | Yoga Tree 每次布局重建 | Medium | 500 节点暖布局 0 Yoga build/write/result change、P95 `0.017401 ms`；2,000 节点单点 Layout 0 build、P95 `0.913102 ms` | M2.6 Persistent Yoga 与局部 Dirty 已完成；真实 Packaged Layout 成本由 M2.7/M2.9 复核 | ✅ Mitigated |
+| R-01 | Pseudo/Binding 导致全树刷新 | Medium | Hover 为 1 Style 节点、43 Selector 求值、0 Yoga；FieldNotify 为 1 字段/1 Op/1 节点、0 Style/Selector/Yoga；schema 6 三类 Corpus 每轨迹 Style/Selector/Binding 不超过 `2/8/2` 且只 patch 受影响命令 | M2.4～M2.9 的局部与 Packaged K=1 门持续 Enforce | ✅ Mitigated |
+| R-02 | Yoga Tree 每次布局重建 | Medium | 500 节点暖布局 0 Yoga build/write/result change、P95 `0.017401 ms`；2,000 节点单点 Layout 0 build、P95 `0.913102 ms`；M2.9 Packaged K=1 不重建 Yoga Tree | M2.6 Persistent Yoga、局部 Dirty 与 M2.9 出口门持续守门 | ✅ Mitigated |
 | R-03 | Compiled 数据与 Runtime 生命周期混合 | Medium | 四项边界/双实例专项通过 | 后续 IR/Dirty/Cache 保持边界 | ✅ Mitigated |
-| R-04 | 状态变化可能同步加载纹理 | Medium | 版本 7 Resource Manifest；View 创建边界 resolve/async request，Presentation 只查稳定槽位；M2.7 Packaged 测量窗口资源加载计数为 0 | `ResourceLifecycle`、`PaintOnlyPseudoResourceSafety` 与 M2.9 继续守门 | ✅ Mitigated |
-| R-05 | Compiler/View 职责集中 | Low | Core 服务、Runtime Presentation、Semantic/Focus 接口与 Game-owned Packaged Benchmark Runner 已拆分；当前精确发现 59 项 Automation | 后续能力进入对应服务 | ✅ Mitigated |
-| R-06 | 性能证据和硬门仍不完整 | High | 局部更新硬门与三类 Corpus 的 Development/Shipping GT/RT/GPU/Batch/RSS/VRAM/输入基线已建立；Shipping LLM、冷首帧离群和每 View/第二 View 内存仍未收口 | M2.9 预算、冷启动归因和完整内存门禁 | 🟡 Observe |
-| R-07 | Map 声明丢失重复属性顺序 | Medium | Core、Compiled IR 与 Hydration 已使用有序声明；当前 59/59 Automation 与 M2.8 Win64 Development/Shipping BuildCookRun 通过 | 保持 Ordered Declaration 专项与资产版本门 | ✅ Mitigated |
+| R-04 | 状态变化可能同步加载纹理 | Medium | 版本 7 Resource Manifest；View 创建边界 resolve/async request，Presentation 只查稳定槽位；schema 6 六个 WTUE 完整样本的测量期资源加载与失败均为 0 | `ResourceLifecycle`、`PaintOnlyPseudoResourceSafety` 与 PackagedExitPolicy 持续守门 | ✅ Mitigated |
+| R-05 | Compiler/View 职责集中 | Low | Core 服务、Runtime Presentation、Semantic/Focus 接口、Game-owned Packaged Runner 与独立出口门脚本已拆分；当前精确发现 60 项 Automation | 后续能力进入对应服务 | ✅ Mitigated |
+| R-06 | 性能证据和硬门仍不完整 | Medium | 第 6.2 节全部 Enforce 门通过；schema 6 + gate schema 1 覆盖两配置三 Corpus 的 GT/RT/GPU/input、Batch/Vertex、冷启动归因、Development LLM、第二 View 与 K=1 工作量，关键比较最大 `1.366×` | 0.5 维持现有硬门；Shipping LLM、硬件扫描延迟和 Gameface 保持明确不可用/Unknown，不伪装为已测 | ✅ Mitigated |
+| R-07 | Map 声明丢失重复属性顺序 | Medium | Core、Compiled IR 与 Hydration 已使用有序声明；当前 60/60 Automation 与 M2.9 Win64 Development/Shipping BuildCookRun 通过 | 保持 Ordered Declaration 专项与资产版本门 | ✅ Mitigated |
 | R-08 | 仅 Win64 | Medium | `.uplugin` 平台限制；PersonalGame-ready 0.5 明确采用 Win64-first | `P1.0` 第二平台可行性 Spike 与完整构建矩阵 | ⬜ M6 |
 | R-09 | MCP Experimental 且通用 Python 权限高 | Medium | 本地 Editor 环境已验证 | 回环/受信任/Editor-only/最小权限 | ⬜ M5 |
 | R-10 | Sandbox 或宿主超时可使 UE 子进程脱离观察 | High | Preflight、互斥、进程树/日志/持久状态和 Pester 6/6；包装器解析最终 AutomationTool ExitCode，已覆盖宿主假 0 | 生命周期 Skill 与 [ADR-0001](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md) | ✅ Mitigated |
-| R-11 | 每 View 深拷贝静态节点/规则 | Medium | Compiled payload、已水合 Style Rules 与 Selector Index 按修订共享；Packaged 进程 RSS/Development LLM 已记录，但实例节点包装仍随 N 线性增长，尚无第二 View Packaged 增量 | ADR-0002 保留可逆节点包装；M2.9 复核每 View/第二 View 内存是否可接受 | 🟡 Observe |
-| R-12 | Game Thread Paint 微基准无法代表 Slate Renderer/RT/GPU | Medium | schema 5 已从真实窗口记录 Draw Elements、最终 Slate Batch/Vertices、RT/GPU、覆盖率、VRAM 与同轨迹 UMG；MainMenu 冷首帧仍有大离群 | M2.9 固化回归阈值并归因冷启动 | 🟡 Observe |
-| R-13 | 同步 Presentation Resource 不只包含纹理 | Medium | Texture/Font/String Table 类型化 Manifest；生产 Runtime 无同步加载，M2.7 Packaged 测量资源加载为 0；MainMenu 冷首帧仍需归因 | M2.9 复核冷启动与异常资源上限 | ✅ Mitigated |
+| R-11 | 每 View 深拷贝静态节点/规则 | Medium | Compiled payload、Style Rules 与 Selector Index 按修订共享；Development Packaged 第二 View known-owned 比值均为 `1.0`、RSS 增量最大 `0.0117 MiB`，LLM 无正向增量 | ADR-0002 保留可逆节点包装；第二 View `≤32 MiB`/known-owned `≤1.10×` 门持续 Enforce | ✅ Mitigated |
+| R-12 | Game Thread Paint 微基准无法代表 Slate Renderer/RT/GPU | Medium | schema 6 真实窗口记录最终 Slate Batch/Vertices、RT/GPU/input；同轨迹 UMG 的 Development/Shipping 稳态最大比值 `1.064/1.366`，冷启动三次中位数最大 `1.347` | gate schema 1 固化 `≤2×`、批次/顶点与冷启动中位数；单次样本不替代门 | ✅ Mitigated |
+| R-13 | 同步 Presentation Resource 不只包含纹理 | Medium | Texture/Font/String Table 类型化 Manifest；生产 Runtime 无同步加载，schema 6 六个 WTUE 完整样本均为 0 compiled resources、0 测量期加载/失败，冷启动分阶段对账 | PackagedExitPolicy 维持资源上限与热路径零同步加载 | ✅ Mitigated |
 | R-14 | 单 Slate Leaf 内部语义节点对焦点/IME/无障碍不可见 | Medium | Generation-safe Semantic/Focus Node 公开 Handle/ID/Label/Role/Bounds/状态并支持 request/activate；Tab/空间手柄导航、Accept、scroll-into-view 与 CommonUI 边界逃逸均有专项 | M2.8 的 `P0.5` 接口和手柄焦点已完成；完整 IME/无障碍适配属于 `P1.0`，除非目标界面提升优先级 | ✅ Mitigated |
 
 风险关闭必须有测试、Benchmark、构建或代码证据，不能只修改状态文字。
@@ -292,19 +294,20 @@ M2 不以模糊的“达到 Gameface”作为验收。性能合同分为三类�
 
 ## 8. 宏观路线
 
-M0/M1 已完成，详细验收项保存在 [Evidence Ledger](WTUE_EvidenceLedger.md#1-完成里程碑证据)。M2 是当前唯一活跃里程碑；原则上不在 M2.3～M2.7 完成并形成真实渲染证据前扩张大型 CSS、组件或动画能力。
+M0/M1/M2 已完成，详细验收项保存在 [Evidence Ledger](WTUE_EvidenceLedger.md#1-完成里程碑证据)。M3 尚未启动；本次 M2.9 完成不自动授权组件、列表或动画能力扩张。
 
-### M2——增量原生运行时 🚧 8 / 9
+### M2——增量原生运行时 ✅ 9 / 9
 
 - [x] 可重复 Benchmark、Trace/Stat 和预算门禁。
 - [x] Compiled IR、Runtime State、Layout/Paint Cache 完全分离。
 - [x] Typed Property、Selector Index、Ordered Declaration、Typed Cascade。（M2.2 已完成 5 / 5）
-- [x] 共享 Compiled/Style Template、稳定 Node/Instance 身份和已量化的 Hydrate/每 View 内存；Packaged RSS/LLM 仍由 M2.7/M2.9 验证。
+- [x] 共享 Compiled/Style Template、稳定 Node/Instance 身份和已量化的 Hydrate/每 View 内存；Packaged RSS/Development LLM 与第二 View 增量已由 M2.9 验证。
 - [x] Paint-only 与 FieldNotify 纵向切片满足局部 Dirty/Cache/Paint 预算。
 - [x] Yoga、Text、Resource Cache 持久化；布局变化只传播必要依赖路径。
 - [x] Display List、局部重绘、裁剪/空间 Hit Test 和 Slate Batch 可扩展。
 - [x] 三类真实 Corpus 在 Packaged 构建中具备 GT/RT/GPU、首帧和内存证据。
 - [x] 单 Slate 控件、无默认 Tick、无浏览器内核的事件驱动基础。
+- [x] PersonalGame-ready 0.5 的 Win64 Correctness/Performance、Development/Shipping Packaged、内存、视觉和发布出口门。
 
 退出结果：500 节点常规菜单的局部状态变化满足预算，全量路径可由 Profiler 解释。
 
@@ -353,7 +356,7 @@ M0/M1 已完成，详细验收项保存在 [Evidence Ledger](WTUE_EvidenceLedger
 
 ## 9. M2 微观执行路线
 
-M2.0～M2.8 已形成可观测性、生命周期、类型化样式、共享 Style Template、统一身份、Paint-only Pseudo 与根字段 FieldNotify/Text 局部失效、持久 Yoga/异步 Resource Handle、Display/Hit/Packaged 真实渲染基线，以及核心生产宿主。后续仍以稳定身份和真实更新路径为纵向切片：每个切片必须贯穿依赖定位、属性差异、失效传播、缓存保留、布局/绘制工作量和端到端预算。宏观 `8 / 9` 统计工程退出门；全部 0.5 性能预算和 Win64 Packaged 证据最终在 M2.9 收口，BuildPlugin 与第二平台不再阻塞 M2。
+M2.0～M2.9 已完成可观测性、生命周期、类型化样式、共享 Style Template、统一身份、Paint-only Pseudo 与根字段 FieldNotify/Text 局部失效、持久 Yoga/异步 Resource Handle、Display/Hit/Packaged 真实渲染、核心生产宿主与 0.5 Go/No-Go。宏观 `9 / 9` 的全部性能预算和 Win64 Packaged 证据已经收口；BuildPlugin 与第二平台仍属 P1.0。M3 仅作为下一条建议，不在本路线自动开始。
 
 ### M2.0——性能可观测性 ✅ 6 / 6
 
@@ -452,15 +455,17 @@ M2.0～M2.8 已形成可观测性、生命周期、类型化样式、共享 Styl
 
 `P0.5-if-used` 裁决：`N/A`。`CorpusOptionalInputContract` 对冻结的三份 UI Source 自动审计：没有可见滚动条声明、拖拽/触摸/惯性标记或水平溢出；只有 ScrollableSettings 使用 `overflow:auto` 的既有纵向滚轮路径。因此本路线不新增不可见的 scrollbar/drag 产品能力，也不创建 P1.0 占位接口。
 
-### M2.9——PersonalGame-ready 0.5 退出与 Go/No-Go ⬜ 0 / 7
+### M2.9——PersonalGame-ready 0.5 退出与 Go/No-Go ✅ 7 / 7
 
-- [ ] M2 Correctness/Performance 测试套件全部通过；精确当前数量从 Automation 产物生成，不在退出条件中手写易漂移的 N。
-- [ ] 第 6.2 节预算全部满足，Hover/FieldNotify 转为 Enforce；K=1 局部变化不再做 O(N) Style/Binding/Resource 工作。
-- [ ] 第 6.3 节三类 Corpus 具备 Packaged GT/RT/GPU、首帧、Batch 和完整内存证据。
-- [ ] Win64 Editor/Game Development/Shipping 编译、Cook、IoStore 和真实 Packaged Smoke 通过；BuildPlugin 属 `P1.0` 分发门。
-- [ ] R-01～R-06、R-11～R-14 关闭或降至产品可接受等级。
-- [ ] 0.5 内部文档、示例、UI Source 重编译策略、性能合同和失败诊断同步。
-- [ ] Go/No-Go：若 500/200 局部更新仍 `>1 ms` 或 K=1 仍触发 O(N)，停止大型功能扩张并重审 Runtime 数据/渲染模型；若 Slate 端到端关键维度持续落后目标基线 `>2×`，选择缩窄产品合同或正式立项混合/自定义渲染 ADR。
+- [x] M2 Correctness/Performance 测试套件全部通过；最终 Automation 产物精确发现并执行 60 项，0 失败/0 跳过。
+- [x] 第 6.2 节预算全部满足，Hover/FieldNotify 为 Enforce；三 Corpus 的 K=1 局部变化不做 O(N) Style/Binding/Resource 工作。
+- [x] 第 6.3 节三类 Corpus 具备 Development/Shipping Packaged GT/RT/GPU、首帧及归因、Batch/Vertex、进程内存、Development LLM 和第二 View 证据。
+- [x] Win64 Editor Strict Development、Game Development/Shipping 编译、Cook、Stage、Pak、IoStore 和真实 Packaged Smoke 通过；BuildPlugin 保持 `P1.0` 分发门。
+- [x] R-01～R-06、R-11～R-14 均关闭或降至当前 Win64 项目内 0.5 可接受的 Mitigated 等级；不可获得的 Shipping LLM、硬件扫描延迟和 Gameface 明确保留边界。
+- [x] 0.5 内部文档、冻结示例、UI Source 版本 7 重编译策略、schema 6 性能合同、last-good/错误诊断与可复现出口脚本同步。
+- [x] Go：500/200 局部更新均 `<0.5 ms`，Packaged K=1 无 O(N) Style/Binding/Resource，Development/Shipping 的 WTUE/UMG 关键维度及三次冷启动中位数均未持续 `>2×`；无需缩窄合同或立项混合/自定义渲染 ADR。
+
+`P0.5-if-used` 裁决：`N/A`。M2.9 没有新增可选产品能力；沿用 M2.8 对冻结 MainMenu/HUD/ScrollableSettings 的自动审计，没有可见滚动条、拖拽、触摸、惯性或水平溢出。该证据只关闭当前 Corpus 的路线门，不提前实现 M3/M4/P1.0 能力。
 
 ---
 
@@ -474,24 +479,23 @@ M2 先建设与传输协议无关的 Compiler、Diagnostics、Inspection 和 Ben
 
 ## 11. 测试与发布门禁
 
-### 11.1 当前 Automation（59 / 59）
+### 11.1 当前 Automation（60 / 60）
 
 | 层 | 测试 |
 | --- | --- |
 | Core | `HtmlCss`、`OrderedDeclarations`、`TypedProperties`、`PropertyMetadata`、`SelectorIndex`、`PseudoInvalidationDependencies`、`TypedCascade`、`TypedCascadeChangeSet`、`FlexLayout`、`ConstrainedMeasure`、`RichTextCompile`、`ScrollLayout`、`CssDiagnostics` |
 | Runtime | `AssetVersion`、`BindingIndex`、`CompiledDocumentBoundary`、`OrderedDeclarationHydration`、`RuntimeIdentity`、`RuntimeInstanceIsolation`、`RuntimeCacheSeparation`、`RuntimePresentationIsolation`、`PseudoInvalidationPath`、`PaintOnlyPseudoResourceSafety`、`TypedCascadeSlateOutput`、`TextCacheKeyAndDirtyPath`、`PersistentLayoutState`、`PersistentLayoutDependencies`、`ResourceLifecycle`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`SemanticFocus`、`GamepadNavigation`、`DpiSafeZone`、`PerformanceInstrumentation`、`PaintOrderCache`、`DisplayListOwnership`、`SpatialPaintHitWorkload`、`DisplayListDebugOverlay`、`DisplayListDebugImage`、`SlateBatchCompatibility` |
-| Benchmark | `CorpusContract`、`CorpusSlateOutput`、`CorpusDpiGolden`、`CorpusOptionalInputContract` |
+| Benchmark | `CorpusContract`、`CorpusSlateOutput`、`CorpusDpiGolden`、`CorpusOptionalInputContract`、`PackagedExitPolicy` |
 | Editor | `BenchmarkScenarios`、`BenchmarkStatistics`、`RuntimeHoverBenchmark`、`RuntimeFieldNotifyBenchmark`、`RuntimeHydrationBenchmark`、`RuntimeWarmLayoutBenchmark`、`RuntimeStressLayoutBenchmark`、`RuntimeUnchangedPaintBenchmark`、`BindingImport`、`FieldNotifyInvalidation`、`LocalizationImport`、`OrderedDeclarationImport`、`ResourceManifest`、`ReimportRecovery` |
 
-Editor 生命周期另有 Pester 6 / 6，不计入 UE Automation；发布包装器会解析 AutomationTool 日志中的最终 ExitCode，避免 `RunUAT.bat` 宿主假 0；当前 Development/Shipping 操作与日志路径见 Evidence Ledger。
+Editor 生命周期另有 Pester 6 / 6，Packaged 出口门脚本另有 Pester 5 / 5，均不计入 UE Automation；发布包装器会解析 AutomationTool 日志中的最终 ExitCode，避免 `RunUAT.bat` 宿主假 0；当前 Development/Shipping 操作、原始矩阵与日志路径见 Evidence Ledger。
 
-### 11.2 仍需建立
+### 11.2 后续路线门禁
 
 - 触摸、惯性、完整文本编辑/IME 和无障碍属于 `P1.0`，除非真实目标界面提升优先级；当前不实施占位接口。
 - M2.8 已建立三类固定 Corpus 的目标专用跨 DPI Golden；扩展为通用 Screenshot/Golden 工具链仍属 `P1.0`。
-- 局部更新工作量回归，以及 Packaged 每 View/第二 View RSS/LLM。
-- Packaged GT/RT/GPU、Draw Elements/Slate Batches/Vertices、冷/暖首帧、RSS/LLM/VRAM 已有 M2.7 基线；M2.9 仍需门禁化、第二 View 增量和冷启动归因。
-- `P0.5` Win64 Editor/Game Development/Shipping/Cook/IoStore/Packaged Smoke 一键门禁；BuildPlugin 与第二平台可行性 Spike 属 `P1.0`。
+- M2.9 已建立局部工作量、Packaged GT/RT/GPU/input、Batch/Vertex、冷启动、Development LLM、每 View/第二 View 与 Win64 Development/Shipping BuildCookRun 门；后续路线必须保持这些门，而不是重定义 M2 通过条件。
+- BuildPlugin、外部安装和第二平台可行性 Spike 属 `P1.0`；Shipping LLM 与硬件输入到显示只有在对应 provider/配置可用时才能升级为新证据。
 
 交付必须分别报告 Correctness、Performance、Packaging 和 Compatibility；功能测试通过不能替代其余门禁。
 
