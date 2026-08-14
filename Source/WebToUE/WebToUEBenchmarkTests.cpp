@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
 
 #include "WebToUEBenchmarkUserWidget.h"
+#include "WebToUEPackagedBenchmarkPolicy.h"
 
 #include "WebToUEDocument.h"
 #include "WebToUEPerformance.h"
@@ -24,6 +25,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEBenchmarkCorpusContractTest,
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEBenchmarkCorpusSlateOutputTest,
 	"WebToUE.Benchmark.CorpusSlateOutput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPackagedExitPolicyTest,
+	"WebToUE.Benchmark.PackagedExitPolicy",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebToUEBenchmarkCorpusContractTest::RunTest(const FString& Parameters)
@@ -243,6 +248,123 @@ bool FWebToUEBenchmarkCorpusSlateOutputTest::RunTest(const FString& Parameters)
 			}
 		}
 	}
+	return true;
+}
+
+bool FWebToUEPackagedExitPolicyTest::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("Packaged result schema records M2.9 evidence"),
+		FWebToUEPackagedBenchmarkPolicy::ResultSchemaVersion, 6);
+	TestEqual(TEXT("Frozen production corpus has an explicit resource ceiling"),
+		FWebToUEPackagedBenchmarkPolicy::FrozenCorpusMaximumCompiledResources, 0);
+
+	const FName Corpora[] = {
+		TEXT("MainMenu"), TEXT("HUD"), TEXT("ScrollableSettings")
+	};
+	for (const FName Corpus : Corpora)
+	{
+		const FString AssetPath = FString::Printf(
+			TEXT("/Game/WebToUEExamples/%s.%s"),
+			*Corpus.ToString(), *Corpus.ToString());
+		UWebToUEDocument* Document = LoadObject<UWebToUEDocument>(nullptr, *AssetPath);
+		if (!TestNotNull(*FString::Printf(TEXT("%s loads for the exit policy"),
+			*Corpus.ToString()), Document))
+		{
+			continue;
+		}
+
+		UWebToUEView* FirstView = NewObject<UWebToUEView>(GetTransientPackage());
+		FirstView->SetDocument(Document);
+		FWebToUEPerformanceSnapshot FirstWorkload;
+		const TSharedRef<SWidget> FirstWidget = [&]()
+		{
+			FWebToUEPerformanceCapture Capture;
+			const TSharedRef<SWidget> Widget = FirstView->TakeWidget();
+			Widget->SlatePrepass(1.0f);
+			FirstWorkload = Capture.GetSnapshot();
+			return Widget;
+		}();
+		UWebToUEView* SecondView = NewObject<UWebToUEView>(GetTransientPackage());
+		SecondView->SetDocument(Document);
+		FWebToUEPerformanceSnapshot SecondWorkload;
+		const TSharedRef<SWidget> SecondWidget = [&]()
+		{
+			FWebToUEPerformanceCapture Capture;
+			const TSharedRef<SWidget> Widget = SecondView->TakeWidget();
+			Widget->SlatePrepass(1.0f);
+			SecondWorkload = Capture.GetSnapshot();
+			return Widget;
+		}();
+		FWebToUERuntimeMemoryCensus FirstCensus;
+		FWebToUERuntimeMemoryCensus SecondCensus;
+		TestTrue(*FString::Printf(TEXT("%s exposes first-view known-owned capacity"),
+			*Corpus.ToString()), FirstView->GetRuntimeMemoryCensusForTesting(FirstCensus));
+		TestTrue(*FString::Printf(TEXT("%s exposes second-view known-owned capacity"),
+			*Corpus.ToString()), SecondView->GetRuntimeMemoryCensusForTesting(SecondCensus));
+
+		FWebToUEPackagedBenchmarkEvidence Evidence;
+		Evidence.CompiledNodeCount = Document->GetCompiledNodes().Num();
+		Evidence.CompiledResourceCount = Document->GetResourceManifest().Num();
+		Evidence.MeasurementTrajectorySteps = 1;
+		Evidence.SetupHydratedNodes = FirstWorkload.GetCounter(
+			EWebToUEPerformanceCounter::HydratedNodes);
+		Evidence.SecondViewHydratedNodes = SecondWorkload.GetCounter(
+			EWebToUEPerformanceCounter::HydratedNodes);
+		Evidence.SetupResourceLoadAttempts = FirstWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceLoadAttempts);
+		Evidence.SetupResourceFailures = FirstWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceFailures);
+		Evidence.SecondViewResourceLoadAttempts = SecondWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceLoadAttempts);
+		Evidence.SecondViewResourceFailures = SecondWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceFailures);
+		Evidence.bKnownOwnedCensusAvailable = true;
+		Evidence.FirstViewKnownOwnedBytes = FirstCensus.GetTotalKnownOwnedBytes();
+		Evidence.SecondViewKnownOwnedBytes = SecondCensus.GetTotalKnownOwnedBytes();
+		Evidence.FirstViewSharedTemplateBytes =
+			FirstCensus.SharedStyleTemplateKnownOwnedBytes;
+		Evidence.SecondViewSharedTemplateBytes =
+			SecondCensus.SharedStyleTemplateKnownOwnedBytes;
+		TArray<FString> Failures;
+		TestTrue(*FString::Printf(TEXT("%s satisfies the packaged exit evidence policy"),
+			*Corpus.ToString()),
+			FWebToUEPackagedBenchmarkPolicy::ValidateWebToUEEvidence(
+				Evidence, Failures));
+		if (!Failures.IsEmpty())
+		{
+			AddError(FString::Join(Failures, TEXT("; ")));
+		}
+	}
+
+	FWebToUEPackagedBenchmarkEvidence Negative;
+	Negative.CompiledNodeCount = 15;
+	Negative.CompiledResourceCount = 0;
+	Negative.MeasurementTrajectorySteps = 1;
+	Negative.SetupHydratedNodes = 15;
+	Negative.SecondViewHydratedNodes = 15;
+	Negative.bKnownOwnedCensusAvailable = true;
+	Negative.FirstViewKnownOwnedBytes = 1000;
+	Negative.SecondViewKnownOwnedBytes = 1000;
+	Negative.FirstViewSharedTemplateBytes = 100;
+	Negative.SecondViewSharedTemplateBytes = 100;
+	TArray<FString> Failures;
+	TestTrue(TEXT("The exact boundary evidence is accepted"),
+		FWebToUEPackagedBenchmarkPolicy::ValidateWebToUEEvidence(Negative, Failures));
+	Negative.CompiledResourceCount = 1;
+	TestFalse(TEXT("An undeclared frozen-corpus resource fails the gate"),
+		FWebToUEPackagedBenchmarkPolicy::ValidateWebToUEEvidence(Negative, Failures));
+	Negative.CompiledResourceCount = 0;
+	Negative.MeasurementStyleNodeVisits = 5;
+	TestFalse(TEXT("O(N)-shaped Style work fails the K=1 constant bound"),
+		FWebToUEPackagedBenchmarkPolicy::ValidateWebToUEEvidence(Negative, Failures));
+	Negative.MeasurementStyleNodeVisits = 0;
+	Negative.SecondViewRssDeltaMiB = 32.01;
+	TestFalse(TEXT("An excessive second-view process delta fails the gate"),
+		FWebToUEPackagedBenchmarkPolicy::ValidateWebToUEEvidence(Negative, Failures));
+	Negative.SecondViewRssDeltaMiB = 0.0;
+	Negative.SecondViewKnownOwnedBytes = 1101;
+	TestFalse(TEXT("An excessive second-view known-owned census fails the gate"),
+		FWebToUEPackagedBenchmarkPolicy::ValidateWebToUEEvidence(Negative, Failures));
 	return true;
 }
 

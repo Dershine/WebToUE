@@ -10,6 +10,7 @@ class FSlateWindowElementList;
 class ISlateViewportProvider;
 class SWidget;
 class SWindow;
+class UWebToUEDocument;
 
 struct FWebToUEBenchmarkFrameSample
 {
@@ -44,6 +45,22 @@ public:
 		const FSlateRect& CullingRect);
 
 private:
+	struct FMemoryPoint
+	{
+		double RssMiB = 0.0;
+		double LlmMiB = 0.0;
+	};
+
+	struct FKnownOwnedCensus
+	{
+		bool bAvailable = false;
+		uint64 SharedStyleTemplateBytes = 0;
+		uint64 RuntimeBytes = 0;
+		uint64 PresentationBytes = 0;
+
+		uint64 GetViewBytes() const { return RuntimeBytes + PresentationBytes; }
+	};
+
 	enum class EPhase : uint8
 	{
 		WaitingForViewport,
@@ -63,13 +80,23 @@ private:
 	int32 RequestedSamples = 600;
 	int32 LogicalFrame = 0;
 	int32 TrajectoryStep = 0;
+	int32 MeasurementTrajectorySteps = 0;
 	bool bUmgTrajectoryEffectObserved = false;
+	bool bSecondViewCreated = false;
 	int32 ScreenshotWaitFrames = 0;
 	EPhase Phase = EPhase::WaitingForViewport;
 	uint64 UiSetupCycles = 0;
+	uint64 UiSetupCompleteCycles = 0;
 	uint64 FirstRenderCycles = 0;
 	uint64 PendingInputCycles = 0;
 	double ColdFirstFrameMs = 0.0;
+	double ColdAssetLoadMs = 0.0;
+	double ColdUiObjectConstructionMs = 0.0;
+	double ColdTakeWidgetMs = 0.0;
+	double ColdPrepassMs = 0.0;
+	double ColdAttachMs = 0.0;
+	double ColdSetupTotalMs = 0.0;
+	double ColdFirstRenderWaitMs = 0.0;
 	FVector2D LastPointerPosition = FVector2D::ZeroVector;
 	FSlateWindowElementList* LastElementList = nullptr;
 	int32 LastUiDrawElements = 0;
@@ -87,6 +114,13 @@ private:
 	FWebToUEPerformanceSnapshot SetupWorkload;
 	FWebToUEPerformanceSnapshot WarmupWorkload;
 	FWebToUEPerformanceSnapshot MeasurementWorkload;
+	FWebToUEPerformanceSnapshot SecondViewWorkload;
+	FMemoryPoint BeforeFirstViewMemory;
+	FMemoryPoint AfterFirstViewMemory;
+	FMemoryPoint BeforeSecondViewMemory;
+	FMemoryPoint AfterSecondViewMemory;
+	FKnownOwnedCensus FirstViewCensus;
+	FKnownOwnedCensus SecondViewCensus;
 	TArray<FWebToUEBenchmarkFrameSample> Samples;
 	TArray<double> WarmInputToSlateSubmitMs;
 	TArray<double> InputToBackBufferReadyMs;
@@ -94,7 +128,11 @@ private:
 	TArray<double> HardwareInputToDisplayMs;
 	TStrongObjectPtr<UObject> PrimaryUiObject;
 	TStrongObjectPtr<UObject> DataContextObject;
+	TStrongObjectPtr<UWebToUEDocument> BenchmarkDocument;
+	TStrongObjectPtr<UObject> SecondUiObject;
+	TStrongObjectPtr<UObject> SecondDataContextObject;
 	TSharedPtr<SWidget> TargetWidget;
+	TSharedPtr<SWidget> SecondTargetWidget;
 	TSharedPtr<SWidget> InputTargetWidget;
 	TSharedPtr<SWidget> ProbeWidget;
 	TWeakPtr<SWindow> TargetWindow;
@@ -109,6 +147,8 @@ private:
 
 	bool Tick(float DeltaSeconds);
 	bool SetupUi();
+	bool CaptureSecondViewEvidence();
+	FMemoryPoint CaptureMemoryPoint() const;
 	void ApplyTrajectory();
 	void OnSlateWindowRendered(SWindow& Window);
 	void OnBackBufferReady(SWindow& Window, ISlateViewportProvider& ViewportProvider);

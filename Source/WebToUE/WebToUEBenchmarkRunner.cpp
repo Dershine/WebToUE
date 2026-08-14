@@ -1,5 +1,6 @@
 #include "WebToUEBenchmarkRunner.h"
 
+#include "WebToUEPackagedBenchmarkPolicy.h"
 #include "WebToUEBenchmarkUserWidget.h"
 #include "WebToUEDemoViewModel.h"
 
@@ -44,6 +45,13 @@
 namespace WebToUE::Benchmark::Private
 {
 	static constexpr double BytesToMiB = 1.0 / (1024.0 * 1024.0);
+
+	static double ElapsedMilliseconds(uint64 StartCycles, uint64 EndCycles)
+	{
+		return StartCycles != 0 && EndCycles >= StartCycles
+			? FPlatformTime::ToMilliseconds64(EndCycles - StartCycles)
+			: 0.0;
+	}
 
 	static constexpr bool IsLlmCompiledIn()
 	{
@@ -430,13 +438,17 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 		return false;
 	}
 	UiSetupCycles = FPlatformTime::Cycles64();
+	BeforeFirstViewMemory = CaptureMemoryPoint();
 	TSharedPtr<SWidget> BuiltTargetWidget;
 	UWorld* World = GEngine->GameViewport->GetWorld();
 	if (Mode == TEXT("WebToUE"))
 	{
+		const uint64 AssetLoadStartCycles = FPlatformTime::Cycles64();
 		const FString AssetPath = FString::Printf(TEXT("/Game/WebToUEExamples/%s.%s"),
 			*Corpus.ToString(), *Corpus.ToString());
 		UWebToUEDocument* Document = LoadObject<UWebToUEDocument>(nullptr, *AssetPath);
+		ColdAssetLoadMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
+			AssetLoadStartCycles, FPlatformTime::Cycles64());
 		if (!Document || Document->GetCompiledNodes().IsEmpty())
 		{
 			FailAndExit(FString::Printf(TEXT("Missing or empty document asset: %s"), *AssetPath));
@@ -447,23 +459,31 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 		CompiledBindingOpCount = Document->GetCompiledBindingOps().Num();
 		CompiledResourceCount = Document->GetResourceManifest().Num();
 		CompiledRootNodeIndex = Document->GetRootNodeIndex();
+		BenchmarkDocument.Reset(Document);
 		UE_LOG(LogTemp, Display,
 			TEXT("WTUE_BENCHMARK_DOCUMENT path=%s nodes=%d rules=%d binding_ops=%d resources=%d root=%d root_valid=%s"),
 			*AssetPath, CompiledNodeCount, CompiledRuleCount, CompiledBindingOpCount,
 			CompiledResourceCount, CompiledRootNodeIndex,
 			Document->GetCompiledNodes().IsValidIndex(CompiledRootNodeIndex)
 				? TEXT("true") : TEXT("false"));
+		const uint64 UiObjectStartCycles = FPlatformTime::Cycles64();
 		UWebToUEView* View = NewObject<UWebToUEView>(GetTransientPackage());
 		UWebToUEDemoViewModel* ViewModel = NewObject<UWebToUEDemoViewModel>(GetTransientPackage());
 		View->SetDocument(Document);
 		View->SetDataContext(ViewModel);
 		PrimaryUiObject.Reset(View);
 		DataContextObject.Reset(ViewModel);
+		ColdUiObjectConstructionMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
+			UiObjectStartCycles, FPlatformTime::Cycles64());
+		const uint64 TakeWidgetStartCycles = FPlatformTime::Cycles64();
 		BuiltTargetWidget = View->TakeWidget();
+		ColdTakeWidgetMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
+			TakeWidgetStartCycles, FPlatformTime::Cycles64());
 		InputTargetWidget = BuiltTargetWidget;
 	}
 	else
 	{
+		const uint64 UiObjectStartCycles = FPlatformTime::Cycles64();
 		UWebToUEBenchmarkUserWidget* Widget = CreateWidget<UWebToUEBenchmarkUserWidget>(
 			World, UWebToUEBenchmarkUserWidget::StaticClass());
 		if (!Widget || !Widget->Configure(Corpus))
@@ -472,7 +492,12 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 			return false;
 		}
 		PrimaryUiObject.Reset(Widget);
+		ColdUiObjectConstructionMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
+			UiObjectStartCycles, FPlatformTime::Cycles64());
+		const uint64 TakeWidgetStartCycles = FPlatformTime::Cycles64();
 		BuiltTargetWidget = Widget->TakeWidget();
+		ColdTakeWidgetMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
+			TakeWidgetStartCycles, FPlatformTime::Cycles64());
 		InputTargetWidget = Widget->GetTrajectoryInputWidget();
 	}
 	if (!BuiltTargetWidget.IsValid())
@@ -482,7 +507,26 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 	}
 	TargetWidget = BuiltTargetWidget;
 	if (!InputTargetWidget.IsValid()) InputTargetWidget = BuiltTargetWidget;
+	const uint64 PrepassStartCycles = FPlatformTime::Cycles64();
 	BuiltTargetWidget->SlatePrepass(1.0f);
+	ColdPrepassMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
+		PrepassStartCycles, FPlatformTime::Cycles64());
+	AfterFirstViewMemory = CaptureMemoryPoint();
+#if WITH_DEV_AUTOMATION_TESTS
+	if (Mode == TEXT("WebToUE"))
+	{
+		FWebToUERuntimeMemoryCensus Census;
+		if (UWebToUEView* View = Cast<UWebToUEView>(PrimaryUiObject.Get());
+			View && View->GetRuntimeMemoryCensusForTesting(Census))
+		{
+			FirstViewCensus.bAvailable = true;
+			FirstViewCensus.SharedStyleTemplateBytes =
+				Census.SharedStyleTemplateKnownOwnedBytes;
+			FirstViewCensus.RuntimeBytes = Census.RuntimeKnownOwnedBytes;
+			FirstViewCensus.PresentationBytes = Census.PresentationKnownOwnedBytes;
+		}
+	}
+#endif
 	if (PerformanceCapture)
 	{
 		SetupWorkload = PerformanceCapture->GetSnapshot();
@@ -494,6 +538,7 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 		*Mode, *Corpus.ToString(), *BuiltTargetWidget->GetTypeAsString(),
 		TargetDesiredSize.X, TargetDesiredSize.Y,
 		*BuiltTargetWidget->GetVisibility().ToString());
+	const uint64 AttachStartCycles = FPlatformTime::Cycles64();
 	WebToUE::Benchmark::Private::ForceVolatileRecursive(BuiltTargetWidget.ToSharedRef());
 	const TSharedRef<WebToUE::Benchmark::Private::SBenchmarkProbe> MeasuringProbe =
 		SNew(WebToUE::Benchmark::Private::SBenchmarkProbe)
@@ -505,8 +550,103 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 	TargetWindow = GEngine->GameViewport->GetWindow();
 	TargetWindowPtr = TargetWindow.Pin().Get();
 	GEngine->GameViewport->AddViewportWidgetContent(ProbeWidget.ToSharedRef(), 1000);
+	UiSetupCompleteCycles = FPlatformTime::Cycles64();
+	ColdAttachMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
+		AttachStartCycles, UiSetupCompleteCycles);
+	ColdSetupTotalMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
+		UiSetupCycles, UiSetupCompleteCycles);
 	UE_LOG(LogTemp, Display, TEXT("WTUE_BENCHMARK_UI_ATTACHED window=%p probe=%p"),
 		TargetWindowPtr, ProbeWidget.Get());
+	return true;
+}
+
+FWebToUEBenchmarkRunner::FMemoryPoint FWebToUEBenchmarkRunner::CaptureMemoryPoint() const
+{
+	using namespace WebToUE::Benchmark::Private;
+	const FPlatformMemoryStats Memory = FPlatformMemory::GetStats();
+	FMemoryPoint Result;
+	Result.RssMiB = Memory.UsedPhysical * BytesToMiB;
+	Result.LlmMiB = GetLlmMiB();
+	return Result;
+}
+
+bool FWebToUEBenchmarkRunner::CaptureSecondViewEvidence()
+{
+	if (bSecondViewCreated)
+	{
+		return true;
+	}
+	if (!GEngine || !GEngine->GameViewport || !GEngine->GameViewport->GetWorld())
+	{
+		UE_LOG(LogTemp, Error, TEXT("WTUE_BENCHMARK_SECOND_VIEW missing game world"));
+		return false;
+	}
+	BeforeSecondViewMemory = CaptureMemoryPoint();
+	if (PerformanceCapture)
+	{
+		PerformanceCapture->Reset();
+	}
+	if (Mode == TEXT("WebToUE"))
+	{
+		UWebToUEDocument* Document = BenchmarkDocument.Get();
+		if (!Document)
+		{
+			UE_LOG(LogTemp, Error, TEXT("WTUE_BENCHMARK_SECOND_VIEW missing document"));
+			return false;
+		}
+		UWebToUEView* View = NewObject<UWebToUEView>(GetTransientPackage());
+		UWebToUEDemoViewModel* ViewModel = NewObject<UWebToUEDemoViewModel>(GetTransientPackage());
+		View->SetDocument(Document);
+		View->SetDataContext(ViewModel);
+		SecondUiObject.Reset(View);
+		SecondDataContextObject.Reset(ViewModel);
+		SecondTargetWidget = View->TakeWidget();
+	}
+	else
+	{
+		UWebToUEBenchmarkUserWidget* Widget = CreateWidget<UWebToUEBenchmarkUserWidget>(
+			GEngine->GameViewport->GetWorld(), UWebToUEBenchmarkUserWidget::StaticClass());
+		if (!Widget || !Widget->Configure(Corpus))
+		{
+			UE_LOG(LogTemp, Error,
+				TEXT("WTUE_BENCHMARK_SECOND_VIEW failed to build UMG counterpart"));
+			return false;
+		}
+		SecondUiObject.Reset(Widget);
+		SecondTargetWidget = Widget->TakeWidget();
+	}
+	if (!SecondTargetWidget.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("WTUE_BENCHMARK_SECOND_VIEW missing Slate widget"));
+		return false;
+	}
+	SecondTargetWidget->SlatePrepass(1.0f);
+#if WITH_DEV_AUTOMATION_TESTS
+	if (Mode == TEXT("WebToUE"))
+	{
+		FWebToUERuntimeMemoryCensus Census;
+		if (UWebToUEView* View = Cast<UWebToUEView>(SecondUiObject.Get());
+			View && View->GetRuntimeMemoryCensusForTesting(Census))
+		{
+			SecondViewCensus.bAvailable = true;
+			SecondViewCensus.SharedStyleTemplateBytes =
+				Census.SharedStyleTemplateKnownOwnedBytes;
+			SecondViewCensus.RuntimeBytes = Census.RuntimeKnownOwnedBytes;
+			SecondViewCensus.PresentationBytes = Census.PresentationKnownOwnedBytes;
+		}
+	}
+#endif
+	if (PerformanceCapture)
+	{
+		SecondViewWorkload = PerformanceCapture->GetSnapshot();
+	}
+	AfterSecondViewMemory = CaptureMemoryPoint();
+	bSecondViewCreated = true;
+	UE_LOG(LogTemp, Display,
+		TEXT("WTUE_BENCHMARK_SECOND_VIEW mode=%s corpus=%s rss_delta_mib=%.3f llm_delta_mib=%.3f"),
+		*Mode, *Corpus.ToString(),
+		AfterSecondViewMemory.RssMiB - BeforeSecondViewMemory.RssMiB,
+		AfterSecondViewMemory.LlmMiB - BeforeSecondViewMemory.LlmMiB);
 	return true;
 }
 
@@ -556,6 +696,10 @@ FVector2D FWebToUEBenchmarkRunner::GetTrajectoryScreenPosition() const
 void FWebToUEBenchmarkRunner::ApplyTrajectory()
 {
 	++TrajectoryStep;
+	if (Phase == EPhase::Measuring)
+	{
+		++MeasurementTrajectorySteps;
+	}
 	PendingInputCycles = FPlatformTime::Cycles64();
 	PendingBackBufferInputCycles.Store(PendingInputCycles);
 	UEngine::SetInputSampleLatencyMarker(GFrameCounter);
@@ -702,6 +846,8 @@ void FWebToUEBenchmarkRunner::OnSlateWindowRendered(SWindow& Window)
 	{
 		FirstRenderCycles = FPlatformTime::Cycles64();
 		ColdFirstFrameMs = FPlatformTime::ToMilliseconds64(FirstRenderCycles - UiSetupCycles);
+		ColdFirstRenderWaitMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
+			UiSetupCompleteCycles, FirstRenderCycles);
 	}
 	if (PendingInputCycles != 0)
 	{
@@ -799,6 +945,7 @@ void FWebToUEBenchmarkRunner::Finish()
 	{
 		MeasurementWorkload = PerformanceCapture->GetSnapshot();
 	}
+	const bool bSecondViewEvidence = CaptureSecondViewEvidence();
 	const bool bHasWebToUERuntimeWork = Mode != TEXT("WebToUE") ||
 		(CompiledNodeCount > 0 &&
 			SetupWorkload.GetCounter(EWebToUEPerformanceCounter::HydratedNodes) ==
@@ -837,9 +984,66 @@ void FWebToUEBenchmarkRunner::Finish()
 					EWebToUEPerformanceCounter::DisplaySpatialIndexPatches) > 0;
 		}
 	}
+	TArray<FString> ProductPolicyFailures;
+	bool bProductPolicyPass = true;
+	if (Mode == TEXT("WebToUE"))
+	{
+		FWebToUEPackagedBenchmarkEvidence Evidence;
+		Evidence.CompiledNodeCount = CompiledNodeCount;
+		Evidence.CompiledResourceCount = CompiledResourceCount;
+		Evidence.MeasurementTrajectorySteps = MeasurementTrajectorySteps;
+		Evidence.SetupHydratedNodes = SetupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::HydratedNodes);
+		Evidence.MeasurementHydratedNodes = MeasurementWorkload.GetCounter(
+			EWebToUEPerformanceCounter::HydratedNodes);
+		Evidence.MeasurementStyleNodeVisits = MeasurementWorkload.GetCounter(
+			EWebToUEPerformanceCounter::StyleNodeVisits);
+		Evidence.MeasurementSelectorEvaluations = MeasurementWorkload.GetCounter(
+			EWebToUEPerformanceCounter::SelectorEvaluations);
+		Evidence.MeasurementBindingNodesUpdated = MeasurementWorkload.GetCounter(
+			EWebToUEPerformanceCounter::BindingNodesUpdated);
+		Evidence.SetupResourceLoadAttempts = SetupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceLoadAttempts);
+		Evidence.SetupResourceFailures = SetupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceFailures);
+		Evidence.MeasurementResourceLoadAttempts = MeasurementWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceLoadAttempts);
+		Evidence.MeasurementResourceAsyncRequests = MeasurementWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceAsyncRequests);
+		Evidence.SecondViewHydratedNodes = SecondViewWorkload.GetCounter(
+			EWebToUEPerformanceCounter::HydratedNodes);
+		Evidence.SecondViewResourceLoadAttempts = SecondViewWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceLoadAttempts);
+		Evidence.SecondViewResourceFailures = SecondViewWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceFailures);
+		Evidence.SecondViewRssDeltaMiB = AfterSecondViewMemory.RssMiB -
+			BeforeSecondViewMemory.RssMiB;
+		Evidence.SecondViewLlmDeltaMiB = AfterSecondViewMemory.LlmMiB -
+			BeforeSecondViewMemory.LlmMiB;
+		Evidence.bLlmAvailable = IsLlmEnabled();
+		Evidence.bKnownOwnedCensusAvailable = FirstViewCensus.bAvailable &&
+			SecondViewCensus.bAvailable;
+		Evidence.FirstViewKnownOwnedBytes = FirstViewCensus.GetViewBytes();
+		Evidence.SecondViewKnownOwnedBytes = SecondViewCensus.GetViewBytes();
+		Evidence.FirstViewSharedTemplateBytes =
+			FirstViewCensus.SharedStyleTemplateBytes;
+		Evidence.SecondViewSharedTemplateBytes =
+			SecondViewCensus.SharedStyleTemplateBytes;
+		bProductPolicyPass =
+			FWebToUEPackagedBenchmarkPolicy::ValidateWebToUEEvidence(
+				Evidence, ProductPolicyFailures);
+	}
+	const double KnownSetupMs = ColdAssetLoadMs + ColdUiObjectConstructionMs +
+		ColdTakeWidgetMs + ColdPrepassMs + ColdAttachMs;
+	const double OtherSetupMs = FMath::Max(0.0, ColdSetupTotalMs - KnownSetupMs);
+	const bool bColdAttributionComplete = ColdFirstFrameMs > 0.0 &&
+		ColdSetupTotalMs + 0.5 >= KnownSetupMs &&
+		FMath::Abs(ColdFirstFrameMs -
+			(ColdSetupTotalMs + ColdFirstRenderWaitMs)) <= 1.0;
 	const bool bSuccess = Samples.Num() == RequestedSamples && bScreenshotExists &&
 		bHasRendererEvidence && bHasInputToDisplay && bHasWebToUERuntimeWork &&
-		bHasTrajectoryEvidence;
+		bHasTrajectoryEvidence && bSecondViewEvidence && bColdAttributionComplete &&
+		bProductPolicyPass;
 
 	FString Csv(TEXT("frame,gt_ms,rt_ms,gpu_ms,ui_draw_elements,window_slate_batches,"
 		"window_slate_vertices,window_slate_indices,ui_geometric_overdraw_ratio,"
@@ -860,7 +1064,8 @@ void FWebToUEBenchmarkRunner::Finish()
 	FFileHelper::SaveStringToFile(Csv, *CsvPath);
 
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
-	Root->SetNumberField(TEXT("schema_version"), 5);
+	Root->SetNumberField(TEXT("schema_version"),
+		FWebToUEPackagedBenchmarkPolicy::ResultSchemaVersion);
 	Root->SetBoolField(TEXT("success"), bSuccess);
 	Root->SetStringField(TEXT("mode"), Mode);
 	Root->SetStringField(TEXT("corpus"), Corpus.ToString());
@@ -876,6 +1081,8 @@ void FWebToUEBenchmarkRunner::Finish()
 		: TEXT("pointer hover plus bidirectional wheel scroll"));
 	TSharedRef<FJsonObject> TrajectoryEvidence = MakeShared<FJsonObject>();
 	TrajectoryEvidence->SetNumberField(TEXT("steps_dispatched"), TrajectoryStep);
+	TrajectoryEvidence->SetNumberField(TEXT("measurement_steps"),
+		MeasurementTrajectorySteps);
 	TrajectoryEvidence->SetBoolField(TEXT("ui_effect_observed"), bHasTrajectoryEvidence);
 	TrajectoryEvidence->SetStringField(TEXT("contract"), Mode == TEXT("UMG")
 		? TEXT("UMG counterpart reports the resulting hover, scroll-offset, or HUD text/visibility state change.")
@@ -906,9 +1113,97 @@ void FWebToUEBenchmarkRunner::Finish()
 	Root->SetObjectField(TEXT("setup_workload"), WorkloadObject(SetupWorkload));
 	Root->SetObjectField(TEXT("warmup_workload"), WorkloadObject(WarmupWorkload));
 	Root->SetObjectField(TEXT("measurement_workload"), WorkloadObject(MeasurementWorkload));
+	Root->SetObjectField(TEXT("second_view_workload"), WorkloadObject(SecondViewWorkload));
 	Root->SetStringField(TEXT("workload_contract"),
-		TEXT("Setup captures load/hydrate/prepass for K=1; warmup captures first layout/display-list construction; measurement resets after warmup and reports aggregate WebToUE-owned phase and workload counters over the sample window."));
+		TEXT("Setup captures load/hydrate/prepass for primary K=1; warmup captures first layout/display-list construction; measurement resets after warmup and reports aggregate local-update work; second_view captures an independent K=1 hydrate/prepass of the same immutable document revision after measurement."));
 	Root->SetNumberField(TEXT("cold_first_frame_ms"), ColdFirstFrameMs);
+	TSharedRef<FJsonObject> ColdAttribution = MakeShared<FJsonObject>();
+	ColdAttribution->SetBoolField(TEXT("complete"), bColdAttributionComplete);
+	ColdAttribution->SetNumberField(TEXT("asset_load_ms"), ColdAssetLoadMs);
+	ColdAttribution->SetNumberField(TEXT("ui_object_construction_ms"),
+		ColdUiObjectConstructionMs);
+	ColdAttribution->SetNumberField(TEXT("take_widget_ms"), ColdTakeWidgetMs);
+	ColdAttribution->SetNumberField(TEXT("prepass_ms"), ColdPrepassMs);
+	ColdAttribution->SetNumberField(TEXT("attach_ms"), ColdAttachMs);
+	ColdAttribution->SetNumberField(TEXT("other_setup_ms"), OtherSetupMs);
+	ColdAttribution->SetNumberField(TEXT("setup_total_ms"), ColdSetupTotalMs);
+	ColdAttribution->SetNumberField(TEXT("first_renderer_wait_ms"),
+		ColdFirstRenderWaitMs);
+	ColdAttribution->SetNumberField(TEXT("ui_setup_to_first_renderer_ms"),
+		ColdFirstFrameMs);
+	ColdAttribution->SetStringField(TEXT("contract"),
+		TEXT("Cold time begins immediately before document load/UI construction and ends at the first matching Slate renderer callback. setup_total plus first_renderer_wait reconciles to the total; other_setup is measured setup overhead outside the named stages."));
+	Root->SetObjectField(TEXT("cold_start_attribution"), ColdAttribution);
+
+	auto MemoryPointObject = [](const FMemoryPoint& Point)
+	{
+		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetNumberField(TEXT("rss_mib"), Point.RssMiB);
+		Result->SetNumberField(TEXT("llm_mib"), Point.LlmMiB);
+		return Result;
+	};
+	auto CensusObject = [](const FKnownOwnedCensus& Census)
+	{
+		TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetBoolField(TEXT("available"), Census.bAvailable);
+		Result->SetNumberField(TEXT("shared_style_template_bytes"),
+			static_cast<double>(Census.SharedStyleTemplateBytes));
+		Result->SetNumberField(TEXT("runtime_bytes"),
+			static_cast<double>(Census.RuntimeBytes));
+		Result->SetNumberField(TEXT("presentation_bytes"),
+			static_cast<double>(Census.PresentationBytes));
+		Result->SetNumberField(TEXT("view_total_bytes"),
+			static_cast<double>(Census.GetViewBytes()));
+		return Result;
+	};
+	TSharedRef<FJsonObject> MemoryEvidence = MakeShared<FJsonObject>();
+	MemoryEvidence->SetBoolField(TEXT("second_view_created"), bSecondViewCreated);
+	MemoryEvidence->SetObjectField(TEXT("before_first_view"),
+		MemoryPointObject(BeforeFirstViewMemory));
+	MemoryEvidence->SetObjectField(TEXT("after_first_view_prepass"),
+		MemoryPointObject(AfterFirstViewMemory));
+	MemoryEvidence->SetObjectField(TEXT("before_second_view"),
+		MemoryPointObject(BeforeSecondViewMemory));
+	MemoryEvidence->SetObjectField(TEXT("after_second_view_prepass"),
+		MemoryPointObject(AfterSecondViewMemory));
+	MemoryEvidence->SetNumberField(TEXT("first_view_rss_delta_mib"),
+		AfterFirstViewMemory.RssMiB - BeforeFirstViewMemory.RssMiB);
+	MemoryEvidence->SetNumberField(TEXT("first_view_llm_delta_mib"),
+		AfterFirstViewMemory.LlmMiB - BeforeFirstViewMemory.LlmMiB);
+	MemoryEvidence->SetNumberField(TEXT("second_view_rss_delta_mib"),
+		AfterSecondViewMemory.RssMiB - BeforeSecondViewMemory.RssMiB);
+	MemoryEvidence->SetNumberField(TEXT("second_view_llm_delta_mib"),
+		AfterSecondViewMemory.LlmMiB - BeforeSecondViewMemory.LlmMiB);
+	MemoryEvidence->SetObjectField(TEXT("first_view_known_owned"),
+		CensusObject(FirstViewCensus));
+	MemoryEvidence->SetObjectField(TEXT("second_view_known_owned"),
+		CensusObject(SecondViewCensus));
+	MemoryEvidence->SetStringField(TEXT("contract"),
+		TEXT("Process RSS/LLM points are raw Packaged observations; positive second-view deltas are bounded. Development additionally records exact WTUE known-owned Runtime/Presentation capacity while shared Style Template bytes are reported separately. Shipping without compiled LLM or census reports availability rather than zero-as-proof."));
+	Root->SetObjectField(TEXT("memory_evidence"), MemoryEvidence);
+
+	TSharedRef<FJsonObject> ProductPolicy = MakeShared<FJsonObject>();
+	ProductPolicy->SetBoolField(TEXT("evaluated"), Mode == TEXT("WebToUE"));
+	ProductPolicy->SetBoolField(TEXT("passed"), bProductPolicyPass);
+	ProductPolicy->SetNumberField(TEXT("maximum_compiled_resources"),
+		FWebToUEPackagedBenchmarkPolicy::FrozenCorpusMaximumCompiledResources);
+	ProductPolicy->SetNumberField(TEXT("maximum_style_node_visits_per_trajectory"),
+		static_cast<double>(FWebToUEPackagedBenchmarkPolicy::MaximumStyleNodeVisitsPerTrajectory));
+	ProductPolicy->SetNumberField(TEXT("maximum_selector_evaluations_per_trajectory"),
+		static_cast<double>(FWebToUEPackagedBenchmarkPolicy::MaximumSelectorEvaluationsPerTrajectory));
+	ProductPolicy->SetNumberField(TEXT("maximum_binding_nodes_updated_per_trajectory"),
+		static_cast<double>(FWebToUEPackagedBenchmarkPolicy::MaximumBindingNodesUpdatedPerTrajectory));
+	ProductPolicy->SetNumberField(TEXT("maximum_second_view_process_memory_delta_mib"),
+		FWebToUEPackagedBenchmarkPolicy::MaximumSecondViewProcessMemoryDeltaMiB);
+	ProductPolicy->SetNumberField(TEXT("maximum_second_view_known_owned_ratio"),
+		FWebToUEPackagedBenchmarkPolicy::MaximumSecondViewKnownOwnedRatio);
+	TArray<TSharedPtr<FJsonValue>> PolicyFailureValues;
+	for (const FString& Failure : ProductPolicyFailures)
+	{
+		PolicyFailureValues.Add(MakeShared<FJsonValueString>(Failure));
+	}
+	ProductPolicy->SetArrayField(TEXT("failures"), PolicyFailureValues);
+	Root->SetObjectField(TEXT("product_policy"), ProductPolicy);
 	Root->SetObjectField(TEXT("warm_input_to_slate_submit_ms"),
 		Distribution(WarmInputToSlateSubmitMs));
 	Root->SetObjectField(TEXT("game_thread_ms"),
@@ -987,6 +1282,14 @@ void FWebToUEBenchmarkRunner::Finish()
 			Failures.Add(MakeShared<FJsonValueString>(TEXT("WebToUE hydrate/display workload missing")));
 		if (!bHasTrajectoryEvidence)
 			Failures.Add(MakeShared<FJsonValueString>(TEXT("trajectory did not mutate target UI")));
+		if (!bSecondViewEvidence)
+			Failures.Add(MakeShared<FJsonValueString>(TEXT("second view evidence unavailable")));
+		if (!bColdAttributionComplete)
+			Failures.Add(MakeShared<FJsonValueString>(TEXT("cold-start attribution incomplete")));
+		for (const FString& Failure : ProductPolicyFailures)
+		{
+			Failures.Add(MakeShared<FJsonValueString>(Failure));
+		}
 		Root->SetArrayField(TEXT("failures"), Failures);
 	}
 
