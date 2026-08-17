@@ -88,6 +88,31 @@ bool FWebToUENativeComponentRegistryTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("An unnamespaced component type is rejected"), InvalidRegistration.IsValid());
 	TestTrue(TEXT("Invalid registration returns an actionable diagnostic"), !Error.IsEmpty());
 
+	InvalidDescriptor.TypeName = TEXT("webtoue.tests.zero-version");
+	InvalidDescriptor.ContractVersion = 0;
+	InvalidRegistration = Registry.Register(
+		InvalidDescriptor, MakeShared<FTestFactory>(), Error);
+	TestFalse(TEXT("A zero contract version is rejected"), InvalidRegistration.IsValid());
+
+	InvalidDescriptor.ContractVersion = 1;
+	InvalidDescriptor.EventPayloadTypes.Add(TEXT("invalid-event"), nullptr);
+	InvalidRegistration = Registry.Register(
+		InvalidDescriptor, MakeShared<FTestFactory>(), Error);
+	TestFalse(TEXT("An event without a payload type is rejected"), InvalidRegistration.IsValid());
+
+	InvalidDescriptor.EventPayloadTypes.Reset();
+	InvalidDescriptor.ResourceSlots.Add({ TEXT("texture"), UObject::StaticClass(), true });
+	InvalidRegistration = Registry.Register(
+		InvalidDescriptor, MakeShared<FTestFactory>(), Error);
+	TestFalse(TEXT("Resource slots require the explicit Resources capability"),
+		InvalidRegistration.IsValid());
+
+	InvalidDescriptor.Capabilities = EWebToUENativeComponentCapability::Resources;
+	InvalidDescriptor.ResourceSlots.Add({ TEXT("texture"), UObject::StaticClass(), false });
+	InvalidRegistration = Registry.Register(
+		InvalidDescriptor, MakeShared<FTestFactory>(), Error);
+	TestFalse(TEXT("Duplicate resource slot names are rejected"), InvalidRegistration.IsValid());
+
 	FWebToUENativeComponentDescriptor Descriptor;
 	Descriptor.TypeName = TEXT("webtoue.tests.native-component");
 	Descriptor.ContractVersion = 1;
@@ -144,6 +169,10 @@ bool FWebToUENativeComponentRegistryTest::RunTest(const FString& Parameters)
 		Registry.Num(), InitialCount);
 	TestFalse(TEXT("The released component type can no longer resolve"),
 		Registry.FindFactory(Descriptor.TypeName).IsValid());
+	Registration = Registry.Register(Descriptor, MakeShared<FTestFactory>(), Error);
+	TestTrue(TEXT("A type can register again after its prior owner releases it"),
+		Registration.IsValid());
+	Registration.Reset();
 	return true;
 }
 
