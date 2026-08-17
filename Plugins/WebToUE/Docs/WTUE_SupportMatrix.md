@@ -2,7 +2,9 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-14，M2.9 closure。
+> 当前基线：2026-08-17，M3.0 Native Component Registry 合同。
+>
+> 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Behavior、UE Material、Native Component 作者声明/Compiler/宿主挂接、正式代码宿主和世界空间能力在各自实现与证据门完成前仍属于未支持。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -81,6 +83,8 @@ Flex：
 
 事件：`data-ue-on-click="EventName"` 广播 `EventName` 和 `ElementId`。
 
+Native Component C++ 边界：Runtime 模块已提供实验性的 `FWebToUENativeComponentRegistry`。注册项必须使用命名空间类型名和非零合同版本，可声明 `UScriptStruct` Props/Event 类型、能力位和带预期 `UClass` 的命名 Resource Slot；Factory/Instance 接口覆盖显式 Slate Widget、Measure、Pointer/Key Input、Focus、Semantic projection、Resource binding 和 Attach/Suspend/Resume/Detach，注册由 Game Thread 上的 move-only RAII token 持有。当前 UI Source 没有 Native Component 声明，Compiler 不生成组件 IR，Runtime Tree/Host 也不会查表或创建实例，因此这只是后续互操作前置合同，不是作者或产品可用能力，且 1.0 外部 API 稳定性尚未承诺。
+
 输入：鼠标移动/点击/滚轮、Tab/Shift+Tab、Enter/Space，以及 Slate `FNavigationEvent` 驱动的手柄 D-pad/空间导航与 Accept。内部 Generation-safe Semantic/Focus Node 接口暴露 Instance Handle、ID、Label、Role、Bounds、Focusable/Enabled/Visible 状态，并支持 request focus/activate；文档换代后旧 Handle 不再解析。焦点移动到被裁剪的后代时会沿现有滚动路径滚入视野；导航越过首尾边界时返回未处理，使外层 CommonUI/Slate 宿主接管。项目启用 CommonUI/CommonInput，但 WebToUE Runtime 不依赖每节点 CommonUI Widget，也不创建每节点 Slate Widget。尚无触摸/惯性、完整文本编辑/IME 和可访问性适配器。
 
 图片：`src` 使用 Unreal 软对象路径，例如 `/Game/UI/T_Logo.T_Logo`；不支持磁盘图片和 HTTP 下载。编译资产生成 Texture/Font/String Table 类型化 Resource Manifest，并按 `(Kind, Path)` 去重；清单数组索引是单个资产修订内的稳定资源 Handle。每个 View 按清单建立强 UObject 槽位：已驻留对象直接解析，未驻留路径在 View 创建/Resource 重建边界批量异步请求，完成后以弱 Slate 引用触发失效；多个 View 共享引擎拥有的 UObject，但不共享 View-owned 请求/句柄数组。Presentation、文本与状态更新只查稳定槽位，生产 Runtime 不调用 `LoadObject` 或 `LoadSynchronous`；解析失败使用无图片 Brush/默认字体并记录失败，重置或销毁 View 取消未完成请求。仅影响 Paint 的 Pseudo State 变化仍只更新受影响目标并保留无关 Brush、Text Cache 与 Paint Order；根字段 text/visible/enabled 绑定不会发起资源请求。网络、磁盘文件、动态 URL、重试/下载策略和资源流送优先级不在当前边界。
@@ -114,6 +118,7 @@ WTUE Document 使用自定义版本 GUID，当前版本 `CssSrgbColors`（7）�
 - 输入框、文本编辑、IME、表单语义。
 - 可见滚动条、基本拖拽、触摸滚动、惯性和虚拟列表。冻结的 MainMenu/HUD/ScrollableSettings 已由自动化审计确认未使用可见滚动条/拖拽/触摸/惯性/水平溢出，因此 M2.8 的对应 `P0.5-if-used` 为有证据的 `N/A`；ScrollableSettings 只使用既有纵向滚轮路径。
 - CommonUI 深度组件/Action Router 集成和无障碍适配器；当前只承诺宿主边界协作与内部语义引用接口。
+- Native Component 的 UI Source 声明、Compiler lowering、Compiled IR、Runtime Tree/Host 实例化和真实专用组件；当前只有实验性 C++ Registry/Factory/Instance 合同。
 - 嵌套属性路径、Converter、双向绑定、类型化事件载荷。
 - 组件、Props、Slots、条件节点、循环和 Keyed Diff。
 - Transition、Keyframes、Transform、阴影、渐变、滤镜和 Mask。

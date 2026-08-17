@@ -8,6 +8,10 @@ WebToUE 将前端式 UI 创作体验转换为游戏引擎原生 UI。本文只�
 作者维护的声明式界面输入，包括结构、样式、资源引用和引擎桥接声明。
 _Avoid_: 网页、Web 页面、运行时页面
 
+**Behavior Source（行为源文件）**:
+作者使用 WTUE 受限 TypeScript 语法维护的界面局部状态、事件编排和动画调度输入；它不是可任意执行的 JavaScript 程序。
+_Avoid_: JavaScript 脚本、游戏逻辑、Runtime JS
+
 **WTUE Web Subset（WTUE Web 子集）**:
 WebToUE 明确承诺支持的前端语义集合；它面向游戏 UI，不等同于浏览器标准兼容层。
 _Avoid_: 完整 HTML、完整 CSS、浏览器兼容
@@ -20,6 +24,14 @@ _Avoid_: Runtime DOM、Slate Tree
 由 UI Source 生成、带版本、可验证并可交付给运行时的不可变界面表示。
 _Avoid_: Runtime DOM、HTML Cache、Widget Blueprint
 
+**Compiled Behavior IR（编译行为 IR）**:
+由 Behavior Source 提前编译、带版本且受预算约束的界面行为表示，由原生运行时按事件执行。
+_Avoid_: JavaScript 字节码、脚本 VM、Gameplay 逻辑
+
+**Typed Mutation（类型化变更）**:
+Behavior、Binding 或宿主提交给 Runtime UI Instance 的原子界面变更意图，目标和值均经过编译期验证。
+_Avoid_: DOM 操作、字符串属性写入、即时树修改
+
 **WTUE Document（WTUE 文档）**:
 保存 Compiled UI IR、资源依赖和必要元数据的可交付界面单元。
 _Avoid_: 网页、DOM Document、HTML 文件
@@ -29,6 +41,14 @@ _Avoid_: 网页、DOM Document、HTML 文件
 **Runtime UI Instance（运行时 UI 实例）**:
 WTUE Document 在一个实际界面视图中的实例，拥有独立的交互、绑定和滚动状态。
 _Avoid_: Runtime Document、网页实例
+
+**UI Surface（UI 表面）**:
+承载 Runtime UI Instance 的目标呈现环境，例如某个 Local Player 的屏幕层或场景中的世界空间表面。
+_Avoid_: 网页窗口、全局 Viewport
+
+**UI Session（UI 会话）**:
+把 Runtime UI Instance 与一个 UI Surface、Local Player、数据与命令合同、环境和生命周期绑定的宿主范围。
+_Avoid_: 全局 UI 状态、Widget Blueprint 实例
 
 **Template Node ID（模板节点 ID）**:
 节点在一个不可变 Compiled UI IR 修订中的稳定位置身份；同一模板节点在不同 Runtime UI Instance 中保持一致，但不作为跨重编译的语义身份。
@@ -61,6 +81,14 @@ _Avoid_: JavaScript Model、全局变量
 **UI Event（UI 事件）**:
 由界面声明触发、交给游戏逻辑处理的语义化交互消息。
 _Avoid_: DOM Event、JavaScript Callback
+
+**UI Command（UI 命令）**:
+UI Session 向游戏代码发出的类型化意图；游戏代码负责权限、异步结果和实际 Gameplay 副作用。
+_Avoid_: 任意 UFUNCTION 调用、字符串回调、客户端权限证明
+
+**Native Component（原生组件）**:
+通过显式注册合同向 UI Source 开放的 UE 原生界面扩展，用于承载 WTUE 核心语义不应自行复制的专用能力。
+_Avoid_: 任意 UObject、隐式 UMG 回退、每节点 Widget
 
 ## 工程边界
 
