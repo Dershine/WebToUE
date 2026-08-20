@@ -3,6 +3,7 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "Templates/Atomic.h"
+#include "WebToUEAsyncWork.h"
 
 namespace WebToUE::Session::Private
 {
@@ -131,7 +132,18 @@ FWebToUESession::FWebToUESession(const FWebToUESessionCreateParams& Params)
 	, Clock(Params.Clock)
 	, FeedbackRouter(Params.FeedbackRouter)
 	, UpdateCoordinator(FWebToUEUpdateCoordinator::Create())
+	, AsyncCoordinator(FWebToUEAsyncCoordinator::Create(
+		FWebToUESessionHandle::Create(SessionId, Generation), Clock.ToSharedRef(),
+		UpdateCoordinator.ToSharedRef()))
 {
+}
+
+FWebToUESession::~FWebToUESession()
+{
+	if (bActive)
+	{
+		Invalidate();
+	}
 }
 
 bool FWebToUESession::IsActive() const
@@ -157,6 +169,7 @@ FWebToUESessionHandle FWebToUESession::AdvanceGeneration()
 	{
 		++Generation;
 	}
+	AsyncCoordinator->AdvanceGeneration(GetHandle());
 	return GetHandle();
 }
 
@@ -167,6 +180,7 @@ void FWebToUESession::Invalidate()
 	{
 		return;
 	}
+	AsyncCoordinator->Shutdown();
 	UpdateCoordinator->Shutdown();
 	bActive = false;
 	++Generation;

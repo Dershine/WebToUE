@@ -7,6 +7,7 @@
 class ULocalPlayer;
 class UObject;
 class UWorld;
+class FWebToUEAsyncCoordinator;
 
 /** Stable identity for one active UI Session generation. */
 struct WEBTOUERUNTIME_API FWebToUESessionHandle
@@ -172,6 +173,7 @@ class WEBTOUERUNTIME_API FWebToUESession final
 public:
 	static TSharedPtr<FWebToUESession> Create(
 		const FWebToUESessionCreateParams& Params, FString& OutError);
+	~FWebToUESession();
 
 	bool IsActive() const;
 	FWebToUESessionHandle GetHandle() const;
@@ -198,6 +200,10 @@ public:
 	{
 		return UpdateCoordinator.ToSharedRef();
 	}
+	TSharedRef<FWebToUEAsyncCoordinator, ESPMode::ThreadSafe> GetAsyncCoordinator() const
+	{
+		return AsyncCoordinator.ToSharedRef();
+	}
 
 private:
 	explicit FWebToUESession(const FWebToUESessionCreateParams& Params);
@@ -214,4 +220,5 @@ private:
 	TSharedPtr<IWebToUEClock> Clock;
 	TSharedPtr<IWebToUEFeedbackRouter> FeedbackRouter;
 	TSharedPtr<FWebToUEUpdateCoordinator, ESPMode::ThreadSafe> UpdateCoordinator;
+	TSharedPtr<FWebToUEAsyncCoordinator, ESPMode::ThreadSafe> AsyncCoordinator;
 };
