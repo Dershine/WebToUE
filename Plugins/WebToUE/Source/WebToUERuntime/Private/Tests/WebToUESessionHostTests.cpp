@@ -20,13 +20,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEScreenHostTest,
 
 namespace WebToUE::SessionHost::Tests
 {
-	class FManualClock final : public IWebToUEClock
-	{
-	public:
-		virtual double GetTimeSeconds() const override { return TimeSeconds; }
-		double TimeSeconds = 12.5;
-	};
-
 	class FRecordingScreenLayer final : public IWebToUEScreenLayer
 	{
 	public:
@@ -104,7 +97,10 @@ namespace WebToUE::SessionHost::Tests
 		Params.Environment.CultureName = TEXT("en-US");
 		Params.Environment.ViewportSize = FVector2f(1280.0f, 720.0f);
 		Params.Environment.DpiScale = 2.0f;
-		Params.Clock = MakeShared<FManualClock>();
+		const TSharedRef<FWebToUEVirtualClock> Clock = MakeShared<FWebToUEVirtualClock>();
+		FString ClockError;
+		Clock->SetTimeSeconds(EWebToUEClockDomain::Test, 12.5, ClockError);
+		Params.Clock = Clock;
 		Params.FeedbackRouter = Router;
 		return Params;
 	}
@@ -130,7 +126,8 @@ bool FWebToUESessionFeedbackTest::RunTest(const FString& Parameters)
 		Session->GetDataContext() == Objects.Data &&
 		Session->GetCommandContext() == Objects.Commands);
 	TestTrue(TEXT("Session binds the injected deterministic Clock"),
-		FMath::IsNearlyEqual(Session->GetClock()->GetTimeSeconds(), 12.5));
+		FMath::IsNearlyEqual(
+			Session->GetClock()->GetTimeSeconds(EWebToUEClockDomain::Test), 12.5));
 
 	FWebToUEFeedbackRequest Request = Session->MakeFeedbackRequest(
 		TEXT("webtoue.tests.confirm"), TEXT("play"), 41,
@@ -254,7 +251,7 @@ bool FWebToUEScreenHostTest::RunTest(const FString& Parameters)
 	Params.DataContext = Objects.Data;
 	Params.CommandContext = Objects.Commands;
 	Params.SurfaceId = TEXT("webtoue.tests.player-screen");
-	Params.Clock = MakeShared<FManualClock>();
+	Params.Clock = MakeShared<FWebToUEVirtualClock>();
 	Params.FeedbackRouter = Recording;
 	Params.ZOrder = 37;
 	FString Error;

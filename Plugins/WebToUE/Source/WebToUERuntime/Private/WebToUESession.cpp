@@ -40,12 +40,6 @@ namespace WebToUE::Session::Private
 	}
 }
 
-double FWebToUEWorldGameClock::GetTimeSeconds() const
-{
-	const UWorld* ResolvedWorld = World.Get();
-	return ResolvedWorld ? static_cast<double>(ResolvedWorld->GetTimeSeconds()) : 0.0;
-}
-
 bool FWebToUEFeedbackRequest::Validate(FString& OutError) const
 {
 	OutError.Reset();
@@ -117,7 +111,7 @@ TSharedPtr<FWebToUESession> FWebToUESession::Create(
 	FWebToUESessionCreateParams Resolved = Params;
 	if (!Resolved.Clock)
 	{
-		Resolved.Clock = MakeShared<FWebToUEWorldGameClock>(Params.World);
+		Resolved.Clock = MakeShared<FWebToUEWorldClock>(Params.World);
 	}
 	if (!Resolved.FeedbackRouter)
 	{

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WebToUEClock.h"
 #include "WebToUEUpdateTransaction.h"
 
 class ULocalPlayer;
@@ -58,24 +59,6 @@ struct WEBTOUERUNTIME_API FWebToUEEnvironmentContext
 	FVector2f ViewportSize = FVector2f::ZeroVector;
 	float DpiScale = 1.0f;
 	bool bReducedMotion = false;
-};
-
-/** Injected time source. Clock domains and timer semantics are frozen by a later M3 route. */
-class WEBTOUERUNTIME_API IWebToUEClock
-{
-public:
-	virtual ~IWebToUEClock() = default;
-	virtual double GetTimeSeconds() const = 0;
-};
-
-class WEBTOUERUNTIME_API FWebToUEWorldGameClock final : public IWebToUEClock
-{
-public:
-	explicit FWebToUEWorldGameClock(UWorld* InWorld) : World(InWorld) {}
-	virtual double GetTimeSeconds() const override;
-
-private:
-	TWeakObjectPtr<UWorld> World;
 };
 
 enum class EWebToUEInputModality : uint8
