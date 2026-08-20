@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、UI Feedback、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-20，M3.8 C++ Data/Command Schema 与 TypeScript 投影边界。
+> 当前基线：2026-08-20，M3.9 Resource provenance/residency/freshness 合同边界。
 >
 > 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Native Component 作者声明/Compiler/Runtime 挂接仍未支持。
 >
@@ -21,6 +21,8 @@
 > 2026-08-20 的 M3.7 已实现 Stable Semantic Identity C++ Policy：Component-scoped Stable Key、Route/keyed-path Component Instance Identity、diagnostic-only Source provenance、same-owner/cross-generation 重导入计划、显式状态保留白名单及 `WTUE-ID-001..004` 诊断。UI Source/Compiler/Compiled UI IR/现有 View 尚未生成或消费这些身份，不能据此宣称状态保留式热重载、Component 或 Keyed Diff 已支持。
 >
 > 2026-08-20 的 M3.8 已实现 C++ Interop Schema Policy：项目 C++ descriptor 是唯一事实源，Core 生成带 Major/Minor 版本的规范 Data/Command snapshot，Editor-only emitter 单向派生确定性 `.d.ts`，并提供 `WTUE-SCHEMA-001..004` 失败门。现有 FieldNotify/View、Command dispatch/payload、Behavior Compiler、MVVM Adapter 与文件 freshness 尚未消费该 snapshot，不能据此宣称类型化作者协议已产品接入。
+>
+> 2026-08-20 的 M3.9 已实现纯 C++ Resource Contract Policy：逻辑 provenance、Document/Route residency assignment、Critical/Visible/Lazy、BLAKE3-256 dependency/manifest seal、Cook freshness stamp、独立 UI/Resource/Behavior/Animation/Interop Schema 版本与 `WTUE-RES-001..005` 失败门。现有 Compiler/Compiled Asset/View/Cook 尚未生成、序列化或消费该合同，不能据此宣称 Route 流送、Material 或 stale-source Cook gate 已产品接入。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -124,9 +126,11 @@ Native Component C++ 边界：Runtime 模块已提供实验性的 `FWebToUENativ
 
 Stable Semantic Identity C++ 边界：`FWebToUESemanticIdentityPolicy` 只以 `(Component Instance Identity, Stable Semantic Key)` 跨 Compiled UI IR 修订匹配节点。Component Instance 由 Route scope、显式 keyed component/list path 与 contract version 标识；provenance 只保存逻辑 source unit/span 并参与诊断，不参与匹配。计划要求同一 Runtime UI Instance Owner、不同 Generation，兼容 Kind/State Contract 后只保留双方显式 `LocalState`/`ScrollIntent`/`FocusIntent` 交集；unkeyed、新增、跨 Component 移动、不兼容和删除均显式重置/退出。旧 Handle、Pointer/Pseudo/Capture、Binding output、Animation、异步工作及 Style/Layout/Paint/Resource cache 不迁移。当前没有 Stable Key/Component 作者声明、Compiler lowering、Compiled IR 字段、真实状态快照/应用或跨重导入 Focus/Scroll 集成；成功重导入仍按现有路径推进 Generation 并重建 View。
 
+Resource Contract C++ 边界：`FWebToUEResourceContractPolicy` 对单个逻辑 Document 验证大小写敏感、非机器绝对路径的 Dependency/Resource/Route/Group ID；provenance 只允许 `/Game`/`/Engine` Unreal Asset、相对 Source 或 `generated:` 输入，并同时指向密封 Source 与 Resource dependency。Dependency 按逻辑 ID/Kind/BLAKE3-256 content hash 规范排序，Compiler fingerprint 与 provenance/residency/version Manifest 分别进入 freshness stamp。空 Route assignment 是 Document fallback；Route 只能把资源提升到同等或更积极的 `Critical`/`Visible`/`Lazy` 等级，不能降级。UI/Resource IR 必须存在，Behavior/Animation/Interop Schema 可显式 `0.0` 缺席；Runtime 只接受相同 Major 且 producer Minor 不高于 consumer 的层。Cook freshness 要求当前 expected 与资产 stamp 完全一致，任一依赖/Compiler/Manifest/version 漂移以 `WTUE-RES-004` 失败。当前 Policy 不读文件、不加载资源、不写资产；Importer 尚未生成真实 snapshot，资产版本 7 未序列化 stamp，View 仍批量请求完整 Manifest，Cook/CI 也未调用 freshness 比较。
+
 输入：鼠标移动/点击/滚轮、Tab/Shift+Tab、Enter/Space，以及 Slate `FNavigationEvent` 驱动的手柄 D-pad/空间导航与 Accept。hover/pressed/capture 以稀疏 `(SlateUserIndex, PointerIndex)` 记录，focus 以 Slate User 记录；聚合引用计数使共享节点的 `:hover`/`:active`/`:focus` 在最后一个拥有者离开时才清除，错误 Pointer release 不影响其他身份。Slate capture lost 只清理匹配身份并派发不可取消事件。内部 Generation-safe Semantic/Focus Node 接口暴露 Instance Handle、ID、Label、Role、Bounds、Focusable/Enabled/Visible 状态，并支持 per-user request focus/activate；文档换代后旧 Handle 不再解析。焦点移动到被裁剪的后代时会沿现有滚动路径滚入视野；导航越过首尾边界时返回未处理，使外层 CommonUI/Slate 宿主接管。项目启用 CommonUI/CommonInput，但 WebToUE Runtime 不依赖每节点 CommonUI Widget，也不创建每节点 Slate Widget。尚无触摸/惯性、完整文本编辑/IME 和可访问性适配器；真实双 LocalPlayer/CommonUI Modal 与 Packaged 多指针未验证。
 
-图片：`src` 使用 Unreal 软对象路径，例如 `/Game/UI/T_Logo.T_Logo`；不支持磁盘图片和 HTTP 下载。编译资产生成 Texture/Font/String Table 类型化 Resource Manifest，并按 `(Kind, Path)` 去重；清单数组索引是单个资产修订内的稳定资源 Handle。每个 View 按清单建立强 UObject 槽位：已驻留对象直接解析，未驻留路径在 View 创建/Resource 重建边界批量异步请求，完成后以弱 Slate 引用触发失效；多个 View 共享引擎拥有的 UObject，但不共享 View-owned 请求/句柄数组。Presentation、文本与状态更新只查稳定槽位，生产 Runtime 不调用 `LoadObject` 或 `LoadSynchronous`；解析失败使用无图片 Brush/默认字体并记录失败，重置或销毁 View 取消未完成请求。仅影响 Paint 的 Pseudo State 变化仍只更新受影响目标并保留无关 Brush、Text Cache 与 Paint Order；根字段 text/visible/enabled 绑定不会发起资源请求。网络、磁盘文件、动态 URL、重试/下载策略和资源流送优先级不在当前边界。
+图片：`src` 使用 Unreal 软对象路径，例如 `/Game/UI/T_Logo.T_Logo`；不支持磁盘图片和 HTTP 下载。编译资产生成 Texture/Font/String Table 类型化 Resource Manifest，并按 `(Kind, Path)` 去重；清单数组索引是单个资产修订内的稳定资源 Handle。每个 View 按清单建立强 UObject 槽位：已驻留对象直接解析，未驻留路径在 View 创建/Resource 重建边界批量异步请求，完成后以弱 Slate 引用触发失效；多个 View 共享引擎拥有的 UObject，但不共享 View-owned 请求/句柄数组。Presentation、文本与状态更新只查稳定槽位，生产 Runtime 不调用 `LoadObject` 或 `LoadSynchronous`；解析失败使用无图片 Brush/默认字体并记录失败，重置或销毁 View 取消未完成请求。仅影响 Paint 的 Pseudo State 变化仍只更新受影响目标并保留无关 Brush、Text Cache 与 Paint Order；根字段 text/visible/enabled 绑定不会发起资源请求。M3.9 已冻结资源流送优先级与 freshness 的 C++ 合同，但现有图片 Compiler/View 不消费它；网络、磁盘文件、动态 URL、重试/下载策略、Route 分组加载与实际释放仍未支持。
 
 Runtime 绘制与命中：
 

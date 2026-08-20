@@ -267,3 +267,4 @@ This project-specific section lives outside the generated VibeUE block and overr
 - Standalone text-measurement test helpers construct unregistered nodes; keep them on explicit transient layout caches instead of routing them through Instance Handle-keyed production caches.
 - `RunUAT.bat` can leave its PowerShell host at exit code 0 after AutomationTool logs a nonzero exit; lifecycle release gates must parse the final `AutomationTool exiting with ExitCode=N` marker and prefer it over the host code.
 - In the current UE 5.8 Python binding, `ToolsetRegistry.get_toolset_json_schema` requires a ToolsetDefinition class even though older examples pass a string; use MCP `describe_toolset` for an exact schema instead of repeating the string call.
+- UE 5.8 Windows has no implementation behind `FPlatformMisc::GetSHA256Signature` and asserts when called; use Core `FBlake3` for deterministic 256-bit content hashes.
