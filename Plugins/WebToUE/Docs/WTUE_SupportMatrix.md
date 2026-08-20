@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、UI Feedback、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-20，M3.5 属性所有权、仲裁与冲突诊断。
+> 当前基线：2026-08-20，M3.6 多树、Portal 与 Focus Restore 边界。
 >
 > 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Native Component 作者声明/Compiler/Runtime 挂接仍未支持。
 >
@@ -15,6 +15,8 @@
 > 2026-08-20 的 M3.4 已实现 Game/Unscaled/Real/Test Clock、Virtual Clock、无默认 Tick 的一次性 Timer、异步 Command Result/Timeout/Cancel、worker MPSC、Generation/View/World cleanup 与有界 Trace；这只是 C++ Runtime 前置，不等于类型化 Command Schema、Behavior 或 Animation 已支持。
 >
 > 2026-08-20 的 M3.5 已实现 Core Property Ownership Policy：canonical Node/CSS/Transform/typed Material Parameter 地址、CSS/Pseudo baseline、唯一 Binding/Behavior durable owner、active-only Animation overlay、visibility/enabled restrictive gate 与稳定 `WTUE-OWN-001..003` 诊断。现有 Binding/CSS/Pseudo 集成已验证；Behavior、Animation Track、Material/MID 与其作者语法仍未支持。
+>
+> 2026-08-20 的 M3.6 已实现 Runtime Tree Projection Policy：Component/Logical durable ownership、Layout/Paint/Semantic projection、同 Session/Surface Overlay Anchor、Portal cycle/order/Modal scope 与同代 Focus Restore，并提供 `WTUE-TREE-001..005` 诊断。UI Source/Compiler/现有 `SWebToUEView` 尚未创建真实 Portal，不能据此宣称 Overlay/Modal 产品能力已支持。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -112,6 +114,8 @@ UI Session / Screen Host：Runtime 已提供 `FWebToUESession` 与代码化 `FWe
 
 Native Component C++ 边界：Runtime 模块已提供实验性的 `FWebToUENativeComponentRegistry`。注册项必须使用命名空间类型名和非零合同版本，可声明 `UScriptStruct` Props/Event 类型、能力位和带预期 `UClass` 的命名 Resource Slot；Factory/Instance 接口覆盖显式 Slate Widget、Measure、Pointer/Key Input、Focus、Semantic projection、Resource binding 和 Attach/Suspend/Resume/Detach，注册由 Game Thread 上的 move-only RAII token 持有。当前 UI Source 没有 Native Component 声明，Compiler 不生成组件 IR，Runtime Tree/Host 也不会查表或创建实例，因此这只是后续互操作前置合同，不是作者或产品可用能力，且 1.0 外部 API 稳定性尚未承诺。
 
+多树/Portal C++ 边界：`FWebToUETreeProjectionPolicy` 在一个 Session/Surface 和 Runtime UI Instance generation 内分别记录 Component/Logical、Layout、Paint 与 Semantic parent。普通节点可在 Layout/Paint/Semantic projection 中 flatten 非参与 wrapper；Portal root 保留 Component/Logical owner，挂载时成为独立 Layout root，并只把 Paint 或显式 Modal Semantic parent 投影到同 Session/Surface 的 Overlay Anchor。Overlay 顺序由 `OverlayOrder + Instance slot` 决定，跨 Surface/Generation、未知 Anchor、重复挂载和 cycle 均拒绝。最高 Modal 使背景/较低 Modal 的 focus scope inert；关闭后只沿打开前捕获的同代 Logical Semantic candidate chain 恢复焦点，旧 Handle 不通过 id/key 猜测。该 Policy 尚未被 UI Source、Compiler 或现有 Yoga/Display List/Semantic Focus 产品路径消费，真实 Anchor geometry、Clip/Transform/Hit、Portal 输入与视觉/性能仍未实现。
+
 输入：鼠标移动/点击/滚轮、Tab/Shift+Tab、Enter/Space，以及 Slate `FNavigationEvent` 驱动的手柄 D-pad/空间导航与 Accept。hover/pressed/capture 以稀疏 `(SlateUserIndex, PointerIndex)` 记录，focus 以 Slate User 记录；聚合引用计数使共享节点的 `:hover`/`:active`/`:focus` 在最后一个拥有者离开时才清除，错误 Pointer release 不影响其他身份。Slate capture lost 只清理匹配身份并派发不可取消事件。内部 Generation-safe Semantic/Focus Node 接口暴露 Instance Handle、ID、Label、Role、Bounds、Focusable/Enabled/Visible 状态，并支持 per-user request focus/activate；文档换代后旧 Handle 不再解析。焦点移动到被裁剪的后代时会沿现有滚动路径滚入视野；导航越过首尾边界时返回未处理，使外层 CommonUI/Slate 宿主接管。项目启用 CommonUI/CommonInput，但 WebToUE Runtime 不依赖每节点 CommonUI Widget，也不创建每节点 Slate Widget。尚无触摸/惯性、完整文本编辑/IME 和可访问性适配器；真实双 LocalPlayer/CommonUI Modal 与 Packaged 多指针未验证。
 
 图片：`src` 使用 Unreal 软对象路径，例如 `/Game/UI/T_Logo.T_Logo`；不支持磁盘图片和 HTTP 下载。编译资产生成 Texture/Font/String Table 类型化 Resource Manifest，并按 `(Kind, Path)` 去重；清单数组索引是单个资产修订内的稳定资源 Handle。每个 View 按清单建立强 UObject 槽位：已驻留对象直接解析，未驻留路径在 View 创建/Resource 重建边界批量异步请求，完成后以弱 Slate 引用触发失效；多个 View 共享引擎拥有的 UObject，但不共享 View-owned 请求/句柄数组。Presentation、文本与状态更新只查稳定槽位，生产 Runtime 不调用 `LoadObject` 或 `LoadSynchronous`；解析失败使用无图片 Brush/默认字体并记录失败，重置或销毁 View 取消未完成请求。仅影响 Paint 的 Pseudo State 变化仍只更新受影响目标并保留无关 Brush、Text Cache 与 Paint Order；根字段 text/visible/enabled 绑定不会发起资源请求。网络、磁盘文件、动态 URL、重试/下载策略和资源流送优先级不在当前边界。
@@ -136,6 +140,7 @@ Runtime 绘制与命中：
 - 不支持的 at-rule、选择器、属性和值。
 - 外链、内联样式的实际文件、行和列。
 - 属性所有权的 invalid/untyped target（`WTUE-OWN-001`）、writer 不允许（`WTUE-OWN-002`）与 Binding/Behavior durable owner 冲突（`WTUE-OWN-003`）；后两类未来作者语法接入前主要由 C++ Policy/Automation 使用。
+- 树投影的无效/跨代节点域（`WTUE-TREE-001`）、父链/注册顺序（`WTUE-TREE-002`）、Anchor Session/Surface/父投影（`WTUE-TREE-003`）、Portal 挂载/cycle/Modal（`WTUE-TREE-004`）与 Focus Restore token/候选链（`WTUE-TREE-005`）；当前主要由 C++ Policy/Automation 使用。
 
 第一次导入错误不会产生有效运行数据；已有资产重导入失败（包括 UI Source 缺失）保留上次成功运行数据并更新诊断。自动化覆盖 HTML/CSS 依赖、成功重导入的 Generation 推进和旧 Handle 失效、失败时 last-good 保留、随后恢复，以及恢复前后 FieldNotify 绑定连续性。
 
@@ -149,6 +154,7 @@ WTUE Document 使用自定义版本 GUID，当前版本 `CssSrgbColors`（7）�
 - UI Feedback Cue 的作者声明/语义默认、Compiled UI/Behavior Op、事件到 Cue 的自动映射、Profile、Sound/MetaSound 资源、预取/Cook、限频/去重、Inspector Trace 和真实播放证据；基础 Request、Router 注入、Screen Scope、Generation 拒绝与通用 C++ Post-Commit Effect 已支持。
 - World Surface Host、WidgetComponent/RT、3D Feedback Scope、世界输入与独立性能门；当前冻结 Corpus 的裁决是有证据的 `N/A`，不是产品支持。
 - Native Component 的 UI Source 声明、Compiler lowering、Compiled IR、Runtime Tree/Host 实例化和真实专用组件；当前只有实验性 C++ Registry/Factory/Instance 合同。
+- Portal/Overlay/Anchor 的 UI Source 声明、Compiler lowering、Compiled IR、现有 Runtime Tree/Yoga/Display List/Semantic Focus 挂载、真实 Anchor geometry/Clip/Transform/Hit、视觉/输入/性能与 Packaged 证据；当前只有多树投影与 Focus Restore C++ Policy。
 - 嵌套属性路径、Converter、双向绑定、类型化事件载荷。
 - 组件、Props、Slots、条件节点、循环和 Keyed Diff。
 - Transition、Keyframes、Transform、阴影、渐变、滤镜和 Mask。
