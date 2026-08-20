@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WebToUEEvents.h"
 #include "WebToUERuntimeInstance.h"
 #include "WebToUESemantics.h"
 #include "WebToUEStyleProperties.h"
@@ -32,6 +33,12 @@ public:
 	FWebToUEInstanceHandle GetFocusedSemanticNode() const;
 	bool RequestSemanticFocus(FWebToUEInstanceHandle Handle);
 	bool ActivateSemanticNode(FWebToUEInstanceHandle Handle);
+	FWebToUEEventListenerHandle AddEventListener(
+		FWebToUEInstanceHandle Target,
+		EWebToUERuntimeEventType Type,
+		EWebToUERuntimeEventPhase Phase,
+		FWebToUEEventListener&& Listener);
+	bool RemoveEventListener(FWebToUEEventListenerHandle Handle);
 
 	virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override;
 	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
@@ -66,6 +73,22 @@ public:
 	FWebToUENode* AddDynamicTextNodeForTesting(FWebToUENode& Parent);
 	void SetHoveredNodeForTesting(FWebToUENode* Node) { SetHoveredNode(Node); }
 	void SetFocusedNodeForTesting(FWebToUENode* Node) { SetFocusedNode(Node); }
+	void DispatchClickForTesting(
+		FWebToUENode& Node,
+		FWebToUEInteractionIdentity Interaction = FWebToUEInteractionIdentity::Pointer(0, 0),
+		EWebToUEInputModality InputModality = EWebToUEInputModality::Pointer)
+	{
+		DispatchClick(Node, Interaction, InputModality);
+	}
+	void SetDefaultEventObserverForTesting(
+		TFunction<void(const FWebToUEEventPathSnapshot&)> Observer)
+	{
+		DefaultEventObserverForTesting = MoveTemp(Observer);
+	}
+	EWebToUEEventDispatchResult GetLastEventDispatchResultForTesting() const
+	{
+		return LastEventDispatchResult;
+	}
 	void SetBoundTextForTesting(FWebToUENode& Node, const FText& Text);
 	bool ApplyBoundTextChangeForTesting(FWebToUENode& Node, const FText& Text, bool bRichText);
 	FVector2f PrepareTextLayoutForTesting(const FWebToUENode& Node,
@@ -113,6 +136,24 @@ private:
 	TUniquePtr<FWebToUERuntimePresentation> Presentation;
 	TSet<FString> LoggedBindingErrors;
 	FString LastPseudoInvalidationReport;
+	TSharedPtr<FWebToUEUpdateCoordinator, ESPMode::ThreadSafe> StandaloneUpdateCoordinator;
+
+	struct FRegisteredEventListener
+	{
+		uint64 Id = 0;
+		FWebToUEInstanceHandle Target;
+		EWebToUERuntimeEventType Type = EWebToUERuntimeEventType::Click;
+		EWebToUERuntimeEventPhase Phase = EWebToUERuntimeEventPhase::Target;
+		FWebToUEEventListener Callback;
+	};
+	TArray<FRegisteredEventListener> EventListeners;
+	uint64 NextEventListenerId = 1;
+	uint64 NextEventCorrelationId = 1;
+	EWebToUEEventDispatchResult LastEventDispatchResult =
+		EWebToUEEventDispatchResult::DroppedInvalidPath;
+#if WITH_DEV_AUTOMATION_TESTS
+	TFunction<void(const FWebToUEEventPathSnapshot&)> DefaultEventObserverForTesting;
+#endif
 
 	FWebToUEDocument* GetRuntimeDocument();
 	const FWebToUEDocument* GetRuntimeDocument() const;
@@ -137,9 +178,26 @@ private:
 		EWebToUEPseudoState Flag, TArray<FWebToUEInstanceHandle>& OutTargets) const;
 	bool MoveFocusSequential(int32 Direction, bool bWrap);
 	bool MoveFocusSpatial(EUINavigation Direction);
-	void ActivateFocusedNode();
+	void ActivateFocusedNode(
+		FWebToUEInteractionIdentity Interaction = FWebToUEInteractionIdentity::NonPointer(0),
+		EWebToUEInputModality InputModality = EWebToUEInputModality::Unknown);
 	bool IsSemanticFocusable(const FWebToUENode& Node) const;
 	FText BuildSemanticLabel(const FWebToUENode& Node) const;
-	void DispatchClick(FWebToUENode& Node) const;
+	FWebToUEEventPathSnapshot BuildEventPathSnapshot(
+		FWebToUENode& Target,
+		EWebToUERuntimeEventType Type,
+		FWebToUEInteractionIdentity Interaction,
+		EWebToUEInputModality InputModality,
+		bool bBubbles,
+		bool bCancelable);
+	bool IsEventPathCurrent(const FWebToUEEventPathSnapshot& Snapshot) const;
+	EWebToUEEventDispatchResult EvaluateEvent(
+		const FWebToUEEventPathSnapshot& Snapshot,
+		FWebToUEUpdateTransaction& Transaction,
+		TUniqueFunction<void()>&& DefaultAction);
+	void DispatchClick(
+		FWebToUENode& Node,
+		FWebToUEInteractionIdentity Interaction = FWebToUEInteractionIdentity::NonPointer(0),
+		EWebToUEInputModality InputModality = EWebToUEInputModality::Unknown);
 	void ReportBindingErrorOnce(const FString& Field, const FString& Message);
 };

@@ -3,6 +3,7 @@
 #include "WebToUECompiler.h"
 #include "WebToUEDocument.h"
 #include "WebToUEPerformance.h"
+#include "WebToUESession.h"
 #include "WebToUEView.h"
 #include "WebToUERuntimeInstance.h"
 #include "WebToUERuntimePresentation.h"
@@ -12,18 +13,26 @@
 #include "Framework/Application/SlateApplication.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "UObject/UnrealType.h"
+#include "Algo/Reverse.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWebToUE, Log, All);
 
 SWebToUEView::SWebToUEView() = default;
 
-SWebToUEView::~SWebToUEView() = default;
+SWebToUEView::~SWebToUEView()
+{
+	if (StandaloneUpdateCoordinator && StandaloneUpdateCoordinator->IsActive())
+	{
+		StandaloneUpdateCoordinator->Shutdown();
+	}
+}
 
 void SWebToUEView::Construct(const FArguments& InArgs)
 {
 	Owner = InArgs._Owner;
 	RuntimeInstance = MakeUnique<FWebToUERuntimeInstance>();
 	Presentation = MakeUnique<FWebToUERuntimePresentation>(*this, *RuntimeInstance);
+	StandaloneUpdateCoordinator = FWebToUEUpdateCoordinator::Create();
 	SetCanTick(false);
 }
 
@@ -977,6 +986,44 @@ bool SWebToUEView::ActivateSemanticNode(FWebToUEInstanceHandle Handle)
 	return true;
 }
 
+FWebToUEEventListenerHandle SWebToUEView::AddEventListener(
+	FWebToUEInstanceHandle Target,
+	EWebToUERuntimeEventType Type,
+	EWebToUERuntimeEventPhase Phase,
+	FWebToUEEventListener&& Listener)
+{
+	check(IsInGameThread());
+	if (!RuntimeInstance->ResolveNode(Target) || !Listener)
+	{
+		return FWebToUEEventListenerHandle();
+	}
+	uint64 ListenerId = NextEventListenerId++;
+	if (ListenerId == 0)
+	{
+		ListenerId = NextEventListenerId++;
+	}
+	FRegisteredEventListener& Entry = EventListeners.AddDefaulted_GetRef();
+	Entry.Id = ListenerId;
+	Entry.Target = Target;
+	Entry.Type = Type;
+	Entry.Phase = Phase;
+	Entry.Callback = MoveTemp(Listener);
+	return FWebToUEEventListenerHandle(ListenerId);
+}
+
+bool SWebToUEView::RemoveEventListener(FWebToUEEventListenerHandle Handle)
+{
+	check(IsInGameThread());
+	if (!Handle.IsValid())
+	{
+		return false;
+	}
+	return EventListeners.RemoveAll([Handle](const FRegisteredEventListener& Entry)
+	{
+		return Entry.Id == Handle.GetValue();
+	}) == 1;
+}
+
 FReply SWebToUEView::OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
 {
 	SetHoveredNode(HitTest(FVector2f(MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()))));
@@ -1006,7 +1053,14 @@ FReply SWebToUEView::OnMouseButtonUp(const FGeometry& MyGeometry, const FPointer
 	FWebToUENode* Released = PressedNode;
 	const bool bActivate = HitTest(FVector2f(MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()))) == Released;
 	SetPressedNode(nullptr);
-	if (bActivate) DispatchClick(*Released);
+	if (bActivate)
+	{
+		DispatchClick(*Released,
+			FWebToUEInteractionIdentity::Pointer(
+				MouseEvent.GetUserIndex(), MouseEvent.GetPointerIndex()),
+			MouseEvent.IsTouchEvent()
+				? EWebToUEInputModality::Touch : EWebToUEInputModality::Pointer);
+	}
 	return FReply::Handled().ReleaseMouseCapture();
 }
 
@@ -1113,10 +1167,15 @@ bool SWebToUEView::MoveFocusSpatial(EUINavigation Direction)
 	return Best && RequestSemanticFocus(RuntimeInstance->GetHandle(Best));
 }
 
-void SWebToUEView::ActivateFocusedNode()
+void SWebToUEView::ActivateFocusedNode(
+	FWebToUEInteractionIdentity Interaction,
+	EWebToUEInputModality InputModality)
 {
 	FWebToUENode* FocusedNode = RuntimeInstance->GetFocusedNode();
-	if (FocusedNode && GetComputedStyle(*FocusedNode).bEnabled) DispatchClick(*FocusedNode);
+	if (FocusedNode && GetComputedStyle(*FocusedNode).bEnabled)
+	{
+		DispatchClick(*FocusedNode, Interaction, InputModality);
+	}
 }
 
 FReply SWebToUEView::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& KeyEvent)
@@ -1135,7 +1194,10 @@ FReply SWebToUEView::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& Key
 				EUINavigationAction::Accept);
 	if (bAccept)
 	{
-		ActivateFocusedNode();
+		ActivateFocusedNode(
+			FWebToUEInteractionIdentity::NonPointer(KeyEvent.GetUserIndex()),
+			Key.IsGamepadKey()
+				? EWebToUEInputModality::Gamepad : EWebToUEInputModality::Keyboard);
 		return FReply::Handled();
 	}
 	return FReply::Unhandled();
@@ -1166,11 +1228,258 @@ void SWebToUEView::OnFocusLost(const FFocusEvent& InFocusEvent)
 	SLeafWidget::OnFocusLost(InFocusEvent);
 }
 
-void SWebToUEView::DispatchClick(FWebToUENode& Node) const
+FWebToUEEventPathSnapshot SWebToUEView::BuildEventPathSnapshot(
+	FWebToUENode& Target,
+	EWebToUERuntimeEventType Type,
+	FWebToUEInteractionIdentity Interaction,
+	EWebToUEInputModality InputModality,
+	bool bBubbles,
+	bool bCancelable)
 {
-	const FString Event = Node.GetAttribute(TEXT("data-ue-on-click"));
-	if (!Event.IsEmpty())
+	FWebToUEEventPathSnapshot Snapshot;
+	Snapshot.Type = Type;
+	Snapshot.Interaction = Interaction;
+	Snapshot.InputModality = InputModality;
+	Snapshot.bBubbles = bBubbles;
+	Snapshot.bCancelable = bCancelable;
+	Snapshot.CorrelationId = NextEventCorrelationId++;
+	if (Snapshot.CorrelationId == 0)
 	{
-		if (UWebToUEView* View = Owner.Get()) View->HandleRuntimeEvent(FName(*Event), FName(*Node.GetAttribute(TEXT("id"))));
+		Snapshot.CorrelationId = NextEventCorrelationId++;
+	}
+	if (const UWebToUEView* View = Owner.Get())
+	{
+		if (const TSharedPtr<FWebToUESession> Session = View->GetSession())
+		{
+			Snapshot.Session = Session->GetHandle();
+		}
+	}
+	for (FWebToUENode* Current = &Target; Current; Current = Current->Parent)
+	{
+		const FWebToUEInstanceHandle Handle = RuntimeInstance->GetHandle(Current);
+		if (!Handle.IsValid())
+		{
+			Snapshot.RootToTarget.Reset();
+			return Snapshot;
+		}
+		Snapshot.RootToTarget.Add(Handle);
+	}
+	Algo::Reverse(Snapshot.RootToTarget);
+	return Snapshot;
+}
+
+bool SWebToUEView::IsEventPathCurrent(
+	const FWebToUEEventPathSnapshot& Snapshot) const
+{
+	if (!Snapshot.IsValid())
+	{
+		return false;
+	}
+	if (Snapshot.Session.IsValid())
+	{
+		const UWebToUEView* View = Owner.Get();
+		const TSharedPtr<FWebToUESession> Session = View ? View->GetSession() : nullptr;
+		if (!Session || !Session->IsActive() || Session->GetHandle() != Snapshot.Session)
+		{
+			return false;
+		}
+	}
+	FWebToUENode* Previous = nullptr;
+	for (const FWebToUEInstanceHandle Handle : Snapshot.RootToTarget)
+	{
+		FWebToUENode* Current = RuntimeInstance->ResolveNode(Handle);
+		if (!Current || Current->Parent != Previous)
+		{
+			return false;
+		}
+		Previous = Current;
+	}
+	return true;
+}
+
+EWebToUEEventDispatchResult SWebToUEView::EvaluateEvent(
+	const FWebToUEEventPathSnapshot& Snapshot,
+	FWebToUEUpdateTransaction& Transaction,
+	TUniqueFunction<void()>&& DefaultAction)
+{
+	if (!Snapshot.IsValid())
+	{
+		Transaction.Reject(TEXT("The Runtime event path snapshot is invalid."));
+		return EWebToUEEventDispatchResult::DroppedInvalidPath;
+	}
+	if (!IsEventPathCurrent(Snapshot))
+	{
+		Transaction.Reject(TEXT("The Runtime event path became stale before evaluation."));
+		return EWebToUEEventDispatchResult::DroppedStalePath;
+	}
+
+	FWebToUERuntimeEvent Event(Snapshot);
+	const auto DispatchCurrent = [this, &Snapshot, &Transaction, &Event](
+		FWebToUEInstanceHandle CurrentTarget, EWebToUERuntimeEventPhase Phase)
+	{
+		if (!IsEventPathCurrent(Snapshot))
+		{
+			Transaction.Reject(TEXT("The Runtime event path became stale during propagation."));
+			return false;
+		}
+		Event.BeginCurrentTarget(CurrentTarget, Phase);
+		TArray<uint64, TInlineAllocator<4>> ListenerIds;
+		for (const FRegisteredEventListener& Entry : EventListeners)
+		{
+			if (Entry.Target == CurrentTarget && Entry.Type == Snapshot.Type &&
+				Entry.Phase == Phase)
+			{
+				ListenerIds.Add(Entry.Id);
+			}
+		}
+		for (const uint64 ListenerId : ListenerIds)
+		{
+			FRegisteredEventListener* Entry = EventListeners.FindByPredicate(
+				[ListenerId](const FRegisteredEventListener& Candidate)
+				{
+					return Candidate.Id == ListenerId;
+				});
+			FWebToUEEventListener Callback = Entry ? Entry->Callback : FWebToUEEventListener();
+			if (Callback)
+			{
+				Callback(Event, Transaction);
+			}
+			if (Transaction.IsRejected())
+			{
+				return false;
+			}
+			if (!IsEventPathCurrent(Snapshot))
+			{
+				Transaction.Reject(TEXT("The Runtime event path became stale during propagation."));
+				return false;
+			}
+			if (Event.IsImmediatePropagationStopped())
+			{
+				break;
+			}
+		}
+		return true;
+	};
+
+	for (int32 Index = 0; Index + 1 < Snapshot.RootToTarget.Num(); ++Index)
+	{
+		if (!DispatchCurrent(
+			Snapshot.RootToTarget[Index], EWebToUERuntimeEventPhase::Capture))
+		{
+			return IsEventPathCurrent(Snapshot)
+				? EWebToUEEventDispatchResult::RejectedTransaction
+				: EWebToUEEventDispatchResult::DroppedStalePath;
+		}
+		if (Event.IsPropagationStopped())
+		{
+			break;
+		}
+	}
+
+	if (!Event.IsPropagationStopped() && !DispatchCurrent(
+		Snapshot.GetTarget(), EWebToUERuntimeEventPhase::Target))
+	{
+		return IsEventPathCurrent(Snapshot)
+			? EWebToUEEventDispatchResult::RejectedTransaction
+			: EWebToUEEventDispatchResult::DroppedStalePath;
+	}
+	if (!Event.IsPropagationStopped() && Snapshot.bBubbles)
+	{
+		for (int32 Index = Snapshot.RootToTarget.Num() - 2; Index >= 0; --Index)
+		{
+			if (!DispatchCurrent(
+				Snapshot.RootToTarget[Index], EWebToUERuntimeEventPhase::Bubble))
+			{
+				return IsEventPathCurrent(Snapshot)
+					? EWebToUEEventDispatchResult::RejectedTransaction
+					: EWebToUEEventDispatchResult::DroppedStalePath;
+			}
+			if (Event.IsPropagationStopped())
+			{
+				break;
+			}
+		}
+	}
+	if (!IsEventPathCurrent(Snapshot))
+	{
+		Transaction.Reject(TEXT("The Runtime event path became stale before its default action."));
+		return EWebToUEEventDispatchResult::DroppedStalePath;
+	}
+	if (Event.IsDefaultPrevented())
+	{
+		return EWebToUEEventDispatchResult::DefaultPrevented;
+	}
+	if (DefaultAction && !Transaction.AddPostCommitEffect(MoveTemp(DefaultAction)))
+	{
+		return EWebToUEEventDispatchResult::RejectedTransaction;
+	}
+	return EWebToUEEventDispatchResult::Dispatched;
+}
+
+void SWebToUEView::DispatchClick(
+	FWebToUENode& Node,
+	FWebToUEInteractionIdentity Interaction,
+	EWebToUEInputModality InputModality)
+{
+	check(IsInGameThread());
+	const FWebToUEEventPathSnapshot Snapshot = BuildEventPathSnapshot(
+		Node, EWebToUERuntimeEventType::Click, Interaction, InputModality, true, true);
+	const FName EventName(*Node.GetAttribute(TEXT("data-ue-on-click")));
+	const FName ElementId(*Node.GetAttribute(TEXT("id")));
+	TWeakObjectPtr<UWebToUEView> WeakOwner = Owner;
+	TWeakPtr<SWebToUEView> WeakThis = StaticCastSharedRef<SWebToUEView>(AsShared());
+	TUniqueFunction<void()> DefaultAction =
+		[WeakOwner, WeakThis, Snapshot, EventName, ElementId]()
+		{
+			if (const TSharedPtr<SWebToUEView> View = WeakThis.Pin())
+			{
+#if WITH_DEV_AUTOMATION_TESTS
+				if (View->DefaultEventObserverForTesting)
+				{
+					View->DefaultEventObserverForTesting(Snapshot);
+				}
+#endif
+			}
+			if (!EventName.IsNone())
+			{
+				if (UWebToUEView* View = WeakOwner.Get())
+				{
+					View->HandleRuntimeEvent(EventName, ElementId);
+				}
+			}
+		};
+
+	TSharedPtr<FWebToUEUpdateCoordinator, ESPMode::ThreadSafe> Coordinator =
+		StandaloneUpdateCoordinator;
+	if (UWebToUEView* View = Owner.Get())
+	{
+		if (const TSharedPtr<FWebToUESession> Session = View->GetSession();
+			Session && Session->IsActive())
+		{
+			Coordinator = Session->GetUpdateCoordinator();
+		}
+	}
+	if (!Coordinator || !Coordinator->IsActive())
+	{
+		LastEventDispatchResult = EWebToUEEventDispatchResult::RejectedInactive;
+		return;
+	}
+	const EWebToUEUpdateSubmitResult SubmitResult = Coordinator->Submit(
+		[WeakThis, Snapshot, DefaultAction = MoveTemp(DefaultAction)](
+			FWebToUEUpdateTransaction& Transaction) mutable
+		{
+			if (const TSharedPtr<SWebToUEView> View = WeakThis.Pin())
+			{
+				View->LastEventDispatchResult = View->EvaluateEvent(
+					Snapshot, Transaction, MoveTemp(DefaultAction));
+			}
+			else
+			{
+				Transaction.Reject(TEXT("The Runtime View was destroyed before event evaluation."));
+			}
+		});
+	if (SubmitResult == EWebToUEUpdateSubmitResult::RejectedInactive)
+	{
+		LastEventDispatchResult = EWebToUEEventDispatchResult::RejectedInactive;
 	}
 }
