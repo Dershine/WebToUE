@@ -318,7 +318,15 @@ bool FWebToUEResourceTextureSmokeContractTest::RunTest(const FString& Parameters
 	View->SetDocument(Document);
 	const TSharedRef<SWidget> Widget = View->TakeWidget();
 	Widget->SlatePrepass(1.0f);
-	View->LayoutForTesting(FVector2f(1280.0f, 720.0f));
+	FHittestGrid HittestGrid;
+	FSlateWindowElementList DrawElements(nullptr);
+	const FGeometry Geometry = FGeometry::MakeRoot(
+		FVector2D(1280.0, 720.0), FSlateLayoutTransform());
+	const FPaintArgs PaintArgs(
+		nullptr, HittestGrid, FVector2D::ZeroVector, 0.0, 0.0f);
+	Widget->Paint(PaintArgs, Geometry,
+		FSlateRect(0.0f, 0.0f, 1280.0f, 720.0f), DrawElements, 0,
+		FWidgetStyle(), true);
 	const FWebToUEPerformanceSnapshot Workload = Capture.GetSnapshot();
 	FWebToUENode* RuntimeImage =
 		View->FindRuntimeNodeByIdForTesting(TEXT("engine-texture"));

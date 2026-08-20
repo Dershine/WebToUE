@@ -18,6 +18,7 @@
 #include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformMemory.h"
 #include "Input/Events.h"
+#include "Input/HittestGrid.h"
 #include "Layout/Children.h"
 #include "InputCoreTypes.h"
 #include "JsonObjectConverter.h"
@@ -40,6 +41,7 @@
 #include "Serialization/JsonWriter.h"
 #include "Slate/SceneViewport.h"
 #include "Slate/SlateViewportProvider.h"
+#include "Types/PaintArgs.h"
 #include "UnrealClient.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/SInvalidationPanel.h"
@@ -734,6 +736,18 @@ bool FWebToUEBenchmarkRunner::CaptureSecondViewEvidence()
 		return false;
 	}
 	SecondTargetWidget->SlatePrepass(1.0f);
+	if (Mode == TEXT("WebToUE") && Corpus == TEXT("ResourceTextureSmoke"))
+	{
+		FHittestGrid HittestGrid;
+		FSlateWindowElementList DrawElements(nullptr);
+		const FGeometry Geometry = FGeometry::MakeRoot(
+			FVector2D(1920.0, 1080.0), FSlateLayoutTransform());
+		const FPaintArgs PaintArgs(
+			nullptr, HittestGrid, FVector2D::ZeroVector, 0.0, 0.0f);
+		SecondTargetWidget->Paint(PaintArgs, Geometry,
+			FSlateRect(0.0f, 0.0f, 1920.0f, 1080.0f), DrawElements, 0,
+			FWidgetStyle(), true);
+	}
 #if WITH_DEV_AUTOMATION_TESTS
 	if (Mode == TEXT("WebToUE"))
 	{
