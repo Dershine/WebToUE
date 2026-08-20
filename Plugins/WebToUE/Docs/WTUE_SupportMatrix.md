@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、UI Feedback、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-20，M3.4 Clock、Timer 与异步取消。
+> 当前基线：2026-08-20，M3.5 属性所有权、仲裁与冲突诊断。
 >
 > 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Native Component 作者声明/Compiler/Runtime 挂接仍未支持。
 >
@@ -13,6 +13,8 @@
 > 2026-08-20 的 M3.3 已实现 Generation-safe 事件路径快照、capture/target/bubble/default/stop、Pointer Capture Lost、per Slate User/Pointer 交互身份和聚合 Pseudo 引用计数；专项只证明 C++/Slate 自动化身份隔离，不等同于真实双 LocalPlayer/CommonUI Modal 或 Packaged 多指针验证。
 >
 > 2026-08-20 的 M3.4 已实现 Game/Unscaled/Real/Test Clock、Virtual Clock、无默认 Tick 的一次性 Timer、异步 Command Result/Timeout/Cancel、worker MPSC、Generation/View/World cleanup 与有界 Trace；这只是 C++ Runtime 前置，不等于类型化 Command Schema、Behavior 或 Animation 已支持。
+>
+> 2026-08-20 的 M3.5 已实现 Core Property Ownership Policy：canonical Node/CSS/Transform/typed Material Parameter 地址、CSS/Pseudo baseline、唯一 Binding/Behavior durable owner、active-only Animation overlay、visibility/enabled restrictive gate 与稳定 `WTUE-OWN-001..003` 诊断。现有 Binding/CSS/Pseudo 集成已验证；Behavior、Animation Track、Material/MID 与其作者语法仍未支持。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -89,6 +91,15 @@ Flex：
 
 当前绑定只支持根 UObject 属性；嵌套路径、Converter 和双向绑定仍属 M3。文本绑定以 Instance Handle 保留节点级 Text Layout Cache；Cache Key 覆盖显示文本、RichText 模式、字体、颜色/文本样式、当前 Culture 和换行约束。文本值变化只重算目标文本；Desired Size 相同仅重绘，变化时记录目标 Measure 与文本到根的 Layout 依赖路径。`visible` 只产生 Paint/HitTest 影响；`enabled` 在同一 FieldNotify 刷新内先更新 Disabled Pseudo State，再匹配 `:disabled` 及其编译依赖目标。
 
+属性所有权 C++ 合同：
+
+- 规范地址区分 `node.text`、`node.visibility`、`node.enabled`、canonical CSS computed slot、Visual Transform 与具名且具 Scalar/Vector/Texture 类型的 Material Parameter。CSS shorthand 不是独立地址；`visibility` 归一为 semantic gate。
+- Source 与 CSS/Pseudo 是 baseline；CSS/Pseudo 仍在同一 Cascade 内竞争，不存在“Pseudo 自动高于 CSS”的第二优先级。
+- Binding 与未来 Behavior 是互斥 durable owner。二者同时 claim 以 `WTUE-OWN-003` 错误拒绝；诊断包含 canonical target 和排序后的 source location，不依赖 claim 遍历顺序。
+- 分层属性采用 `Animation(active) > durable owner > CSS/Source`，但 visibility/enabled 采用全部 gate 必须允许的 restrictive composition。Animation 释放时必须显露最新 underlying value，不能写回旧快照。
+- 当前只把 Color、BackgroundColor、BorderColor、Opacity、Visual Transform 与 Scalar/Vector Material Parameter 归类为可动画目标；Layout、Text、Visibility、Enabled 和 Texture Parameter 拒绝 Animation writer。Material Parameter 不会由 CSS 名称或任意字符串隐式别名。
+- 当前产品路径只有 Binding text/visible/enabled 是已实现 durable owner；`PropertyOwnershipIntegration` 证明 Source text 覆盖、Pseudo visibility gate、Binding visibility gate、Enabled/Pseudo 恢复与上述合同一致。Policy 是 M4/M5 的前置，不等于 Behavior、Animation 或 Material 已支持。
+
 事件：Click 与 Pointer Capture Lost 使用不可变 root→target 事件路径快照；快照携带文档/Session Generation、Slate User/Pointer、Input Modality 与 Correlation，提交前逐段验证父子关系和身份。监听器按 capture→target→bubble 派发，支持 propagation/immediate stop；可取消 Click 支持 prevent default，Pointer Capture Lost 不可取消。`data-ue-on-click="EventName"` 仍广播 `EventName` 和 `ElementId`，但现作为 Session-owned 事务的 Post-Commit 默认动作执行；监听器状态写入先提交，失败/过期事务不广播。当前只有 C++ Listener API 和类型化事件种类，没有 UI Source 事件声明、类型化 payload schema 或 Behavior Event IR。
 
 UI Feedback 基础合同：Runtime 已提供 Feedback Request、`IWebToUEFeedbackRouter`、Null Router 和 Recording Router。Request 固定 Cue/Source/Correlation、Input Modality、Session/LocalPlayer/Viewport/Surface Scope 与 Session Generation；Router 由 UI Session 注入，失活 Session 或旧 Generation 请求明确拒绝。C++ 专项已证明 Feedback 可作为 Session-owned 事务的 Post-Commit Effect，观察全部已提交 Mutation，且失败事务不派发；Click 默认动作也已进入 Post-Commit，但 UI Source 没有 Feedback/Sound 声明，Compiler 不生成 Feedback Cue/Behavior Op，现有事件不会自动生成 Cue。版本化 Profile、UE Sound/SoundCue/MetaSound 资源清单、预取/Cook、限频/去重、用户设置和播放后端仍不存在，因此不能宣称已支持 UI 音效。
@@ -124,6 +135,7 @@ Runtime 绘制与命中：
 - CSS 规则未闭合、声明格式错误。
 - 不支持的 at-rule、选择器、属性和值。
 - 外链、内联样式的实际文件、行和列。
+- 属性所有权的 invalid/untyped target（`WTUE-OWN-001`）、writer 不允许（`WTUE-OWN-002`）与 Binding/Behavior durable owner 冲突（`WTUE-OWN-003`）；后两类未来作者语法接入前主要由 C++ Policy/Automation 使用。
 
 第一次导入错误不会产生有效运行数据；已有资产重导入失败（包括 UI Source 缺失）保留上次成功运行数据并更新诊断。自动化覆盖 HTML/CSS 依赖、成功重导入的 Generation 推进和旧 Handle 失效、失败时 last-good 保留、随后恢复，以及恢复前后 FieldNotify 绑定连续性。
 
