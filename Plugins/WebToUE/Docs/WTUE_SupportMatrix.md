@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、UI Feedback、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-20，M3.3 事件路径与交互身份。
+> 当前基线：2026-08-20，M3.4 Clock、Timer 与异步取消。
 >
 > 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Native Component 作者声明/Compiler/Runtime 挂接仍未支持。
 >
@@ -11,6 +11,8 @@
 > 2026-08-20 的 M3.2 已实现 Session-owned 更新协调器、非 Game Thread MPSC 入队、遍历来源 Structural Mutation 拒绝、重入/循环预算和 Post-Commit Effect C++ 合同；M3.3 已将 Click 事件监听、状态 Mutation 与 `data-ue-on-click` 默认动作迁入统一事务，现有 FieldNotify 与未来 Behavior 尚未迁入。
 
 > 2026-08-20 的 M3.3 已实现 Generation-safe 事件路径快照、capture/target/bubble/default/stop、Pointer Capture Lost、per Slate User/Pointer 交互身份和聚合 Pseudo 引用计数；专项只证明 C++/Slate 自动化身份隔离，不等同于真实双 LocalPlayer/CommonUI Modal 或 Packaged 多指针验证。
+>
+> 2026-08-20 的 M3.4 已实现 Game/Unscaled/Real/Test Clock、Virtual Clock、无默认 Tick 的一次性 Timer、异步 Command Result/Timeout/Cancel、worker MPSC、Generation/View/World cleanup 与有界 Trace；这只是 C++ Runtime 前置，不等于类型化 Command Schema、Behavior 或 Animation 已支持。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -91,9 +93,11 @@ Flex：
 
 UI Feedback 基础合同：Runtime 已提供 Feedback Request、`IWebToUEFeedbackRouter`、Null Router 和 Recording Router。Request 固定 Cue/Source/Correlation、Input Modality、Session/LocalPlayer/Viewport/Surface Scope 与 Session Generation；Router 由 UI Session 注入，失活 Session 或旧 Generation 请求明确拒绝。C++ 专项已证明 Feedback 可作为 Session-owned 事务的 Post-Commit Effect，观察全部已提交 Mutation，且失败事务不派发；Click 默认动作也已进入 Post-Commit，但 UI Source 没有 Feedback/Sound 声明，Compiler 不生成 Feedback Cue/Behavior Op，现有事件不会自动生成 Cue。版本化 Profile、UE Sound/SoundCue/MetaSound 资源清单、预取/Cook、限频/去重、用户设置和播放后端仍不存在，因此不能宣称已支持 UI 音效。
 
-更新事务 C++ 边界：每个 `FWebToUESession` 拥有一个 `FWebToUEUpdateCoordinator`。evaluation 在 Game Thread 只收集 State/Structural Mutation 和 Post-Commit Effect，成功后按 State→Structure→Effect 提交；evaluation 拒绝、遍历来源结构写入或预算超限时整笔不提交。非 Game Thread 只能向 MPSC 队列提交 evaluation，由 Game Thread drain；evaluation 重入属于同一原子事务，Commit/Post-Commit 重入进入后续事务。evaluation、Mutation、Effect、单次 drain 与保留 Trace 均有硬上限，Session 失活拒绝新工作并丢弃晚到队列。Click 监听与 `data-ue-on-click` 默认动作已接入；该接口仍只是后续 Typed Mutation/Behavior/Command 的基础，现有 FieldNotify 和动态结构尚未迁入，也不提供 Clock/Timer/异步 Result 语义。
+更新事务 C++ 边界：每个 `FWebToUESession` 拥有一个 `FWebToUEUpdateCoordinator`。evaluation 在 Game Thread 只收集 State/Structural Mutation 和 Post-Commit Effect，成功后按 State→Structure→Effect 提交；evaluation 拒绝、遍历来源结构写入或预算超限时整笔不提交。非 Game Thread 只能向 MPSC 队列提交 evaluation，由 Game Thread drain；evaluation 重入属于同一原子事务，Commit/Post-Commit 重入进入后续事务。evaluation、Mutation、Effect、单次 drain 与保留 Trace 均有硬上限，Session 失活拒绝新工作并丢弃晚到队列。Click 监听、`data-ue-on-click` 默认动作及 M3.4 Timer/Command terminal evaluation 已接入；该接口仍只是后续 Typed Mutation/Behavior/Command 的基础，现有 FieldNotify 和动态结构尚未迁入。
 
-UI Session / Screen Host：Runtime 已提供 `FWebToUESession` 与代码化 `FWebToUEScreenHost`。Session 绑定 LocalPlayer、World、Screen Surface、Data/Command Context、Environment、可注入 Clock 与 Generation；一个 Host 拥有一个 `UWebToUEView`，通过 `UGameViewportClient::AddViewportWidgetForPlayer` 附着到对应 LocalPlayer，默认继续使用 `SSafeZone`。显式 Shutdown、World cleanup 或 LocalPlayer removal 均先失活 Session、清除 View 关联，再移除 Slate 内容；文档设置/换代会推进 Session Generation。固定 MainMenu/HUD/ScrollableSettings Packaged Runner 已走该生产 Host。C++/Slate 专项已验证多 Slate User/Pointer 的状态隔离，但真实双 LocalPlayer/CommonUI Modal 敌意矩阵尚未执行；World Surface Host 经当前冻结 Corpus 自动审计为 `P0.5-if-used=N/A`，不是已实现能力。
+Clock/异步 C++ 边界：`FWebToUEWorldClock` 明确区分 Game（随 pause 停止、受 dilation）、Unscaled（随 pause 停止、不受 dilation）和 Real（不随 pause 停止、不受 dilation），不提供 Test；`FWebToUEVirtualClock` 为测试/工具独立单调推进四个域。Session-owned `FWebToUEAsyncCoordinator` 提供一次性 Timer 与异步 Command token；Timer 只在显式 `Pump()` 观察 deadline，不注册默认 Tick。worker completion 只入 MPSC，result/timeout exactly-once 并进入更新事务；显式 Cancel、重复/晚到 result、旧 Generation 和失活 Session 均不执行 Mutation。Pending、单次 Pump 与 Trace 有界；文档换代、Host Shutdown、World cleanup 和既有 LocalPlayer removal 路径会取消对应工作。当前没有类型化 Command Schema/payload、Behavior Op、重复 Timer、Animation Track 或 Runtime Inspector，因此这些基础合同不应被表述为作者可用的异步行为系统。
+
+UI Session / Screen Host：Runtime 已提供 `FWebToUESession` 与代码化 `FWebToUEScreenHost`。Session 绑定 LocalPlayer、World、Screen Surface、Data/Command Context、Environment、显式多域 Clock 与 Generation；一个 Host 拥有一个 `UWebToUEView`，通过 `UGameViewportClient::AddViewportWidgetForPlayer` 附着到对应 LocalPlayer，默认继续使用 `SSafeZone`。显式 Shutdown、World cleanup 或 LocalPlayer removal 均先失活 Session/Async、清除 View 关联，再移除 Slate 内容；文档设置/换代会推进 Session Generation 并同步取消旧代次 Timer/Command。固定 MainMenu/HUD/ScrollableSettings Packaged Runner 已走该生产 Host。C++/Slate 专项已验证多 Slate User/Pointer 的状态隔离，但真实双 LocalPlayer/CommonUI Modal 敌意矩阵尚未执行；World Surface Host 经当前冻结 Corpus 自动审计为 `P0.5-if-used=N/A`，不是已实现能力。
 
 Native Component C++ 边界：Runtime 模块已提供实验性的 `FWebToUENativeComponentRegistry`。注册项必须使用命名空间类型名和非零合同版本，可声明 `UScriptStruct` Props/Event 类型、能力位和带预期 `UClass` 的命名 Resource Slot；Factory/Instance 接口覆盖显式 Slate Widget、Measure、Pointer/Key Input、Focus、Semantic projection、Resource binding 和 Attach/Suspend/Resume/Detach，注册由 Game Thread 上的 move-only RAII token 持有。当前 UI Source 没有 Native Component 声明，Compiler 不生成组件 IR，Runtime Tree/Host 也不会查表或创建实例，因此这只是后续互操作前置合同，不是作者或产品可用能力，且 1.0 外部 API 稳定性尚未承诺。
 
