@@ -2,11 +2,11 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、UI Feedback、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-17，M3.0 Native Component Registry 合同。
+> 当前基线：2026-08-20，M3.1 UI Session + 代码化 Screen Host 最小闭环。
 >
-> 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Behavior、UE Material、Native Component 作者声明/Compiler/宿主挂接、正式代码宿主和世界空间能力在各自实现与证据门完成前仍属于未支持。
+> 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Native Component 作者声明/Compiler/Runtime 挂接仍未支持。
 >
-> 2026-08-20 的 ADR-0005/路线调整只接受 UI Feedback Cue、Router/Profile 与 UE/项目音频复用边界；当前没有作者声明、Compiled Op、UI Session Router、Sound/MetaSound 资源、播放后端或 Packaged 证据，因此 UI 音效仍为未支持。
+> 2026-08-20 的 M3.1 已实现 Screen UI Session、per-LocalPlayer 代码宿主和 Feedback Request/Null/Recording Router 基础合同；没有作者声明、Compiled Op、Profile、Sound/MetaSound 资源或播放后端，因此“真实 UI 音效”仍未支持。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -85,7 +85,9 @@ Flex：
 
 事件：`data-ue-on-click="EventName"` 广播 `EventName` 和 `ElementId`。
 
-UI Feedback/音效：当前未支持。UI Source 没有 Feedback/Sound 声明，Compiler 不生成 Feedback Cue/Behavior Op，Runtime 没有 UI Session Router/Profile、UE Sound/MetaSound 资源清单或播放路径，也没有 Hover/Focus 去重、Slider 限频、LocalPlayer/Surface Scope、预取/Cook 和诊断证据。ADR-0005 只规定后续由事务成功后的语义 UI Feedback Cue 经注入 Router 复用 UE/项目音频系统；不得把路线决定理解为当前可以直接引用或播放声音。
+UI Feedback 基础合同：Runtime 已提供 Feedback Request、`IWebToUEFeedbackRouter`、Null Router 和 Recording Router。Request 固定 Cue/Source/Correlation、Input Modality、Session/LocalPlayer/Viewport/Surface Scope 与 Session Generation；Router 由 UI Session 注入，失活 Session 或旧 Generation 请求明确拒绝。当前调用只是合同级派发，不等于事务 Post-Commit 收集：UI Source 没有 Feedback/Sound 声明，Compiler 不生成 Feedback Cue/Behavior Op，也没有版本化 Profile、UE Sound/SoundCue/MetaSound 资源清单、预取/Cook、限频/去重、用户设置或播放后端，因此不能宣称已支持 UI 音效。
+
+UI Session / Screen Host：Runtime 已提供 `FWebToUESession` 与代码化 `FWebToUEScreenHost`。Session 绑定 LocalPlayer、World、Screen Surface、Data/Command Context、Environment、可注入 Clock 与 Generation；一个 Host 拥有一个 `UWebToUEView`，通过 `UGameViewportClient::AddViewportWidgetForPlayer` 附着到对应 LocalPlayer，默认继续使用 `SSafeZone`。显式 Shutdown、World cleanup 或 LocalPlayer removal 均先失活 Session、清除 View 关联，再移除 Slate 内容；文档设置/换代会推进 Session Generation。固定 MainMenu/HUD/ScrollableSettings Packaged Runner 已走该生产 Host。尚未验证多 LocalPlayer/CommonUI Modal/多 Slate User/多 Pointer 敌意矩阵；World Surface Host 经当前冻结 Corpus 自动审计为 `P0.5-if-used=N/A`，不是已实现能力。
 
 Native Component C++ 边界：Runtime 模块已提供实验性的 `FWebToUENativeComponentRegistry`。注册项必须使用命名空间类型名和非零合同版本，可声明 `UScriptStruct` Props/Event 类型、能力位和带预期 `UClass` 的命名 Resource Slot；Factory/Instance 接口覆盖显式 Slate Widget、Measure、Pointer/Key Input、Focus、Semantic projection、Resource binding 和 Attach/Suspend/Resume/Detach，注册由 Game Thread 上的 move-only RAII token 持有。当前 UI Source 没有 Native Component 声明，Compiler 不生成组件 IR，Runtime Tree/Host 也不会查表或创建实例，因此这只是后续互操作前置合同，不是作者或产品可用能力，且 1.0 外部 API 稳定性尚未承诺。
 
@@ -122,7 +124,8 @@ WTUE Document 使用自定义版本 GUID，当前版本 `CssSrgbColors`（7）�
 - 输入框、文本编辑、IME、表单语义。
 - 可见滚动条、基本拖拽、触摸滚动、惯性和虚拟列表。冻结的 MainMenu/HUD/ScrollableSettings 已由自动化审计确认未使用可见滚动条/拖拽/触摸/惯性/水平溢出，因此 M2.8 的对应 `P0.5-if-used` 为有证据的 `N/A`；ScrollableSettings 只使用既有纵向滚轮路径。
 - CommonUI 深度组件/Action Router 集成和无障碍适配器；当前只承诺宿主边界协作与内部语义引用接口。
-- UI Feedback Cue 的作者声明/语义默认、Compiled UI/Behavior Op、Post-Commit 派发、Router/Profile、Sound/MetaSound 资源、预取/Cook、限频/去重、Screen/World Scope、Inspector/Trace 和真实播放证据。
+- UI Feedback Cue 的作者声明/语义默认、Compiled UI/Behavior Op、事务 Post-Commit 收集、Profile、Sound/MetaSound 资源、预取/Cook、限频/去重、Inspector/Trace 和真实播放证据；基础 Request、Router 注入、Screen Scope 与 Generation 拒绝已支持。
+- World Surface Host、WidgetComponent/RT、3D Feedback Scope、世界输入与独立性能门；当前冻结 Corpus 的裁决是有证据的 `N/A`，不是产品支持。
 - Native Component 的 UI Source 声明、Compiler lowering、Compiled IR、Runtime Tree/Host 实例化和真实专用组件；当前只有实验性 C++ Registry/Factory/Instance 合同。
 - 嵌套属性路径、Converter、双向绑定、类型化事件载荷。
 - 组件、Props、Slots、条件节点、循环和 Keyed Diff。
