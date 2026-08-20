@@ -2,6 +2,7 @@
 
 #include "SWebToUEView.h"
 #include "WebToUEDocument.h"
+#include "WebToUESession.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/Layout/SSafeZone.h"
 
@@ -54,6 +55,10 @@ void UWebToUEView::ReleaseSlateResources(bool bReleaseChildren)
 void UWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 {
 	if (Document == InDocument) return;
+	if (TSharedPtr<FWebToUESession> ActiveSession = Session.Pin())
+	{
+		ActiveSession->AdvanceGeneration();
+	}
 	Document = InDocument;
 	if (SlateView)
 	{
@@ -61,6 +66,16 @@ void UWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 		SlateView->RefreshBindings(DataContext);
 		BindFieldNotifications();
 	}
+}
+
+void UWebToUEView::SetSession(TSharedPtr<FWebToUESession> InSession)
+{
+	Session = InSession;
+}
+
+void UWebToUEView::ClearSession()
+{
+	Session.Reset();
 }
 
 void UWebToUEView::SetDataContext(UObject* InDataContext)
@@ -266,6 +281,10 @@ void UWebToUEView::HandleDocumentChanged(UWebToUEDocument* ChangedDocument)
 {
 	if (ChangedDocument == Document && SlateView)
 	{
+		if (TSharedPtr<FWebToUESession> ActiveSession = Session.Pin())
+		{
+			ActiveSession->AdvanceGeneration();
+		}
 		SlateView->SetDocument(Document);
 		SlateView->RefreshBindings(DataContext);
 		BindFieldNotifications();

@@ -9,6 +9,7 @@
 
 class SWebToUEView;
 class SSafeZone;
+class FWebToUESession;
 class UWebToUEDocument;
 struct FWebToUERuntimeLayoutResult;
 enum class EWebToUEPseudoState : uint8;
@@ -65,6 +66,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category="WebToUE")
 	void SetRespectSafeZone(bool bInRespectSafeZone);
 
+	void SetSession(TSharedPtr<FWebToUESession> InSession);
+	void ClearSession();
+	TSharedPtr<FWebToUESession> GetSession() const { return Session.Pin(); }
+
 	void HandleRuntimeEvent(FName EventName, FName ElementId);
 	virtual void GetSemanticNodes(TArray<FWebToUESemanticNode>& OutNodes) const override;
 	virtual FWebToUEInstanceHandle GetFocusedSemanticNode() const override;
@@ -109,6 +114,7 @@ private:
 	TSharedPtr<SWebToUEView> SlateView;
 	TSharedPtr<SSafeZone> SafeZone;
 	FDelegateHandle DocumentChangedHandle;
+	TWeakPtr<FWebToUESession> Session;
 
 	void ApplySafeZoneSetting();
 	void BindFieldNotifications();
