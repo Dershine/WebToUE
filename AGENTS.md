@@ -266,3 +266,4 @@ This project-specific section lives outside the generated VibeUE block and overr
 - Development Game targets define `WITH_DEV_AUTOMATION_TESTS` without `WITH_EDITOR`; any EditorContext test using editor-only APIs must guard on both macros or it can break the Game receipt build despite Editor builds passing.
 - Standalone text-measurement test helpers construct unregistered nodes; keep them on explicit transient layout caches instead of routing them through Instance Handle-keyed production caches.
 - `RunUAT.bat` can leave its PowerShell host at exit code 0 after AutomationTool logs a nonzero exit; lifecycle release gates must parse the final `AutomationTool exiting with ExitCode=N` marker and prefer it over the host code.
+- In the current UE 5.8 Python binding, `ToolsetRegistry.get_toolset_json_schema` requires a ToolsetDefinition class even though older examples pass a string; use MCP `describe_toolset` for an exact schema instead of repeating the string call.
