@@ -162,6 +162,7 @@ private:
 	void OnSlateWindowRendered(SWindow& Window);
 	void OnBackBufferReady(SWindow& Window, ISlateViewportProvider& ViewportProvider);
 	void RequestScreenshot();
+	void ShutdownUi();
 	void Finish();
 	void FailAndExit(const FString& Error);
 	bool IsGameWindow(const SWindow& Window) const;

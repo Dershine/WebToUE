@@ -319,6 +319,12 @@ FWebToUEBenchmarkRunner::~FWebToUEBenchmarkRunner()
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(TickerHandle);
 	}
+	ShutdownUi();
+	PerformanceCapture.Reset();
+}
+
+void FWebToUEBenchmarkRunner::ShutdownUi()
+{
 	if (PrimaryScreenHost)
 	{
 		PrimaryScreenHost->Shutdown();
@@ -331,8 +337,22 @@ FWebToUEBenchmarkRunner::~FWebToUEBenchmarkRunner()
 			GEngine->GameViewport->RemoveViewportWidgetContent(ProbeWidget.ToSharedRef());
 		}
 	}
+	if (SecondScreenHost)
+	{
+		SecondScreenHost->Shutdown();
+	}
 	SecondScreenHost.Reset();
-	PerformanceCapture.Reset();
+	InputTargetWidget.Reset();
+	TargetWidget.Reset();
+	SecondTargetWidget.Reset();
+	ProbeWidget.Reset();
+	TargetWindow.Reset();
+	TargetWindowPtr = nullptr;
+	PrimaryUiObject.Reset();
+	DataContextObject.Reset();
+	BenchmarkDocument.Reset();
+	SecondUiObject.Reset();
+	SecondDataContextObject.Reset();
 }
 
 bool FWebToUEBenchmarkRunner::IsRequested()
@@ -1386,6 +1406,7 @@ void FWebToUEBenchmarkRunner::Finish()
 	FFileHelper::SaveStringToFile(Json, *JsonPath);
 	UE_LOG(LogTemp, Display, TEXT("WTUE_BENCHMARK_COMPLETE success=%s json=%s"),
 		bSuccess ? TEXT("true") : TEXT("false"), *JsonPath);
+	ShutdownUi();
 	FPlatformMisc::RequestExit(!bSuccess);
 }
 
@@ -1403,5 +1424,6 @@ void FWebToUEBenchmarkRunner::FailAndExit(const FString& Error)
 	FJsonSerializer::Serialize(Root, Writer);
 	FFileHelper::SaveStringToFile(Json, *JsonPath);
 	UE_LOG(LogTemp, Error, TEXT("WTUE_BENCHMARK_FAILED %s"), *Error);
+	ShutdownUi();
 	FPlatformMisc::RequestExit(true);
 }
