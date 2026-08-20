@@ -4,6 +4,7 @@
 #include "WebToUEStyleProperties.h"
 
 #include "Serialization/Archive.h"
+#include "UObject/ObjectSaveContext.h"
 
 #if WITH_EDITOR
 #include "EditorFramework/AssetImportData.h"
@@ -184,6 +185,49 @@ void UWebToUEDocument::Serialize(FArchive& Ar)
 {
 	Super::Serialize(Ar);
 	Ar.UsingCustomVersion(FWebToUEAssetVersion::GUID);
+}
+
+FWebToUECookFreshnessValidator& UWebToUEDocument::CookFreshnessValidator()
+{
+	static FWebToUECookFreshnessValidator Validator;
+	return Validator;
+}
+
+void UWebToUEDocument::PreSave(FObjectPreSaveContext SaveContext)
+{
+	Super::PreSave(SaveContext);
+#if WITH_EDITOR
+	if (!SaveContext.IsCooking() || HasAnyFlags(RF_ClassDefaultObject))
+	{
+		return;
+	}
+
+	TArray<FWebToUEResourceContractDiagnostic> FreshnessDiagnostics;
+	bool bFresh = ValidateResourceContract(FreshnessDiagnostics);
+	if (bFresh)
+	{
+		FWebToUECookFreshnessValidator& Validator = CookFreshnessValidator();
+		if (Validator.IsBound())
+		{
+			bFresh = Validator.Execute(*this, FreshnessDiagnostics);
+		}
+		else
+		{
+			bFresh = false;
+			FreshnessDiagnostics.Add({ TEXT("WTUE-RES-004"),
+				TEXT("cook-validator"),
+				TEXT("Cook cannot prove Resource freshness because the Editor validator is unavailable.") });
+		}
+	}
+	if (!bFresh)
+	{
+		for (const FWebToUEResourceContractDiagnostic& Diagnostic : FreshnessDiagnostics)
+		{
+			UE_LOG(LogWebToUEDocument, Error, TEXT("%s %s: %s Asset=%s"),
+				*Diagnostic.Code, *Diagnostic.Path, *Diagnostic.Detail, *GetPathName());
+		}
+	}
+#endif
 }
 
 void UWebToUEDocument::NotifyDocumentChanged()

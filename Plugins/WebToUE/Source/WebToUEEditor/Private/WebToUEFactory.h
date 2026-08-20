@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "EditorReimportHandler.h"
 #include "Factories/Factory.h"
+#include "WebToUEResourceContract.h"
 #include "WebToUEFactory.generated.h"
 
 class UWebToUEDocument;
@@ -23,4 +24,6 @@ public:
 	virtual int32 GetPriority() const override { return ImportPriority; }
 
 	static bool ImportIntoDocument(UWebToUEDocument& Document, const FString& Filename, bool bPreserveLastGood);
+	static bool ValidateCookFreshness(const UWebToUEDocument& Document,
+		TArray<FWebToUEResourceContractDiagnostic>& OutDiagnostics);
 };

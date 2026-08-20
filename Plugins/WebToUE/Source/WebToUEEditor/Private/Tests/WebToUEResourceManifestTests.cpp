@@ -5,6 +5,8 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Internationalization/StringTableRegistry.h"
+#include "Interfaces/ITargetPlatformManagerModule.h"
+#include "UObject/ObjectSaveContext.h"
 #include "WebToUEDocument.h"
 #include "WebToUEFactory.h"
 #include "WebToUESettings.h"
@@ -111,6 +113,28 @@ bool FWebToUEResourceManifestTest::RunTest(const FString& Parameters)
 		UWebToUEFactory::ImportIntoDocument(*Document, TestFilename, true));
 	TestTrue(TEXT("A failed reimport preserves the last-good sealed artifact"),
 		Document->GetResourceFreshness() == LastGoodStamp);
+	TArray<FWebToUEResourceContractDiagnostic> CookDiagnostics;
+	TestFalse(TEXT("Last-good content cannot Cook after its source drifts"),
+		UWebToUEFactory::ValidateCookFreshness(*Document, CookDiagnostics));
+	TestTrue(TEXT("Stale Source uses the stable Cook freshness diagnostic"),
+		CookDiagnostics.ContainsByPredicate([](
+			const FWebToUEResourceContractDiagnostic& Diagnostic)
+		{
+			return Diagnostic.Code == TEXT("WTUE-RES-004");
+		}));
+	ITargetPlatform* WindowsTarget =
+		GetTargetPlatformManagerRef().FindTargetPlatform(TEXT("Windows"));
+	TestNotNull(TEXT("The Win64 Cook target is available to the PreSave test"),
+		WindowsTarget);
+	if (WindowsTarget)
+	{
+		FObjectSaveContextData SaveData(Document->GetPackage(), WindowsTarget,
+			TEXT("WebToUEAutomation/ResourceManifest.uasset"), SAVE_None);
+		SaveData.ObjectSaveContextPhase = EObjectSaveContextPhase::PreSave;
+		AddExpectedError(TEXT("WTUE-RES-004"),
+			EAutomationExpectedErrorFlags::Contains, -1);
+		Document->PreSave(FObjectPreSaveContext(SaveData));
+	}
 	return true;
 }
 

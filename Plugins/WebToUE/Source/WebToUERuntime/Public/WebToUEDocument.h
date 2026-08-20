@@ -7,6 +7,10 @@
 #include "WebToUEDocument.generated.h"
 
 class UAssetImportData;
+class UWebToUEDocument;
+
+DECLARE_DELEGATE_RetVal_TwoParams(bool, FWebToUECookFreshnessValidator,
+	const UWebToUEDocument&, TArray<FWebToUEResourceContractDiagnostic>&);
 
 UENUM()
 enum class EWebToUEResourceKind : uint8
@@ -196,9 +200,11 @@ public:
 	bool HasCompileErrors() const;
 	void NotifyDocumentChanged();
 	virtual void Serialize(FArchive& Ar) override;
+	virtual void PreSave(FObjectPreSaveContext SaveContext) override;
 
 	DECLARE_MULTICAST_DELEGATE_OneParam(FOnDocumentChanged, UWebToUEDocument*);
 	static FOnDocumentChanged& OnDocumentChanged();
+	static FWebToUECookFreshnessValidator& CookFreshnessValidator();
 
 #if WITH_EDITOR
 	bool NeedsRecompile() const { return bNeedsRecompile; }

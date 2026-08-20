@@ -438,6 +438,37 @@ static bool BuildResourceContract(const TArray<FString>& DependencyFiles,
 	return true;
 }
 
+bool UWebToUEFactory::ValidateCookFreshness(const UWebToUEDocument& Document,
+	TArray<FWebToUEResourceContractDiagnostic>& OutDiagnostics)
+{
+#if WITH_EDITORONLY_DATA
+	FWebToUECompiledDocumentData ExpectedDocument;
+	ExpectedDocument.ResourceManifest = Document.GetResourceManifest();
+	if (!BuildResourceContract(
+		Document.DependencyFiles, ExpectedDocument, OutDiagnostics))
+	{
+		return false;
+	}
+	TArray<FWebToUEResourceContractDiagnostic> FreshnessDiagnostics;
+	const bool bFresh = FWebToUEResourceContractPolicy::IsCookFresh(
+		ExpectedDocument.ResourceFreshness, Document.GetResourceFreshness(),
+		FreshnessDiagnostics);
+	OutDiagnostics.Append(MoveTemp(FreshnessDiagnostics));
+	OutDiagnostics.Sort([](const FWebToUEResourceContractDiagnostic& A,
+		const FWebToUEResourceContractDiagnostic& B)
+	{
+		if (A.Code != B.Code) return A.Code < B.Code;
+		if (A.Path != B.Path) return A.Path < B.Path;
+		return A.Detail < B.Detail;
+	});
+	return bFresh && OutDiagnostics.IsEmpty();
+#else
+	OutDiagnostics = { { TEXT("WTUE-RES-004"), TEXT("cook-validator"),
+		TEXT("Editor-only source inputs are unavailable for Cook freshness validation.") } };
+	return false;
+#endif
+}
+
 bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FString& Filename, bool bPreserveLastGood)
 {
 	FString Html;
