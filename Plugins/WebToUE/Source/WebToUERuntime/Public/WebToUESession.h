@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WebToUEUpdateTransaction.h"
 
 class ULocalPlayer;
 class UObject;
@@ -210,6 +211,10 @@ public:
 	const FWebToUESurfaceContext& GetSurface() const { return Surface; }
 	const FWebToUEEnvironmentContext& GetEnvironment() const { return Environment; }
 	TSharedRef<IWebToUEClock> GetClock() const { return Clock.ToSharedRef(); }
+	TSharedRef<FWebToUEUpdateCoordinator, ESPMode::ThreadSafe> GetUpdateCoordinator() const
+	{
+		return UpdateCoordinator.ToSharedRef();
+	}
 
 private:
 	explicit FWebToUESession(const FWebToUESessionCreateParams& Params);
@@ -225,4 +230,5 @@ private:
 	FWebToUEEnvironmentContext Environment;
 	TSharedPtr<IWebToUEClock> Clock;
 	TSharedPtr<IWebToUEFeedbackRouter> FeedbackRouter;
+	TSharedPtr<FWebToUEUpdateCoordinator, ESPMode::ThreadSafe> UpdateCoordinator;
 };

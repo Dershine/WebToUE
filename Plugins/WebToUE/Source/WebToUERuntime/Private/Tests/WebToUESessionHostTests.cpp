@@ -152,6 +152,43 @@ bool FWebToUESessionFeedbackTest::RunTest(const FString& Parameters)
 			Record.Context.Surface.Kind == EWebToUESurfaceKind::Screen);
 	}
 
+	Recording->Reset();
+	bool bStateCommitted = false;
+	bool bEffectObservedCommittedState = false;
+	EWebToUEFeedbackDispatchResult TransactionDispatch =
+		EWebToUEFeedbackDispatchResult::DroppedInvalidRequest;
+	Session->GetUpdateCoordinator()->Submit(
+		[Session, Request, &bStateCommitted, &bEffectObservedCommittedState,
+			&TransactionDispatch](FWebToUEUpdateTransaction& Transaction)
+		{
+			Transaction.AddStateMutation([&bStateCommitted]()
+			{
+				bStateCommitted = true;
+			});
+			Transaction.AddPostCommitEffect(
+				[Session, Request, &bStateCommitted, &bEffectObservedCommittedState,
+					&TransactionDispatch]()
+				{
+					bEffectObservedCommittedState = bStateCommitted;
+					TransactionDispatch = Session->DispatchCommittedFeedback(Request);
+				});
+		});
+	TestTrue(TEXT("Session-owned Feedback dispatch observes committed UI state"),
+		bStateCommitted && bEffectObservedCommittedState &&
+		TransactionDispatch == EWebToUEFeedbackDispatchResult::Routed &&
+		Recording->GetRecords().Num() == 1);
+	Session->GetUpdateCoordinator()->Submit(
+		[Session, Request](FWebToUEUpdateTransaction& Transaction)
+		{
+			Transaction.AddPostCommitEffect([Session, Request]()
+			{
+				Session->DispatchCommittedFeedback(Request);
+			});
+			Transaction.Reject(TEXT("hostile event evaluation failure"));
+		});
+	TestEqual(TEXT("Rejected UI transactions never dispatch collected Feedback"),
+		Recording->GetRecords().Num(), 1);
+
 	const FWebToUESessionHandle FirstGeneration = Session->GetHandle();
 	Session->AdvanceGeneration();
 	TestTrue(TEXT("Generation advance invalidates a delayed Feedback request"),
@@ -186,6 +223,11 @@ bool FWebToUESessionFeedbackTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Session shutdown rejects feedback even when its former request was current"),
 		Session->DispatchCommittedFeedback(Current) ==
 		EWebToUEFeedbackDispatchResult::DroppedInactiveSession);
+	TestTrue(TEXT("Session shutdown rejects new Runtime update evaluation"),
+		Session->GetUpdateCoordinator()->Submit([](FWebToUEUpdateTransaction& Transaction)
+		{
+			Transaction.AddStateMutation([]() {});
+		}) == EWebToUEUpdateSubmitResult::RejectedInactive);
 	return true;
 }
 

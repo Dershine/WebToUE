@@ -136,6 +136,7 @@ FWebToUESession::FWebToUESession(const FWebToUESessionCreateParams& Params)
 	, Environment(Params.Environment)
 	, Clock(Params.Clock)
 	, FeedbackRouter(Params.FeedbackRouter)
+	, UpdateCoordinator(FWebToUEUpdateCoordinator::Create())
 {
 }
 
@@ -172,6 +173,7 @@ void FWebToUESession::Invalidate()
 	{
 		return;
 	}
+	UpdateCoordinator->Shutdown();
 	bActive = false;
 	++Generation;
 	if (Generation == 0)
