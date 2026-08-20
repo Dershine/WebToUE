@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "SWebToUEView.h"
 #include "WebToUEDocument.h"
+#include "WebToUEResourceContractTestUtils.h"
 #include "WebToUERuntimeInstance.h"
 #include "WebToUEStyleProperties.h"
 
@@ -26,8 +27,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEOrderedDeclarationHydrationTest,
 	"WebToUE.Runtime.OrderedDeclarationHydration",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceContractHydrationTest,
+	"WebToUE.Runtime.ResourceContractHydration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace WebToUE::CompiledDocument::Tests
 {
+	static bool HasResourceDiagnostic(
+		TConstArrayView<FWebToUEResourceContractDiagnostic> Diagnostics,
+		const TCHAR* Code)
+	{
+		return Diagnostics.ContainsByPredicate([Code](
+			const FWebToUEResourceContractDiagnostic& Diagnostic)
+		{
+			return Diagnostic.Code == Code;
+		});
+	}
+
 	static void AddAttribute(FWebToUECompiledNode& Node, const TCHAR* Name, const TCHAR* Value)
 	{
 		FWebToUECompiledAttribute& Attribute = Node.Attributes.AddDefaulted_GetRef();
@@ -52,6 +68,57 @@ namespace WebToUE::CompiledDocument::Tests
 	}
 }
 
+bool FWebToUEResourceContractHydrationTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::CompiledDocument::Tests;
+	const auto MakeCompiledDocument = []()
+	{
+		FWebToUECompiledDocumentData Compiled;
+		Compiled.RootNodeIndex = 0;
+		FWebToUECompiledNode& Root = Compiled.Nodes.AddDefaulted_GetRef();
+		Root.Type = static_cast<uint8>(EWebToUENodeType::Element);
+		Root.Tag = TEXT("body");
+		FWebToUECompiledNode& Image = Compiled.Nodes.AddDefaulted_GetRef();
+		Image.Type = static_cast<uint8>(EWebToUENodeType::Element);
+		Image.Tag = TEXT("img");
+		Image.ParentIndex = 0;
+		AddAttribute(Image, TEXT("src"),
+			TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
+		Compiled.ResourceManifest.Add({ EWebToUEResourceKind::Texture,
+			FSoftObjectPath(TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture")) });
+		WebToUE::Tests::SealResourceContractForTesting(
+			Compiled, TEXT("document/hydration-test"));
+		return Compiled;
+	};
+
+	UWebToUEDocument* InvalidBinding =
+		NewObject<UWebToUEDocument>(GetTransientPackage());
+	FWebToUECompiledDocumentData InvalidBindingData = MakeCompiledDocument();
+	InvalidBindingData.Nodes[1].ResourceId = TEXT("resource/texture/unknown");
+	InvalidBinding->CommitCompiledDocument(MoveTemp(InvalidBindingData));
+	TArray<FWebToUEResourceContractDiagnostic> Diagnostics;
+	TestFalse(TEXT("Unknown image ResourceId fails the asset boundary"),
+		InvalidBinding->ValidateResourceContract(Diagnostics));
+	TestTrue(TEXT("Unknown image ResourceId uses the residency/binding diagnostic"),
+		HasResourceDiagnostic(Diagnostics, TEXT("WTUE-RES-003")));
+	FWebToUERuntimeInstance RuntimeInstance;
+	AddExpectedError(TEXT("WTUE-RES-003"),
+		EAutomationExpectedErrorFlags::Contains, -1);
+	TestFalse(TEXT("Invalid ResourceId never creates a Runtime Tree"),
+		RuntimeInstance.Hydrate(*InvalidBinding));
+
+	UWebToUEDocument* UnsupportedVersion =
+		NewObject<UWebToUEDocument>(GetTransientPackage());
+	FWebToUECompiledDocumentData UnsupportedVersionData = MakeCompiledDocument();
+	UnsupportedVersionData.ResourceFreshness.ArtifactVersions.ResourceIr = { 2, 0 };
+	UnsupportedVersion->CommitCompiledDocument(MoveTemp(UnsupportedVersionData));
+	TestFalse(TEXT("Unsupported Resource IR fails the runtime compatibility boundary"),
+		UnsupportedVersion->ValidateResourceContract(Diagnostics));
+	TestTrue(TEXT("Unsupported Resource IR has a stable version diagnostic"),
+		HasResourceDiagnostic(Diagnostics, TEXT("WTUE-RES-005")));
+	return true;
+}
+
 bool FWebToUECompiledDocumentBoundaryTest::RunTest(const FString& Parameters)
 {
 	using namespace WebToUE::CompiledDocument::Tests;
@@ -63,23 +130,17 @@ bool FWebToUECompiledDocumentBoundaryTest::RunTest(const FString& Parameters)
 	FWebToUECompiledResource& TextureResource =
 		CompiledDocument.ResourceManifest.AddDefaulted_GetRef();
 	TextureResource.Kind = EWebToUEResourceKind::Texture;
-	TextureResource.Path = FSoftObjectPath(TEXT("/WebToUETests/T_Boundary.T_Boundary"));
+	TextureResource.Path = FSoftObjectPath(
+		TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
 	TextureResource.ResourceId = TEXT("resource/texture/boundary");
 	TextureResource.Provenance = { EWebToUEResourceOrigin::UnrealAsset,
-		TEXT("source/boundary.html"), TEXT("/WebToUETests/T_Boundary.T_Boundary"),
-		TEXT("asset/WebToUETests/T_Boundary") };
+		TEXT("source/boundary.html"),
+		TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"),
+		TEXT("asset/Engine/EngineResources/DefaultTexture") };
 	TextureResource.GroupId = TEXT("document/images");
 	TextureResource.Residency = EWebToUEResidencyClass::Visible;
 	CompiledDocument.ResourceManifest.Add({ EWebToUEResourceKind::StringTable,
 		FSoftObjectPath(TEXT("/WebToUETests/ST_Boundary.ST_Boundary")) });
-	CompiledDocument.SealedResourceDependencies.Add({ TEXT("source/boundary.html"),
-		EWebToUEResourceDependencyKind::UiSource, FString::ChrN(64, TEXT('a')) });
-	CompiledDocument.ResourceFreshness.ContractVersion = { 1, 0 };
-	CompiledDocument.ResourceFreshness.DocumentId = TEXT("document/boundary");
-	CompiledDocument.ResourceFreshness.DependencyClosureBlake3 = FString::ChrN(64, TEXT('b'));
-	CompiledDocument.ResourceFreshness.ResourceManifestBlake3 = FString::ChrN(64, TEXT('c'));
-	CompiledDocument.ResourceFreshness.ArtifactVersions.UiIr = { 1, 0 };
-	CompiledDocument.ResourceFreshness.ArtifactVersions.ResourceIr = { 1, 0 };
 
 	FWebToUECompiledNode& Body = CompiledDocument.Nodes.AddDefaulted_GetRef();
 	Body.Type = static_cast<uint8>(EWebToUENodeType::Element);
@@ -103,6 +164,8 @@ bool FWebToUECompiledDocumentBoundaryTest::RunTest(const FString& Parameters)
 	HoverSelector.RequiredState = static_cast<uint8>(EWebToUEPseudoState::Hover);
 	AddDeclaration(HoverRule, TEXT("background-color"), TEXT("#ff0000"));
 
+	WebToUE::Tests::SealResourceContractForTesting(
+		CompiledDocument, TEXT("document/boundary"));
 	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
 	const FWebToUECompiledNode* InitialNodeStorage = Document->GetCompiledNodes().GetData();
 	const FWebToUECompiledRule* InitialRuleStorage = Document->GetCompiledRules().GetData();
@@ -125,13 +188,11 @@ bool FWebToUECompiledDocumentBoundaryTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The resource manifest retains document residency"),
 		Document->GetResourceManifest()[0].Residency, EWebToUEResidencyClass::Visible);
 	TestEqual(TEXT("The sealed dependency list crosses the asset boundary"),
-		Document->GetSealedResourceDependencies().Num(), 1);
+		Document->GetSealedResourceDependencies().Num(), 2);
 	TestEqual(TEXT("The freshness stamp crosses the asset boundary"),
 		Document->GetResourceFreshness().DocumentId, FString(TEXT("document/boundary")));
 
 	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
-	AddExpectedError(TEXT("/WebToUETests/T_Boundary"),
-		EAutomationExpectedErrorFlags::Contains, -1);
 	AddExpectedError(TEXT("/WebToUETests/ST_Boundary"),
 		EAutomationExpectedErrorFlags::Contains, -1);
 	View->SetDocument(Document);

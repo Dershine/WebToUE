@@ -87,6 +87,11 @@ void UWebToUEView::SetDataContext(UObject* InDataContext)
 	BindFieldNotifications();
 }
 
+bool UWebToUEView::RequestLazyResource(const FString& ResourceId)
+{
+	return SlateView && SlateView->RequestLazyResource(ResourceId);
+}
+
 void UWebToUEView::RefreshBindings()
 {
 	if (SlateView) SlateView->RefreshBindings(DataContext);

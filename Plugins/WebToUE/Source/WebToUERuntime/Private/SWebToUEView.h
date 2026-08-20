@@ -27,6 +27,7 @@ public:
 	virtual ~SWebToUEView() override;
 	void Construct(const FArguments& InArgs);
 	void SetDocument(UWebToUEDocument* InDocument);
+	bool RequestLazyResource(const FString& ResourceId);
 	void RefreshBindings(UObject* DataContext, FName ChangedField = NAME_None);
 	TSet<FName> GetBoundFields() const;
 	void GetSemanticNodes(TArray<FWebToUESemanticNode>& OutNodes) const;
@@ -118,6 +119,8 @@ public:
 	uint64 GetPresentationResourceCancellationsForTesting() const;
 	int32 FindPresentationResourceHandleForTesting(EWebToUEResourceKind Kind,
 		const FSoftObjectPath& Path) const;
+	int32 FindPresentationResourceHandleByIdForTesting(const FString& ResourceId) const;
+	bool ArePresentationCriticalResourcesReadyForTesting() const;
 	const UObject* GetPresentationResourceObjectForTesting(int32 Handle) const;
 	bool FinalizePresentationResourcesForTesting() const;
 	const void* GetPresentationTextCacheIdentityForTesting(const FWebToUENode& Node) const;

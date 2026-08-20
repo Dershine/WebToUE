@@ -82,6 +82,18 @@ bool FWebToUEResourceManifestTest::RunTest(const FString& Parameters)
 			TextureResource->Provenance.Origin, EWebToUEResourceOrigin::UnrealAsset);
 		TestEqual(TEXT("Duplicate references promote document residency to Critical"),
 			TextureResource->Residency, EWebToUEResidencyClass::Critical);
+		int32 BoundImageCount = 0;
+		for (const FWebToUECompiledNode& Node : Document->GetCompiledNodes())
+		{
+			if (Node.Tag == TEXT("img"))
+			{
+				++BoundImageCount;
+				TestEqual(TEXT("Image nodes consume the shared logical ResourceId"),
+					Node.ResourceId, TextureResource->ResourceId);
+			}
+		}
+		TestEqual(TEXT("Both duplicate image nodes carry the contract identity"),
+			BoundImageCount, 2);
 	}
 	TestEqual(TEXT("The sealed contract contains UI Source and Texture package inputs"),
 		Document->GetSealedResourceDependencies().Num(), 2);

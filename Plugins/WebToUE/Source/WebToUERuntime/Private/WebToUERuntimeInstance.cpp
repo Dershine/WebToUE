@@ -284,6 +284,16 @@ void FWebToUERuntimeInstance::Reset()
 bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 {
 	Reset();
+	TArray<FWebToUEResourceContractDiagnostic> ResourceDiagnostics;
+	if (!CompiledDocument.ValidateResourceContract(ResourceDiagnostics))
+	{
+		for (const FWebToUEResourceContractDiagnostic& Diagnostic : ResourceDiagnostics)
+		{
+			UE_LOG(LogWebToUERuntimeInstance, Error, TEXT("%s %s: %s"),
+				*Diagnostic.Code, *Diagnostic.Path, *Diagnostic.Detail);
+		}
+		return false;
+	}
 	const TArray<FWebToUECompiledNode>& CompiledNodes = CompiledDocument.GetCompiledNodes();
 	if (!CompiledNodes.IsValidIndex(CompiledDocument.GetRootNodeIndex()))
 	{
@@ -318,6 +328,7 @@ bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 		Node->TemplateNodeId = FWebToUETemplateNodeId::FromIndex(CompiledNodeIndex);
 		Node->Type = static_cast<EWebToUENodeType>(Source.Type);
 		Node->Tag = Source.Tag;
+		Node->ResourceId = Source.ResourceId;
 		Node->Text = Source.Text;
 		Node->LocalizedText = Source.LocalizedText;
 		Node->bHasLocalizedText = Node->Type == EWebToUENodeType::Text;

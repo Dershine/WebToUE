@@ -328,6 +328,7 @@ struct WEBTOUECORE_API FWebToUENode : public TSharedFromThis<FWebToUENode>
 {
 	EWebToUENodeType Type = EWebToUENodeType::Element;
 	FString Tag;
+	FString ResourceId;
 	FString Text;
 	FText LocalizedText;
 	bool bHasLocalizedText = false;

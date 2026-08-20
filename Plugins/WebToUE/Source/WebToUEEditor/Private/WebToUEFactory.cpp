@@ -183,6 +183,15 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 		FWebToUECompiledNode Serialized;
 		Serialized.Type = static_cast<uint8>(Node->Type);
 		Serialized.Tag = Node->Tag;
+		if (Node->Tag == TEXT("img"))
+		{
+			const FString AuthorReference = Node->GetAttribute(TEXT("src"));
+			if (!AuthorReference.IsEmpty())
+			{
+				Serialized.ResourceId = TEXT("resource/texture/") +
+					WebToUE::ResourceImport::Private::HashUtf8(AuthorReference);
+			}
+		}
 		Serialized.Text = Node->Text;
 		Serialized.bRichText = Node->bRichText;
 		Serialized.ParentIndex = ParentIndex;

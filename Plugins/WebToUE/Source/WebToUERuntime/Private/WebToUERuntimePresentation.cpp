@@ -162,7 +162,7 @@ FWebToUERuntimePresentation::FWebToUERuntimePresentation(SWebToUEView& InOwnerWi
 
 FWebToUERuntimePresentation::~FWebToUERuntimePresentation()
 {
-	CancelResourcePreload();
+	CancelResourceRequests();
 }
 
 FWebToUEDocument* FWebToUERuntimePresentation::GetDocument()
@@ -237,14 +237,17 @@ void FWebToUERuntimePresentation::Reset()
 	DirtyRects.Reset();
 	DirtyCommandIndices.Reset();
 	bDisplayListDirty = true;
+	CancelResourceRequests();
+	ResolvedResources.Reset();
+	ResourceLoadStates.Reset();
+	PendingResourceRequests.Reset();
+	bCriticalResourcesReady = true;
 #if WITH_DEV_AUTOMATION_TESTS
 	ResourceLoadAttemptsForTesting = 0;
 	ResourceAsyncRequestsForTesting = 0;
 	ResourceFailuresForTesting = 0;
 	ResourceCancellationsForTesting = 0;
 #endif
-	CancelResourcePreload();
-	ResolvedResources.Reset();
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -252,7 +255,8 @@ uint64 FWebToUERuntimePresentation::GetKnownOwnedBytesForTesting() const
 {
 	uint64 Bytes = sizeof(*this) + Brushes.GetAllocatedSize() + TextLayouts.GetAllocatedSize() +
 		MeasureDirtyNodes.GetAllocatedSize() + LayoutDirtyNodes.GetAllocatedSize() +
-		ResolvedResources.GetAllocatedSize() + PaintOrderNodes.GetAllocatedSize() +
+		ResolvedResources.GetAllocatedSize() + ResourceLoadStates.GetAllocatedSize() +
+		PendingResourceRequests.GetAllocatedSize() + PaintOrderNodes.GetAllocatedSize() +
 		PaintOrderRanges.GetAllocatedSize() + DisplayCommands.GetAllocatedSize() +
 		DisplayCommandIndices.GetAllocatedSize() + DisplayCommandRanges.GetAllocatedSize() +
 		DisplaySpatialCells.GetAllocatedSize() + LargeDisplayCommands.GetAllocatedSize() +
@@ -294,8 +298,10 @@ void FWebToUERuntimePresentation::RebuildCaches(bool bReloadResources)
 	else
 	{
 		Brushes.Reset();
-		CancelResourcePreload();
+		CancelResourceRequests();
 		ResolvedResources.Reset();
+		ResourceLoadStates.Reset();
+		PendingResourceRequests.Reset();
 		PaintOrderNodes.Reset();
 		PaintOrderRanges.Reset();
 		DisplayCommands.Reset();
@@ -331,94 +337,159 @@ namespace WebToUE::Runtime::Presentation::Private
 	}
 }
 
-void FWebToUERuntimePresentation::CancelResourcePreload() const
+void FWebToUERuntimePresentation::CancelResourceRequests() const
 {
-	if (PendingResourceRequest.IsValid() && !PendingResourceRequest->HasLoadCompleted())
+	for (int32 Index = 0; Index < PendingResourceRequests.Num(); ++Index)
 	{
-		PendingResourceRequest->CancelHandle();
+		TSharedPtr<FStreamableHandle>& Request = PendingResourceRequests[Index];
+		if (!Request.IsValid() || Request->HasLoadCompleted())
+		{
+			continue;
+		}
+		Request->CancelHandle();
+		if (ResourceLoadStates.IsValidIndex(Index))
+		{
+			ResourceLoadStates[Index] = EResourceLoadState::NotRequested;
+		}
 		FWebToUEPerformanceCapture::RecordCounter(
 			EWebToUEPerformanceCounter::ResourceCancellations);
 #if WITH_DEV_AUTOMATION_TESTS
 		++ResourceCancellationsForTesting;
 #endif
 	}
-	PendingResourceRequest.Reset();
+	PendingResourceRequests.Reset();
 }
 
-void FWebToUERuntimePresentation::BeginResourcePreload() const
+void FWebToUERuntimePresentation::InitializeResourceResidency() const
 {
-	using namespace WebToUE::Runtime::Presentation::Private;
-	CancelResourcePreload();
+	CancelResourceRequests();
 	const TConstArrayView<FWebToUECompiledResource> Manifest =
 		RuntimeInstance.GetResourceManifest();
 	ResolvedResources.Reset();
 	ResolvedResources.SetNum(Manifest.Num());
+	ResourceLoadStates.Reset();
+	ResourceLoadStates.Init(EResourceLoadState::NotRequested, Manifest.Num());
+	PendingResourceRequests.Reset();
+	PendingResourceRequests.SetNum(Manifest.Num());
 	FWebToUEPerformanceCapture::RecordCounter(
 		EWebToUEPerformanceCounter::ResourceManifestEntries, Manifest.Num());
 	FWebToUEPerformanceCapture::RecordCounter(
 		EWebToUEPerformanceCounter::ResourceKnownOwnedBytes,
 		ResolvedResources.GetAllocatedSize());
 
-	TArray<FSoftObjectPath> PendingPaths;
-	PendingPaths.Reserve(Manifest.Num());
 	for (int32 Index = 0; Index < Manifest.Num(); ++Index)
 	{
 		const FWebToUECompiledResource& Resource = Manifest[Index];
-		if (UObject* Object = Resource.Path.ResolveObject())
+		if (Resource.Kind != EWebToUEResourceKind::Texture ||
+			Resource.Residency == EWebToUEResidencyClass::Critical)
 		{
-			if (IsExpectedResourceType(Resource.Kind, Object))
-			{
-				ResolvedResources[Index].Reset(Object);
-				FWebToUEPerformanceCapture::RecordCounter(
-					EWebToUEPerformanceCounter::ResourceCacheHits);
-			}
-			else
-			{
-				FWebToUEPerformanceCapture::RecordCounter(
-					EWebToUEPerformanceCounter::ResourceFailures);
-#if WITH_DEV_AUTOMATION_TESTS
-				++ResourceFailuresForTesting;
-#endif
-			}
+			RequestResource(Index);
+		}
+	}
+	RefreshCriticalResourceReadiness();
+}
+
+bool FWebToUERuntimePresentation::RequestResource(int32 Handle) const
+{
+	using namespace WebToUE::Runtime::Presentation::Private;
+	const TConstArrayView<FWebToUECompiledResource> Manifest =
+		RuntimeInstance.GetResourceManifest();
+	if (!Manifest.IsValidIndex(Handle) || !ResourceLoadStates.IsValidIndex(Handle) ||
+		ResourceLoadStates[Handle] != EResourceLoadState::NotRequested)
+	{
+		return false;
+	}
+	const FWebToUECompiledResource& Resource = Manifest[Handle];
+	if (UObject* Object = Resource.Path.ResolveObject())
+	{
+		if (IsExpectedResourceType(Resource.Kind, Object))
+		{
+			ResolvedResources[Handle].Reset(Object);
+			ResourceLoadStates[Handle] = EResourceLoadState::Resolved;
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::ResourceCacheHits);
 		}
 		else
 		{
-			PendingPaths.AddUnique(Resource.Path);
-		}
-	}
-	if (!PendingPaths.IsEmpty())
-	{
-		FWebToUEPerformanceCapture::RecordCounter(
-			EWebToUEPerformanceCounter::ResourceAsyncRequests, PendingPaths.Num());
+			ResourceLoadStates[Handle] = EResourceLoadState::Failed;
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::ResourceFailures);
 #if WITH_DEV_AUTOMATION_TESTS
-		ResourceAsyncRequestsForTesting += PendingPaths.Num();
+			++ResourceFailuresForTesting;
 #endif
-		const TWeakPtr<SWidget> WeakOwnerWidget = OwnerWidget.AsShared();
-		PendingResourceRequest = UAssetManager::GetStreamableManager().RequestAsyncLoad(
-			PendingPaths, FStreamableDelegate::CreateLambda([WeakOwnerWidget]()
+		}
+		return true;
+	}
+
+	const TWeakPtr<SWidget> WeakOwnerWidget = OwnerWidget.AsShared();
+	PendingResourceRequests[Handle] =
+		UAssetManager::GetStreamableManager().RequestAsyncLoad(
+			Resource.Path, FStreamableDelegate::CreateLambda([WeakOwnerWidget]()
 			{
 				if (const TSharedPtr<SWidget> Widget = WeakOwnerWidget.Pin())
 				{
 					Widget->Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
 				}
 			}), FStreamableManager::AsyncLoadHighPriority,
-			false, false, TEXT("WebToUEViewResources"));
-		FinalizeResourcePreload();
+			false, false, *FString::Printf(TEXT("WebToUEResource:%s"), *Resource.ResourceId));
+	if (PendingResourceRequests[Handle].IsValid())
+	{
+		ResourceLoadStates[Handle] = EResourceLoadState::Pending;
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::ResourceAsyncRequests);
+#if WITH_DEV_AUTOMATION_TESTS
+		++ResourceAsyncRequestsForTesting;
+#endif
 	}
+	else
+	{
+		ResourceLoadStates[Handle] = EResourceLoadState::Failed;
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::ResourceFailures);
+#if WITH_DEV_AUTOMATION_TESTS
+		++ResourceFailuresForTesting;
+#endif
+	}
+	return true;
+}
+
+bool FWebToUERuntimePresentation::RequestVisibleResources() const
+{
+	const FWebToUEDocument* RuntimeDocument = GetDocument();
+	if (!RuntimeDocument)
+	{
+		return false;
+	}
+	bool bRequested = false;
+	RuntimeDocument->ForEachNode([this, RuntimeDocument, &bRequested](FWebToUENode& Node)
+	{
+		if (Node.Tag != TEXT("img") || !RuntimeDocument->IsDisplayed(Node))
+		{
+			return;
+		}
+		const int32 Handle = FindResourceHandleById(Node.ResourceId);
+		const TConstArrayView<FWebToUECompiledResource> Manifest =
+			RuntimeInstance.GetResourceManifest();
+		if (Manifest.IsValidIndex(Handle) &&
+			Manifest[Handle].Residency == EWebToUEResidencyClass::Visible)
+		{
+			bRequested |= RequestResource(Handle);
+		}
+	});
+	return bRequested;
 }
 
 bool FWebToUERuntimePresentation::FinalizeResourcePreload() const
 {
 	using namespace WebToUE::Runtime::Presentation::Private;
-	if (!PendingResourceRequest.IsValid() || !PendingResourceRequest->HasLoadCompleted())
-	{
-		return false;
-	}
 	const TConstArrayView<FWebToUECompiledResource> Manifest =
 		RuntimeInstance.GetResourceManifest();
+	bool bChanged = false;
 	for (int32 Index = 0; Index < Manifest.Num(); ++Index)
 	{
-		if (ResolvedResources.IsValidIndex(Index) && ResolvedResources[Index].IsValid())
+		if (!PendingResourceRequests.IsValidIndex(Index) ||
+			!PendingResourceRequests[Index].IsValid() ||
+			!PendingResourceRequests[Index]->HasLoadCompleted())
 		{
 			continue;
 		}
@@ -426,18 +497,25 @@ bool FWebToUERuntimePresentation::FinalizeResourcePreload() const
 		if (IsExpectedResourceType(Manifest[Index].Kind, Object))
 		{
 			ResolvedResources[Index].Reset(Object);
+			ResourceLoadStates[Index] = EResourceLoadState::Resolved;
 		}
 		else
 		{
+			ResourceLoadStates[Index] = EResourceLoadState::Failed;
 			FWebToUEPerformanceCapture::RecordCounter(
 				EWebToUEPerformanceCounter::ResourceFailures);
 #if WITH_DEV_AUTOMATION_TESTS
 			++ResourceFailuresForTesting;
 #endif
 		}
+		PendingResourceRequests[Index].Reset();
+		bChanged = true;
 	}
-	PendingResourceRequest.Reset();
-	return true;
+	if (bChanged)
+	{
+		RefreshCriticalResourceReadiness();
+	}
+	return bChanged;
 }
 
 int32 FWebToUERuntimePresentation::FindResourceHandle(EWebToUEResourceKind Kind,
@@ -451,11 +529,82 @@ int32 FWebToUERuntimePresentation::FindResourceHandle(EWebToUEResourceKind Kind,
 	});
 }
 
+int32 FWebToUERuntimePresentation::FindResourceHandleById(
+	const FString& ResourceId) const
+{
+	const TConstArrayView<FWebToUECompiledResource> Manifest =
+		RuntimeInstance.GetResourceManifest();
+	return Manifest.IndexOfByPredicate([&ResourceId](const FWebToUECompiledResource& Resource)
+	{
+		return Resource.ResourceId == ResourceId;
+	});
+}
+
 UObject* FWebToUERuntimePresentation::GetResolvedResource(EWebToUEResourceKind Kind,
 	const FSoftObjectPath& Path) const
 {
 	const int32 Handle = FindResourceHandle(Kind, Path);
 	return ResolvedResources.IsValidIndex(Handle) ? ResolvedResources[Handle].Get() : nullptr;
+}
+
+UObject* FWebToUERuntimePresentation::GetResolvedResourceById(
+	const FString& ResourceId) const
+{
+	const int32 Handle = FindResourceHandleById(ResourceId);
+	return ResolvedResources.IsValidIndex(Handle) ? ResolvedResources[Handle].Get() : nullptr;
+}
+
+bool FWebToUERuntimePresentation::AreCriticalResourcesReady() const
+{
+	return bCriticalResourcesReady;
+}
+
+void FWebToUERuntimePresentation::RefreshCriticalResourceReadiness() const
+{
+	bCriticalResourcesReady = true;
+	const TConstArrayView<FWebToUECompiledResource> Manifest =
+		RuntimeInstance.GetResourceManifest();
+	for (int32 Index = 0; Index < Manifest.Num(); ++Index)
+	{
+		if (Manifest[Index].Kind == EWebToUEResourceKind::Texture &&
+			Manifest[Index].Residency == EWebToUEResidencyClass::Critical &&
+			(!ResourceLoadStates.IsValidIndex(Index) ||
+				ResourceLoadStates[Index] != EResourceLoadState::Resolved))
+		{
+			bCriticalResourcesReady = false;
+			return;
+		}
+	}
+}
+
+bool FWebToUERuntimePresentation::RequestLazyResource(
+	const FString& ResourceId) const
+{
+	const int32 Handle = FindResourceHandleById(ResourceId);
+	const TConstArrayView<FWebToUECompiledResource> Manifest =
+		RuntimeInstance.GetResourceManifest();
+	if (!Manifest.IsValidIndex(Handle) ||
+		Manifest[Handle].Residency != EWebToUEResidencyClass::Lazy)
+	{
+		return false;
+	}
+	const bool bRequested = RequestResource(Handle);
+	if (bRequested && ResourceLoadStates[Handle] == EResourceLoadState::Resolved)
+	{
+		if (const FWebToUEDocument* RuntimeDocument = GetDocument())
+		{
+			RuntimeDocument->ForEachNode([this, &ResourceId](FWebToUENode& Node)
+			{
+				if (Node.ResourceId == ResourceId)
+				{
+					RebuildBrush(Node);
+				}
+			});
+		}
+		bLayoutDirty = true;
+		bDisplayListDirty = true;
+	}
+	return bRequested;
 }
 
 UObject* FWebToUERuntimePresentation::GetResolvedFont(const FString& Family) const
@@ -712,7 +861,8 @@ void FWebToUERuntimePresentation::Layout(const FVector2f& ViewportSize) const
 {
 	FWebToUEDocument* RuntimeDocument = const_cast<FWebToUEDocument*>(GetDocument());
 	if (!RuntimeDocument || !RuntimeDocument->Root) return;
-	if (FinalizeResourcePreload())
+	const bool bRequestedVisibleResources = RequestVisibleResources();
+	if (FinalizeResourcePreload() || bRequestedVisibleResources)
 	{
 		TextLayouts.Reset();
 		RuntimeDocument->ForEachNode([this](FWebToUENode& Node)
@@ -889,7 +1039,7 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 	}
 	Command.SubtreeBounds = Command.VisibleBounds;
 	Command.bDrawable = Node.Type == EWebToUENodeType::Text;
-	Command.bInteractive = Node.IsInteractive();
+	Command.bInteractive = Node.IsInteractive() && AreCriticalResourcesReady();
 	Command.bScrollable = RuntimeDocument.IsScrollable(Node) &&
 		GetState(Node).MaxScrollOffset.Y > 0.0f;
 	Command.bSpatiallyIndexed = false;
@@ -1400,7 +1550,7 @@ void FWebToUERuntimePresentation::RebuildBrushes(bool bReloadResources) const
 	if (bReloadResources)
 	{
 		Brushes.Reset();
-		BeginResourcePreload();
+		InitializeResourceResidency();
 	}
 	const FWebToUEDocument* RuntimeDocument = GetDocument();
 	if (!RuntimeDocument) return;
@@ -1417,8 +1567,8 @@ void FWebToUERuntimePresentation::RebuildBrush(FWebToUENode& Node) const
 	{
 		const FWebToUEInstanceHandle NodeHandle = RuntimeInstance.GetHandle(&Node);
 		Brushes.Remove(NodeHandle);
-		UTexture2D* Texture = Cast<UTexture2D>(GetResolvedResource(
-			EWebToUEResourceKind::Texture, FSoftObjectPath(Node.GetAttribute(TEXT("src")))));
+		UTexture2D* Texture = Cast<UTexture2D>(
+			GetResolvedResourceById(Node.ResourceId));
 		if (Texture)
 		{
 			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
@@ -1453,6 +1603,12 @@ int32 FWebToUERuntimePresentation::FindResourceHandleForTesting(
 	EWebToUEResourceKind Kind, const FSoftObjectPath& Path) const
 {
 	return FindResourceHandle(Kind, Path);
+}
+
+int32 FWebToUERuntimePresentation::FindResourceHandleByIdForTesting(
+	const FString& ResourceId) const
+{
+	return FindResourceHandleById(ResourceId);
 }
 
 const UObject* FWebToUERuntimePresentation::GetResourceObjectForTesting(int32 Handle) const
@@ -1525,6 +1681,7 @@ FVector2f FWebToUERuntimePresentation::GetVisualPosition(const FWebToUENode& Nod
 
 FWebToUENode* FWebToUERuntimePresentation::HitTest(const FVector2f& LocalPosition) const
 {
+	if (!AreCriticalResourcesReady()) return nullptr;
 	SCOPE_CYCLE_COUNTER(STAT_WebToUE_HitTest);
 	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_HitTest);
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::HitTest);

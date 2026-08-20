@@ -34,6 +34,9 @@ bool FWebToUEAssetVersionTest::RunTest(const FString& Parameters)
 			FWebToUEAssetVersion::CompiledResourceManifest));
 	TestTrue(TEXT("Assets without the Resource Contract manifest require recompilation"),
 		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::CssSrgbColors));
+	TestTrue(TEXT("Assets without ResourceId node bindings require recompilation"),
+		FWebToUEAssetVersion::RequiresRecompile(
+			FWebToUEAssetVersion::ResourceContractManifest));
 	TestFalse(TEXT("Assets at the latest version do not require recompilation"),
 		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::LatestVersion));
 	return true;

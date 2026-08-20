@@ -62,6 +62,9 @@ public:
 	void SetDataContext(UObject* InDataContext);
 
 	UFUNCTION(BlueprintCallable, Category="WebToUE")
+	bool RequestLazyResource(const FString& ResourceId);
+
+	UFUNCTION(BlueprintCallable, Category="WebToUE")
 	void RefreshBindings();
 
 	UFUNCTION(BlueprintCallable, Category="WebToUE")

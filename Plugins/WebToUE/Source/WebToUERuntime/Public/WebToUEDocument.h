@@ -76,6 +76,7 @@ struct FWebToUECompiledNode
 	GENERATED_BODY()
 	UPROPERTY() uint8 Type = 0;
 	UPROPERTY() FString Tag;
+	UPROPERTY() FString ResourceId;
 	UPROPERTY() FString Text;
 	UPROPERTY() FText LocalizedText;
 	UPROPERTY() bool bRichText = false;
@@ -170,6 +171,8 @@ public:
 		return SealedResourceDependencies;
 	}
 	const FWebToUECookFreshnessStamp& GetResourceFreshness() const { return ResourceFreshness; }
+	bool ValidateResourceContract(
+		TArray<FWebToUEResourceContractDiagnostic>& OutDiagnostics) const;
 
 #if WITH_EDITORONLY_DATA
 	UPROPERTY(VisibleAnywhere, Category="WebToUE", meta=(MultiLine=true))

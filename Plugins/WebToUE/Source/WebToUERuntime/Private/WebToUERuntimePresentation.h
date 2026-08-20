@@ -145,6 +145,8 @@ public:
 	FVector2f GetVisualPosition(const FWebToUENode& Node) const;
 	TConstArrayView<FWebToUEInstanceHandle> GetPaintOrder(const FWebToUENode& Parent) const;
 	FText GetDisplayText(const FWebToUENode& Node) const;
+	bool RequestLazyResource(const FString& ResourceId) const;
+	bool AreCriticalResourcesReady() const;
 
 #if WITH_DEV_AUTOMATION_TESTS
 	FVector2f MeasureTextForTesting(const FString& Text, float Width, bool bWrap) const;
@@ -158,6 +160,7 @@ public:
 	uint64 GetResourceCancellationsForTesting() const { return ResourceCancellationsForTesting; }
 	int32 FindResourceHandleForTesting(EWebToUEResourceKind Kind,
 		const FSoftObjectPath& Path) const;
+	int32 FindResourceHandleByIdForTesting(const FString& ResourceId) const;
 	const UObject* GetResourceObjectForTesting(int32 Handle) const;
 	bool FinalizeResourcesForTesting() const { return FinalizeResourcePreload(); }
 	const void* GetTextLayoutCacheIdentityForTesting(const FWebToUENode& Node) const;
@@ -192,7 +195,16 @@ private:
 	mutable TSet<FWebToUEInstanceHandle> MeasureDirtyNodes;
 	mutable TSet<FWebToUEInstanceHandle> LayoutDirtyNodes;
 	mutable TArray<TStrongObjectPtr<UObject>> ResolvedResources;
-	mutable TSharedPtr<FStreamableHandle> PendingResourceRequest;
+	enum class EResourceLoadState : uint8
+	{
+		NotRequested,
+		Pending,
+		Resolved,
+		Failed
+	};
+	mutable TArray<EResourceLoadState> ResourceLoadStates;
+	mutable TArray<TSharedPtr<FStreamableHandle>> PendingResourceRequests;
+	mutable bool bCriticalResourcesReady = true;
 	TArray<FWebToUEInstanceHandle> PaintOrderNodes;
 	TMap<FWebToUEInstanceHandle, FWebToUEPaintOrderRange> PaintOrderRanges;
 	mutable TArray<FWebToUEPaintCommand> DisplayCommands;
@@ -231,11 +243,16 @@ private:
 		const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
 	FVector2f MeasureNodeWithStyle(const FWebToUENode& Node, const FWebToUEComputedStyle& Style,
 		const FWebToUELayoutEngine::FMeasureConstraints& Constraints) const;
-	void BeginResourcePreload() const;
-	void CancelResourcePreload() const;
+	void InitializeResourceResidency() const;
+	void CancelResourceRequests() const;
+	bool RequestResource(int32 Handle) const;
+	bool RequestVisibleResources() const;
+	void RefreshCriticalResourceReadiness() const;
 	bool FinalizeResourcePreload() const;
 	int32 FindResourceHandle(EWebToUEResourceKind Kind, const FSoftObjectPath& Path) const;
+	int32 FindResourceHandleById(const FString& ResourceId) const;
 	UObject* GetResolvedResource(EWebToUEResourceKind Kind, const FSoftObjectPath& Path) const;
+	UObject* GetResolvedResourceById(const FString& ResourceId) const;
 	UObject* GetResolvedFont(const FString& Family) const;
 	void RebuildDisplayList() const;
 	void BuildDisplaySubtree(const FWebToUEDocument& RuntimeDocument,

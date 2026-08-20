@@ -73,6 +73,107 @@ bool UWebToUEDocument::HasCompileErrors() const
 	});
 }
 
+bool UWebToUEDocument::ValidateResourceContract(
+	TArray<FWebToUEResourceContractDiagnostic>& OutDiagnostics) const
+{
+	OutDiagnostics.Reset();
+	const bool bHasTexture = ResourceManifest.ContainsByPredicate(
+		[](const FWebToUECompiledResource& Resource)
+		{
+			return Resource.Kind == EWebToUEResourceKind::Texture;
+		});
+	const bool bHasContract = ResourceFreshness.ContractVersion.IsPresent();
+	if (!bHasTexture && !bHasContract)
+	{
+		return true;
+	}
+
+	FWebToUEResourceContractDescriptor Descriptor;
+	Descriptor.ContractVersion = ResourceFreshness.ContractVersion;
+	Descriptor.DocumentId = ResourceFreshness.DocumentId;
+	Descriptor.CompilerFingerprintBlake3 = ResourceFreshness.CompilerFingerprintBlake3;
+	Descriptor.ArtifactVersions = ResourceFreshness.ArtifactVersions;
+	Descriptor.Dependencies = SealedResourceDependencies;
+
+	TMap<FString, const FWebToUECompiledResource*> ResourcesById;
+	for (const FWebToUECompiledResource& Resource : ResourceManifest)
+	{
+		if (Resource.Kind != EWebToUEResourceKind::Texture)
+		{
+			continue;
+		}
+		Descriptor.Resources.Add({ Resource.ResourceId, Resource.Provenance });
+		Descriptor.ResidencyAssignments.Add({ Resource.ResourceId, FString(),
+			Resource.GroupId, Resource.Residency });
+		if (Resource.Path.IsNull() || ResourcesById.Contains(Resource.ResourceId))
+		{
+			OutDiagnostics.Add({ TEXT("WTUE-RES-002"),
+				TEXT("manifest/") + Resource.ResourceId,
+				TEXT("Texture manifest paths and ResourceIds must be present and unique.") });
+		}
+		else
+		{
+			ResourcesById.Add(Resource.ResourceId, &Resource);
+		}
+	}
+
+	for (int32 NodeIndex = 0; NodeIndex < CompiledNodes.Num(); ++NodeIndex)
+	{
+		const FWebToUECompiledNode& Node = CompiledNodes[NodeIndex];
+		if (Node.Tag != TEXT("img"))
+		{
+			continue;
+		}
+		const FWebToUECompiledResource* const* Resource =
+			ResourcesById.Find(Node.ResourceId);
+		const FWebToUECompiledAttribute* SourceAttribute =
+			Node.Attributes.FindByPredicate([](const FWebToUECompiledAttribute& Attribute)
+			{
+				return Attribute.Name == TEXT("src");
+			});
+		if (!Resource || !SourceAttribute ||
+			(*Resource)->Provenance.AuthorReference != SourceAttribute->Value ||
+			(*Resource)->Path != FSoftObjectPath(SourceAttribute->Value))
+		{
+			OutDiagnostics.Add({ TEXT("WTUE-RES-003"),
+				FString::Printf(TEXT("nodes/%d/resource-id"), NodeIndex),
+				TEXT("Image nodes must bind by ResourceId to their sealed Unreal texture manifest entry.") });
+		}
+	}
+
+	FWebToUEResourceContractSnapshot Snapshot;
+	TArray<FWebToUEResourceContractDiagnostic> SnapshotDiagnostics;
+	if (!FWebToUEResourceContractPolicy::BuildSnapshot(
+		Descriptor, Snapshot, SnapshotDiagnostics))
+	{
+		OutDiagnostics.Append(MoveTemp(SnapshotDiagnostics));
+	}
+	else
+	{
+		FWebToUEArtifactVersionSet SupportedVersions;
+		SupportedVersions.UiIr = { 1, 0 };
+		SupportedVersions.ResourceIr = { 1, 0 };
+		TArray<FWebToUEResourceContractDiagnostic> CompatibilityDiagnostics;
+		FWebToUEResourceContractPolicy::IsRuntimeCompatible(
+			Snapshot.Freshness.ArtifactVersions, SupportedVersions,
+			CompatibilityDiagnostics);
+		OutDiagnostics.Append(MoveTemp(CompatibilityDiagnostics));
+		TArray<FWebToUEResourceContractDiagnostic> FreshnessDiagnostics;
+		FWebToUEResourceContractPolicy::IsCookFresh(
+			Snapshot.Freshness, ResourceFreshness, FreshnessDiagnostics);
+		OutDiagnostics.Append(MoveTemp(FreshnessDiagnostics));
+	}
+
+	OutDiagnostics.Sort([](const FWebToUEResourceContractDiagnostic& A,
+		const FWebToUEResourceContractDiagnostic& B)
+	{
+		if (A.Code != B.Code) return A.Code < B.Code;
+		if (A.Path != B.Path) return A.Path < B.Path;
+		return A.Detail < B.Detail;
+	});
+	return OutDiagnostics.IsEmpty();
+}
+
 UWebToUEDocument::FOnDocumentChanged& UWebToUEDocument::OnDocumentChanged()
 {
 	static FOnDocumentChanged Delegate;

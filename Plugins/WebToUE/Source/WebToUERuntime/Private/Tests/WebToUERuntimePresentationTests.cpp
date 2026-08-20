@@ -5,6 +5,7 @@
 #include "WebToUECompiler.h"
 #include "WebToUEDocument.h"
 #include "WebToUEPerformance.h"
+#include "WebToUEResourceContractTestUtils.h"
 #include "WebToUEStyleProperties.h"
 
 #include "Input/HittestGrid.h"
@@ -134,6 +135,7 @@ bool FWebToUERuntimePresentationIsolationTest::RunTest(const FString& Parameters
 	HoverSelector.RequiredState = static_cast<uint8>(EWebToUEPseudoState::Hover);
 	AddDeclaration(HoverRule, TEXT("background-color"), TEXT("#ff0000"));
 
+	WebToUE::Tests::SealResourceContractForTesting(CompiledDocument);
 	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
 	const FWebToUECompiledNode* InitialNodeStorage = Document->GetCompiledNodes().GetData();
 	const FWebToUECompiledRule* InitialRuleStorage = Document->GetCompiledRules().GetData();
@@ -469,6 +471,7 @@ bool FWebToUEPaintOnlyPseudoResourceSafetyTest::RunTest(const FString& Parameter
 	HoverSelector.RequiredState = static_cast<uint8>(EWebToUEPseudoState::Hover);
 	AddDeclaration(HoverRule, TEXT("opacity"), TEXT("0.25"));
 
+	WebToUE::Tests::SealResourceContractForTesting(CompiledDocument);
 	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
 	TestNotNull(TEXT("The test texture is resident before runtime presentation"),
 		LoadObject<UTexture2D>(nullptr,

@@ -103,6 +103,16 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	RebuildStylesAndBrushes();
 }
 
+bool SWebToUEView::RequestLazyResource(const FString& ResourceId)
+{
+	const bool bRequested = Presentation->RequestLazyResource(ResourceId);
+	if (bRequested)
+	{
+		Invalidate(EInvalidateWidgetReason::LayoutAndVolatility);
+	}
+	return bRequested;
+}
+
 FVector2D SWebToUEView::ComputeDesiredSize(float LayoutScaleMultiplier) const
 {
 	return FVector2D(320.0, 180.0);
@@ -382,6 +392,17 @@ int32 SWebToUEView::FindPresentationResourceHandleForTesting(
 	EWebToUEResourceKind Kind, const FSoftObjectPath& Path) const
 {
 	return Presentation->FindResourceHandleForTesting(Kind, Path);
+}
+
+int32 SWebToUEView::FindPresentationResourceHandleByIdForTesting(
+	const FString& ResourceId) const
+{
+	return Presentation->FindResourceHandleByIdForTesting(ResourceId);
+}
+
+bool SWebToUEView::ArePresentationCriticalResourcesReadyForTesting() const
+{
+	return Presentation->AreCriticalResourcesReady();
 }
 
 const UObject* SWebToUEView::GetPresentationResourceObjectForTesting(int32 Handle) const

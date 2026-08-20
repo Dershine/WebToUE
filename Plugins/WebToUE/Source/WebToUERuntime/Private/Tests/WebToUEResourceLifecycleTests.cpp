@@ -3,6 +3,7 @@
 #include "SWebToUEView.h"
 #include "WebToUEDocument.h"
 #include "WebToUEPerformance.h"
+#include "WebToUEResourceContractTestUtils.h"
 #include "WebToUESettings.h"
 #include "WebToUEStyleProperties.h"
 
@@ -16,6 +17,10 @@
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceLifecycleTest,
 	"WebToUE.Runtime.ResourceLifecycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceResidencyTest,
+	"WebToUE.Runtime.ResourceResidency",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 namespace WebToUE::ResourceLifecycle::Tests
@@ -104,6 +109,7 @@ bool FWebToUEResourceLifecycleTest::RunTest(const FString& Parameters)
 		{ EWebToUEResourceKind::Font, FontPath });
 	CompiledDocument.ResourceManifest.Add(
 		{ EWebToUEResourceKind::Texture, FontPath });
+	WebToUE::Tests::SealResourceContractForTesting(CompiledDocument);
 	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
 
 	const TSharedRef<SWebToUEView> FirstView = SNew(SWebToUEView);
@@ -147,6 +153,7 @@ bool FWebToUEResourceLifecycleTest::RunTest(const FString& Parameters)
 
 	const TSharedRef<SWebToUEView> SecondView = SNew(SWebToUEView);
 	SecondView->SetDocument(Document);
+	SecondView->LayoutForTesting(FVector2f(640.0f, 360.0f));
 	const int32 SecondTextureHandle = SecondView->FindPresentationResourceHandleForTesting(
 		EWebToUEResourceKind::Texture, TexturePath);
 	TestEqual(TEXT("Manifest handles are stable across views"), SecondTextureHandle, TextureHandle);
@@ -194,6 +201,9 @@ bool FWebToUEResourceLifecycleTest::RunTest(const FString& Parameters)
 	PendingRoot.Tag = TEXT("body");
 	PendingCompiled.ResourceManifest.Add({ EWebToUEResourceKind::Texture,
 		FSoftObjectPath(TEXT("/Game/WebToUEAutomation/T_Pending.T_Pending")) });
+	PendingCompiled.ResourceManifest[0].Residency = EWebToUEResidencyClass::Critical;
+	WebToUE::Tests::SealResourceContractForTesting(
+		PendingCompiled, TEXT("document/pending-test"));
 	PendingDocument->CommitCompiledDocument(MoveTemp(PendingCompiled));
 	const TSharedRef<SWebToUEView> PendingView = SNew(SWebToUEView);
 	AddExpectedError(TEXT("/Game/WebToUEAutomation/T_Pending"),
@@ -216,10 +226,89 @@ bool FWebToUEResourceLifecycleTest::RunTest(const FString& Parameters)
 		CancellationSnapshot.GetCounter(EWebToUEPerformanceCounter::ResourceCancellations),
 		uint64(1));
 	PendingView->SetDocument(Document);
+	PendingView->LayoutForTesting(FVector2f(640.0f, 360.0f));
 	const int32 RecoveredTextureHandle = PendingView->FindPresentationResourceHandleForTesting(
 		EWebToUEResourceKind::Texture, TexturePath);
 	TestNotNull(TEXT("A view can recover with a valid document after cancelling a request"),
 		PendingView->GetPresentationResourceObjectForTesting(RecoveredTextureHandle));
+	return true;
+}
+
+bool FWebToUEResourceResidencyTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::ResourceLifecycle::Tests;
+	const FSoftObjectPath CriticalPath(
+		TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
+	const FSoftObjectPath VisiblePath(
+		TEXT("/Engine/EngineResources/Black.Black"));
+	const FSoftObjectPath LazyPath(
+		TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
+	for (const FSoftObjectPath& Path : { CriticalPath, VisiblePath, LazyPath })
+	{
+		TestNotNull(TEXT("Residency fixture texture is resident"),
+			LoadObject<UTexture2D>(nullptr, *Path.ToString()));
+	}
+
+	UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
+	FWebToUECompiledDocumentData CompiledDocument;
+	CompiledDocument.RootNodeIndex = 0;
+	FWebToUECompiledNode& Root = CompiledDocument.Nodes.AddDefaulted_GetRef();
+	Root.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	Root.Tag = TEXT("body");
+	const TArray<FSoftObjectPath> Paths{ CriticalPath, VisiblePath, LazyPath };
+	for (int32 Index = 0; Index < Paths.Num(); ++Index)
+	{
+		FWebToUECompiledNode& Image = CompiledDocument.Nodes.AddDefaulted_GetRef();
+		Image.Type = static_cast<uint8>(EWebToUENodeType::Element);
+		Image.Tag = TEXT("img");
+		Image.ParentIndex = 0;
+		AddAttribute(Image, TEXT("id"),
+			*FString::Printf(TEXT("residency-%d"), Index));
+		AddAttribute(Image, TEXT("src"), *Paths[Index].ToString());
+		FWebToUECompiledResource& Resource =
+			CompiledDocument.ResourceManifest.AddDefaulted_GetRef();
+		Resource.Kind = EWebToUEResourceKind::Texture;
+		Resource.Path = Paths[Index];
+		Resource.ResourceId = FString::Printf(
+			TEXT("resource/texture/residency-%d"), Index);
+		Resource.Residency = Index == 0 ? EWebToUEResidencyClass::Critical :
+			Index == 1 ? EWebToUEResidencyClass::Visible :
+			EWebToUEResidencyClass::Lazy;
+	}
+	WebToUE::Tests::SealResourceContractForTesting(
+		CompiledDocument, TEXT("document/residency-test"));
+	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
+
+	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
+	View->SetDocument(Document);
+	const int32 CriticalHandle = View->FindPresentationResourceHandleByIdForTesting(
+		TEXT("resource/texture/residency-0"));
+	const int32 VisibleHandle = View->FindPresentationResourceHandleByIdForTesting(
+		TEXT("resource/texture/residency-1"));
+	const int32 LazyHandle = View->FindPresentationResourceHandleByIdForTesting(
+		TEXT("resource/texture/residency-2"));
+	TestTrue(TEXT("Critical residency is satisfied during Document activation"),
+		View->ArePresentationCriticalResourcesReadyForTesting());
+	TestNotNull(TEXT("Critical texture is resident before interaction"),
+		View->GetPresentationResourceObjectForTesting(CriticalHandle));
+	TestNull(TEXT("Visible texture is not requested before its node is evaluated"),
+		View->GetPresentationResourceObjectForTesting(VisibleHandle));
+	TestNull(TEXT("Lazy texture is not part of Document activation"),
+		View->GetPresentationResourceObjectForTesting(LazyHandle));
+
+	View->LayoutForTesting(FVector2f(640.0f, 360.0f));
+	TestNotNull(TEXT("Displayed Visible texture is requested by the visibility boundary"),
+		View->GetPresentationResourceObjectForTesting(VisibleHandle));
+	TestNull(TEXT("Layout does not implicitly request Lazy texture"),
+		View->GetPresentationResourceObjectForTesting(LazyHandle));
+	TestTrue(TEXT("Explicit ResourceId consumption requests a Lazy texture"),
+		View->RequestLazyResource(TEXT("resource/texture/residency-2")));
+	TestNotNull(TEXT("Explicit Lazy request retains the resolved texture strongly"),
+		View->GetPresentationResourceObjectForTesting(LazyHandle));
+	TestFalse(TEXT("A resolved Lazy resource is not requested twice"),
+		View->RequestLazyResource(TEXT("resource/texture/residency-2")));
+	TestFalse(TEXT("Unknown ResourceIds fail without path fallback"),
+		View->RequestLazyResource(TEXT("resource/texture/unknown")));
 	return true;
 }
 
