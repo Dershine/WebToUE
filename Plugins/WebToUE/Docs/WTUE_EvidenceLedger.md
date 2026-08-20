@@ -46,7 +46,7 @@
 - schema 6 Development/Shipping Packaged GT/RT/GPU/input、冷启动、内存和 UMG 对照出口门。
 - Win64 Editor Strict、Game Development/Shipping BuildCookRun、Automation 与 Go/No-Go 收口。
 
-### M3 已完成微观路线——宏观 4 / 11
+### M3 已完成微观路线——宏观 5 / 11
 
 - M3.0：Native Component Registry/Factory/Instance 的显式 C++ 合同、schema 拒绝边界与 RAII 注册所有权。
 - M3.1：Screen UI Session 绑定 LocalPlayer/World/Surface/Data/Command/Environment/Clock/Generation；per-LocalPlayer Screen Host、World/LocalPlayer 清理与固定 Packaged Corpus 生产宿主迁移。
@@ -54,6 +54,8 @@
 - M3.1 `P0.5-if-used`：冻结 MainMenu/HUD/ScrollableSettings 不声明 World Surface，World Host 以自动化 Corpus 证据裁决为 `N/A`。
 - M3.2：Session-owned Game Thread 更新事务、非 Game Thread MPSC 入队、遍历来源 Structural Mutation 拒绝、评估/提交重入分层、循环/工作量预算、有界 Trace、失活取消与 Post-Commit Feedback 基础合同。
 - M3.2 `P0.5-if-used`：路线只包含无条件 `P0.5` Runtime 前置，无 Corpus 选择性能力，裁决为 `N/A`。
+- M3.3：Generation-safe 事件路径快照、capture/target/bubble/default/stop、事务化 Click 默认动作、Pointer Capture Lost、per Slate User/Pointer 交互身份与聚合 Pseudo 引用计数。
+- M3.3 `P0.5-if-used`：路线只包含无条件 `P0.5` Runtime/Input 前置，裁决为 `N/A`；真实双 LocalPlayer/CommonUI Modal 与 Packaged 多指针没有被合成专项替代。
 
 ## 2. 性能测量政策与固定语料
 
@@ -168,6 +170,7 @@ M2.9 的 schema `6` / gate schema `1` 原始目录为 `Saved/WebToUEBenchmarks/M
 
 | 日期 | 基线 | 变化 | 路线影响 |
 | --- | --- | --- | --- |
+| 2026-08-20 | `692ffeb` + `048a676` + `a7c1db4` + M3.3 closure | Runtime 新增类型化 Click/PointerCaptureLost 事件、不可变 root→target Generation-safe 路径快照、capture/target/bubble、stop/immediate stop/prevent default 与监听器合同；`data-ue-on-click` 默认广播进入 Session-owned Post-Commit，监听 State Mutation 先提交，过期/失败事务不执行默认动作。View 将 hover/pressed/captured 拆为稀疏 Slate User/Pointer 身份，将 focus 拆为 per-user 身份，使用聚合引用计数保持共享 Pseudo；capture lost 只清除匹配身份。两个实现检查点分别由 Operations `576a06890ab944a088f0b36762164730`（8 / 8 actions，PID `33756`）与 `689cd53b5e1e4388bef6156ce399ddf8`（18 / 18 actions，PID `4456`）重建并通过聚焦 2 / 2、5 / 5。首轮完整套件 68 / 69 暴露聚合 hover 对祖先逐节点失效，使 `PseudoInvalidationPath` 的 Style dirty/visits 从 `2/3` 退化为 `3/4`；`a7c1db4` 改为单次批量去重，最终 Operation `52d93aaf0d65462a8ea8c9d0be4dce4c` 9 / 9 actions、聚焦 4 / 4、完整 69 / 69、0 failed/skipped/warnings（8.465 秒），Editor PID `13408` readiness/MCP/Python/World 健康。 | M3.3 达到 ✅ 7 / 7，宏观 M3 由 `4 / 11` 进入 `5 / 11`；R-15 收窄到 FieldNotify/Clock/异步/Behavior，R-17 获得身份隔离合同但真实双 LocalPlayer/CommonUI Modal/Packaged 多指针仍未验证，等级不变。本路线无默认 Tick、无每节点对象、无资源加载，不改资产/Cook/schema/模块依赖或可见输出，因此视觉、PIE、产品性能、Packaged Runtime 与 BuildCookRun 不适用；`P0.5-if-used=N/A`。下一路线只建议 M3.4 Clock/异步取消，本次未进入。 |
 | 2026-08-20 | `7be0f8e` + M3.2 closure | Runtime 新增 Session-owned `FWebToUEUpdateCoordinator`/`FWebToUEUpdateTransaction`：evaluation 收集 State/Structural Mutation 与 Post-Commit Effect 后按序原子提交；MPSC 接收非 GT evaluation，遍历来源结构写入整笔拒绝；evaluation 重入并入当前事务，Commit/Effect 重入进入后续事务；evaluation/mutation/effect/drain/Trace 均受硬预算，Session 失活拒绝或丢弃队列。专项证明失败/循环预算零部分提交、非 GT 生产者不直接写状态、Post-Commit Feedback 观察已提交状态且失败事务不路由。聚焦 3 / 3、完整 WebToUE Automation 66 / 66、0 failed/skipped/warnings（8.896 秒）通过；首轮受控编译暴露 move-only `TUniqueFunction` 数组的隐式 copy assignment，显式删除事务 copy/move 后最终 Operation `f379d269a129493fa9ae04ad215e45de` 完成 11 / 11 actions，Editor PID `17480` readiness/MCP/Python/World 健康。 | M3.2 达到 ✅ 7 / 7，宏观 M3 由 `3 / 11` 进入 `4 / 11`；R-15 获得事务/队列/预算基础但因 FieldNotify/事件/Behavior/异步尚未接入仍为 High，R-21 获得 Post-Commit 基础但真实 Cue/Profile/音频后端仍为 High。本路线不改资产/Cook/schema/模块依赖或可见输出，视觉、PIE、性能、Packaged Runtime 与 BuildCookRun 不适用；`P0.5-if-used=N/A`。下一路线只建议 M3.3 事件身份，本次未进入。 |
 | 2026-08-20 | `1fc2a20` + `5342bf6` + `3f1bf20` + M3.1 closure | Runtime 新增 `FWebToUESession`、Screen Surface/Environment/Clock/Generation、Feedback Request/Scope 与 Null/Recording Router；`FWebToUEScreenHost` 以 per-LocalPlayer View/SSafeZone、World cleanup/LocalPlayer removal 和显式 Shutdown 管理生命周期，`UWebToUEView` 文档换代推进 Session Generation。固定 WebToUE Packaged Runner 从全局 viewport 注入迁到生产 Host，UMG 对照不变；退出门首次暴露过晚 Host 析构的非零进程码，随后在请求退出前显式释放所有 UI 所有权。`CorpusSurfaceContract` 审计三类冻结 HTML/CSS 不使用 World Surface。 | M3.1 达到 ✅ 8 / 8，宏观 M3 由 `1 / 11` 进入 `3 / 11`；R-17 降为 Medium，R-21 的 Router/Scope/Generation 合同完成但真实 Profile/音频后端仍为 High。World Host 以 `P0.5-if-used=N/A` 关闭当前 Corpus 门；没有新增第三方依赖、资产 schema、VibeUE/Yoga 改动或 P1.0 接口。下一微观路线建议是 M3 Game Thread 更新事务，本次未开始。 |
 | 2026-08-20 | M3.0 基线 + UI Feedback route-decision working tree | 项目所有者确认游戏 UI 必须具备音效后，新增统一术语 UI Feedback Cue/Profile/Router 与 [ADR-0005](ADRs/ADR-0005-UI-Feedback-And-Audio-Routing-Boundary.md)：WTUE 只提交事务成功后的语义 Feedback Cue，UI Session 注入 Router，版本化 Profile/项目策略负责 Sound/SoundCue/MetaSound、预取、限频、Scope、用户设置和后端；普通瞬时反馈不经过 Gameplay Command 或 Native Component，长期 BGM/Audio State 仍归游戏 C++。Technical Summary 将 M4 重命名为 Native Presentation/Compositing，并把 Feedback 合同、资源/UE Router、Behavior `EmitFeedbackCue`、Inspector/Trace 分别纳入 M3～M6；新增 R-21。 | 这是产品/架构路线裁决，只修改领域语言、ADR、路线、Evidence Ledger 与 Support Matrix 的未支持说明；没有修改 Runtime、资产 schema、模块依赖或可见输出，也没有运行新的 Automation、Build、Editor、PIE 或 Packaged 门。当前实现事实仍为 M3.0 Native Component 合同完成；新增验收项后 M3 为 `1 / 11`、M4 为 `0 / 9`、M5 为 `0 / 10`，不是实现进度倒退。UI Feedback/音效在 Compiler、Runtime、真实资源和 Packaged 证据完成前继续标记为未支持。 |
