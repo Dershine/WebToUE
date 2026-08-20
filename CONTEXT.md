@@ -36,6 +36,18 @@ _Avoid_: DOM 操作、字符串属性写入、即时树修改
 保存 Compiled UI IR、资源依赖和必要元数据的可交付界面单元。
 _Avoid_: 网页、DOM Document、HTML 文件
 
+**Resource Identity（资源身份）**:
+一个 WTUE Document 合同修订内用于稳定引用同一逻辑资源的身份；它不等同于作者路径、UObject 身份或单次编译产生的 Manifest Handle。
+_Avoid_: Resource Path、Manifest Index、UObject ID
+
+**Resource Provenance（资源来源）**:
+记录资源由哪个 UI Source 声明、作者使用何种引用以及该引用解析到哪个密封依赖的可诊断来源关系。
+_Avoid_: 资源身份、机器绝对路径、Runtime 下载地址
+
+**Resource Residency（资源驻留需求）**:
+资源相对于 WTUE Document 或其中 Route 的可交互、可见或显式消费时机要求；它描述何时必须可用，不代表资源对象的所有权。
+_Avoid_: UObject 生命周期、永久常驻、加载优先级数字
+
 ## 运行时
 
 **Runtime UI Instance（运行时 UI 实例）**:

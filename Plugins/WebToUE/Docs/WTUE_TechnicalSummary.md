@@ -6,7 +6,7 @@
 >
 > 引擎/平台：Unreal Engine 5.8 / Win64
 >
-> 当前里程碑：M3——Runtime Semantics、Host 与原生互操作已完成 11 / 11；M3.0～M3.9 的 Native Component、Session/Host、事务/事件/异步、属性所有权、多树/Portal、Stable Identity、C++ Schema 与 Resource freshness 基础合同均已收口
+> 当前里程碑：M4——UE 原生表现与合成已开始 0 / 9；活跃微观路线为 M4.1 Unreal Texture/Brush Resource Contract 产品闭环
 >
 > 当前交付 Profile：PersonalGame-ready 0.5——Win64 项目内生产使用；通用商业 1.0 延后
 >
@@ -59,7 +59,7 @@
 | 功能成熟度 | 可覆盖固定 MainMenu/HUD/ScrollableSettings 原型，具备局部 Display patch、语义焦点/手柄导航、DPI/Safe Zone、重导入恢复和跨 DPI Golden；尚非完整生产 UI 框架 | 🟡 |
 | 性能成熟度 | 无默认 Tick；局部更新、K=1 工作量、Packaged Development/Shipping GT/RT/GPU/input、Batch/Vertex、冷启动、Development LLM 与第二 View 硬门已建立并通过 | ✅ |
 | 当前最大风险 | M2 风险已降至当前 Win64 项目内 0.5 可接受等级；M3 基础合同已收口，后续最大架构风险转为 Material/Transform/真实 Portal 合成、Resource Contract 的 Compiler/View/Cook 产品接入、Behavior/FieldNotify/Command Adapter 与 Stable Identity 接入、真实双 LocalPlayer/CommonUI Modal、Feedback Profile/音频后端和确定性工具链 | 🟡 |
-| 当前策略 | 保持 M2 出口门和 M3 合同边界；下一路线从 M4 最早未完成的 Native Resource/Brush 切片开始，之后再按依赖进入 Behavior 和现代作者工具链；UI Feedback 复用 UE/项目音频系统，完整 JS VM 与浏览器兼容继续延后 | ✅ |
+| 当前策略 | 保持 M2 出口门和 M3 合同边界；M4 先让现有 Unreal Texture/Brush 链路端到端消费 ResourceId/provenance/residency/freshness，再分别进入 relative/generated source、Material/MID、Transform/Animation/Compositing；UI Feedback 保持独立纵向切片，完整 JS VM 与浏览器兼容继续延后 | ✅ |
 
 ### 2.2 验证快照
 
@@ -80,7 +80,7 @@
 | M1 UI 基础语义 | ✅ | 10 / 10 | 受控菜单/HUD 原型的排版、交互、本地化和诊断基础 |
 | M2 增量原生运行时 | ✅ | 9 / 9 退出门 | 可度量、共享样式模板、稳定身份、持久 Layout/Resource、局部失效、真实渲染与 Win64 0.5 Go/No-Go 已完成 |
 | M3 Runtime Semantics、Host 与原生互操作 | ✅ | 11 / 11 | Native Component、Session/Host、事务/事件/异步、属性所有权、多树/Portal、Stable Identity、Feedback、C++ Data/Command Schema 与 Resource provenance/residency/freshness 基础合同完成 |
-| M4 UE 原生表现与合成 | ⬜ | 0 / 9 | Material/Brush、Transform、Animation IR、UI Feedback Profile/UE Audio 与分级 Compositing |
+| M4 UE 原生表现与合成 | 🚧 | 0 / 9 | Texture/Brush 生产链路已选为首个消费者；其后分别进入 relative/generated source、Material/MID、Transform、Animation IR、UI Feedback Profile/UE Audio 与分级 Compositing |
 | M5 Dynamic UI 与 Compiled Behavior | ⬜ | 0 / 10 | Typed Mutation、动态结构、受限 Behavior TS、Feedback Cue 和原生事件驱动 Executor |
 | M6 现代作者工具链与 Inspector | ⬜ | 0 / 8 | Component/TSX/Tailwind 子集、Source Map、原生预览、Inspector 与确定性构建 |
 | M7 1.0 产品化 | ⬜ | 0 / 8 | 长期兼容、完整宿主/文本/无障碍、跨平台、外部分发与安全收口 |
@@ -360,16 +360,16 @@ M0/M1/M2 已完成，详细验收项保存在 [Evidence Ledger](WTUE_EvidenceLed
 
 退出结果：合同级敌意专项已覆盖异步结果晚到、更新/Feedback 重入与循环、Session 销毁、关卡切换清理、Portal/Modal Focus Restore、属性 owner 冲突、身份重绑定，以及非法 Resource provenance/residency/version 与 stale stamp 拒绝；真实双 LocalPlayer/CommonUI Modal、Transform/Material/WidgetComponent、Compiler/View/Cook 接入和 Packaged 多指针仍有明确后续归属，不由合同专项外推为产品能力。
 
-### M4——UE 原生表现与合成 ⬜ 0 / 9
+### M4——UE 原生表现与合成 🚧 0 / 9
 
-- [ ] `P0.5` 将 Texture、Material/Material Instance 和必要 Brush Metadata 纳入版本化 Resource Manifest；静态对象共享、View/Node MID 所有权和 GC 明确。
-- [ ] `P0.5` 建立 `ue-asset`/relative/generated 等作者资源解析、稳定生成资产身份、intrinsic size、重导入和 Cook 依赖；HTTP Runtime 继续拒绝。
+- [ ] `P0.5` 让现有 Unreal Texture/基础 Brush 链路端到端消费版本化 Resource Identity、provenance、Document residency 与 freshness；Importer、Compiled Asset、Cook、View、异步句柄和 Packaged 可见结果形成一个纵向闭环，HTTP Runtime 继续拒绝。
+- [ ] `P0.5` 建立 relative/generated 作者资源解析、稳定生成资产身份、intrinsic size、重导入和 Cook 依赖；不把机器绝对路径或动态下载带入 Runtime。
+- [ ] `P0.5` 将 Material/Material Instance 和必要 Brush Metadata 纳入 Resource Manifest；静态对象共享、View/Node MID 所有权、参数地址和 GC 明确。
 - [ ] `P0.5` 实现版本化 UI Feedback Profile 和默认注入式 UE Router：Cue 映射到 Sound/SoundCue/MetaSound 或项目 Adapter，覆盖 Critical 预取/Cook、用户设置、Concurrency/Cooldown/Throttle、缺项降级、Screen 2D 与 World Surface 策略；Core 不依赖音频中间件。
 - [ ] `P0.5` 实现 Translate/Scale/Rotate/Origin 的 Visual Transform、Clip Chain、transformed bounds、逆变换 Hit Test、Semantic Bounds 和空间索引更新。
 - [ ] `P0.5` 实现 Opacity/Color/Transform Typed Transition 与受控 easing、Retarget/Reverse/Cancel/Fill 语义。
 - [ ] `P0.5` 建立原生 Animation IR/Track 与 Active-only Clock；无 Track 时零 Tick，Virtual UI Clock 可在精确时间点验证。
-- [ ] `P0.5` 建立 Paint Effect、UI Material Brush、子树 Compositing Layer、Render Target Effect 四档合同；不把任意 Material 等同于浏览器合成器。
-- [ ] `P0.5-if-used` 以冻结 Corpus 实现 Gradient、Shadow、Nine-slice、Mask/Keyframes 中的必要切片；任意 Material `Time` 明确为不受 WTUE 时钟保证的 escape hatch。
+- [ ] `P0.5` 建立 Paint Effect、UI Material Brush、子树 Compositing Layer、Render Target Effect 四档合同；`P0.5-if-used` 只实现冻结 Corpus 使用的 Gradient、Shadow、Nine-slice、Mask/Keyframes，任意 Material `Time` 明确为不受 WTUE 时钟保证的 escape hatch。
 - [ ] `P0.5` 屏幕 Corpus 保持 M2 的 GT/RT/GPU/Batch/Vertex/内存门；使用世界空间时另建 WidgetComponent RT、Redraw、Gamma、VRAM、输入和可见性门。
 
 ### M5——Dynamic UI 与 Compiled Behavior ⬜ 0 / 10
@@ -549,7 +549,22 @@ M0/M1/M2 已完成，详细验收项保存在 [Evidence Ledger](WTUE_EvidenceLed
 - [x] `ResourceContractCanonicalization`/`ResourceContractFailures` 聚焦 2 / 2（0.020 秒）；完整 `StartsWith:WebToUE` 87 / 87、0 failed/skipped/warnings（8.589 秒）与 staged `git diff --check` 通过。开发中首次调用无 Windows 实现的 `FPlatformMisc::GetSHA256Signature` 触发断言，改用 Core `FBlake3`；第二次失败由测试 `TArray` 自引用追加触发，复制夹具值后最终候选稳定通过。
 - [x] 受保护 UE 5.8 Win64 Editor Development Operation `cf21dc76251647bba30740d4e2137582` 完成 5 / 5 actions，正常关闭 PID `16692` 并启动 PID `19656`；readiness signal、MCP HTTP 200、Python UE 5.8.1/Project WebToUE 与 `Lvl_TopDown` World 健康。路线只新增纯 C++ 非序列化 Policy/测试，不改现有 Import/Compiled Asset/View/Cook、模块依赖、加载热路径或可见输出，因此视觉、PIE、产品性能、Packaged Runtime 与 BuildCookRun 不适用；真实 stale-source Cook 仍未验证。
 
-本路线完成后停止。下一建议为 M4 的第一条微观路线：围绕 Texture、Material/Material Instance 与 Brush Metadata 建立最小 Native Resource/Brush 纵向切片，并让真实 Compiler/Manifest/View 消费 M3.9 provenance/residency 的必要子集；不自动进入该路线。
+本路线完成后停止。M4.1 已在后续微观路线开始；M3.9 的历史边界仍不包含任何 Compiler/资产/View/Cook 产品消费者。
+
+### M4.1——Unreal Texture/Brush Resource Contract 产品闭环 🚧 1 / 8
+
+`P0.5-if-used` 裁决：冻结的 MainMenu/HUD/ScrollableSettings 没有图片，额外视觉样式与目标游戏资源工作量为有证据的 `N/A`；但 Unreal Texture/Brush、Resource Contract 消费和 Cooked 资源正确性本身是无条件 `P0.5`，必须用 Engine 纹理 fixture 和真实 Packaged 路径验收，不能因当前三份页面无图片而跳过。
+
+- [x] `CONTEXT.md` 固定 Resource Identity、Resource Provenance、Resource Residency；Manifest Handle 继续只在单个资产修订内稳定，ResourceId 不等于软对象路径、UObject 或数组索引。
+- [ ] 资产自定义版本升级，`FWebToUECompiledResource` 与 `UWebToUEDocument` 序列化 Unreal Texture 的 ResourceId、provenance、Document residency、独立层版本和 Cook freshness stamp；不引入 Material/MID、Route、relative/generated 或 P1.0 迁移承诺。
+- [ ] Editor Importer 对 HTML/CSS 原始输入和 Unreal Asset package-saved content fingerprint 生成确定性 BLAKE3-256 dependency closure，以稳定 logical ID 构建 M3.9 snapshot；非法/缺失/HTTP/机器路径失败关闭且 last-good 不覆盖已密封成功修订。
+- [ ] `img` 默认按实际可见性请求，显式 `data-ue-residency=critical|visible|lazy` 只改变 Document activation 时机；Critical 在交互前满足，Visible 仅在节点可见时请求，Lazy 只经显式 ResourceId 消费入口请求并保持确定性无图片 fallback。
+- [ ] Runtime 在 Hydration/View 边界验证 Resource IR 版本和 ResourceId/Manifest/assignment 一致性；继续使用 View-owned async request/strong handle，状态变化与 Paint 热路径保持零同步加载、无 per-node UObject/UWidget/Slate Widget。
+- [ ] Cook 前用当前 Source、Compiler 和 Unreal Asset package fingerprint 重建 expected stamp；exact match 才允许发布，last-good stale 以 `WTUE-RES-004` 失败。完整 DDC/Lockfile/跨机器 Incremental Compile 仍归 M6。
+- [ ] Import/asset/runtime/freshness 的修改前失败、修改后通过专项覆盖确定性 ID、重复图片共享、Critical/Visible/Lazy 请求与 fallback、重导入漂移、旧资产重编译和 stale Cook；记录 K=1 资源请求、命中、失败、取消、同步加载与已知所有权。
+- [ ] `git diff --check`、聚焦与完整 WebToUE Automation、UE 5.8 Win64 Editor Development、tracked Development/Shipping BuildCookRun、真实 Packaged Texture/Brush smoke 和可见截图全部通过；BuildCookRun 不替代 Packaged Runtime、视觉或产品性能结论。
+
+本路线完成后停止，不进入 relative/generated、Material/MID、Feedback、Transform、Animation 或 Compositing。
 
 M2.0～M2.9 已完成可观测性、生命周期、类型化样式、共享 Style Template、统一身份、Paint-only Pseudo 与根字段 FieldNotify/Text 局部失效、持久 Yoga/异步 Resource Handle、Display/Hit/Packaged 真实渲染、核心生产宿主与 M2 0.5 Go/No-Go。宏观 `9 / 9` 的全部性能预算和 Win64 Packaged 证据已经收口；BuildPlugin 与第二平台仍属 P1.0。
 
