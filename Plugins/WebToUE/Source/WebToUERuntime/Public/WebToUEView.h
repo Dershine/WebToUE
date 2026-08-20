@@ -13,6 +13,7 @@ class FWebToUESession;
 class UWebToUEDocument;
 struct FWebToUERuntimeLayoutResult;
 enum class EWebToUEPseudoState : uint8;
+enum class EWebToUEInputModality : uint8;
 struct FWebToUEComputedStyle;
 struct FWebToUENode;
 
@@ -75,6 +76,13 @@ public:
 	virtual FWebToUEInstanceHandle GetFocusedSemanticNode() const override;
 	virtual bool RequestSemanticFocus(FWebToUEInstanceHandle Handle) override;
 	virtual bool ActivateSemanticNode(FWebToUEInstanceHandle Handle) override;
+	FWebToUEInstanceHandle GetFocusedSemanticNodeForSlateUser(uint32 SlateUserIndex) const;
+	bool RequestSemanticFocusForSlateUser(
+		FWebToUEInstanceHandle Handle, uint32 SlateUserIndex);
+	bool ActivateSemanticNodeForSlateUser(
+		FWebToUEInstanceHandle Handle,
+		uint32 SlateUserIndex,
+		EWebToUEInputModality InputModality);
 
 	virtual void SynchronizeProperties() override;
 	virtual void ReleaseSlateResources(bool bReleaseChildren) override;

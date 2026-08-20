@@ -120,22 +120,46 @@ void UWebToUEView::GetSemanticNodes(TArray<FWebToUESemanticNode>& OutNodes) cons
 
 FWebToUEInstanceHandle UWebToUEView::GetFocusedSemanticNode() const
 {
-	return SlateView ? SlateView->GetFocusedSemanticNode() : FWebToUEInstanceHandle();
+	return GetFocusedSemanticNodeForSlateUser(0);
 }
 
 bool UWebToUEView::RequestSemanticFocus(FWebToUEInstanceHandle Handle)
 {
-	if (!SlateView || !SlateView->RequestSemanticFocus(Handle)) return false;
-	if (FSlateApplication::IsInitialized())
-	{
-		FSlateApplication::Get().SetKeyboardFocus(SlateView, EFocusCause::SetDirectly);
-	}
-	return true;
+	return RequestSemanticFocusForSlateUser(Handle, 0);
 }
 
 bool UWebToUEView::ActivateSemanticNode(FWebToUEInstanceHandle Handle)
 {
-	return SlateView && SlateView->ActivateSemanticNode(Handle);
+	return ActivateSemanticNodeForSlateUser(
+		Handle, 0, EWebToUEInputModality::Unknown);
+}
+
+FWebToUEInstanceHandle UWebToUEView::GetFocusedSemanticNodeForSlateUser(
+	uint32 SlateUserIndex) const
+{
+	return SlateView
+		? SlateView->GetFocusedSemanticNode(SlateUserIndex) : FWebToUEInstanceHandle();
+}
+
+bool UWebToUEView::RequestSemanticFocusForSlateUser(
+	FWebToUEInstanceHandle Handle, uint32 SlateUserIndex)
+{
+	if (!SlateView || !SlateView->RequestSemanticFocus(Handle, SlateUserIndex)) return false;
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().SetUserFocus(
+			SlateUserIndex, SlateView, EFocusCause::SetDirectly);
+	}
+	return true;
+}
+
+bool UWebToUEView::ActivateSemanticNodeForSlateUser(
+	FWebToUEInstanceHandle Handle,
+	uint32 SlateUserIndex,
+	EWebToUEInputModality InputModality)
+{
+	return SlateView && SlateView->ActivateSemanticNode(
+		Handle, SlateUserIndex, InputModality);
 }
 
 #if WITH_DEV_AUTOMATION_TESTS

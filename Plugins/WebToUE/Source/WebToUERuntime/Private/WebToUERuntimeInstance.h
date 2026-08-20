@@ -43,13 +43,6 @@ public:
 	}
 	FWebToUELayoutEngine& GetLayoutEngine() { return *LayoutEngine; }
 
-	FWebToUENode* GetHoveredNode() const { return const_cast<FWebToUENode*>(ResolveNode(HoveredNode)); }
-	FWebToUENode* GetPressedNode() const { return const_cast<FWebToUENode*>(ResolveNode(PressedNode)); }
-	FWebToUENode* GetFocusedNode() const { return const_cast<FWebToUENode*>(ResolveNode(FocusedNode)); }
-	void SetHoveredNode(FWebToUENode* Node) { HoveredNode = GetHandle(Node); }
-	void SetPressedNode(FWebToUENode* Node) { PressedNode = GetHandle(Node); }
-	void SetFocusedNode(FWebToUENode* Node) { FocusedNode = GetHandle(Node); }
-
 #if WITH_DEV_AUTOMATION_TESTS
 	uint64 GetKnownOwnedBytesForTesting() const;
 	uint64 GetSharedStyleTemplateKnownOwnedBytesForTesting() const;
@@ -62,9 +55,6 @@ private:
 	TSharedPtr<FWebToUEDocument> RuntimeDocument;
 	uint64 OwnerId = 0;
 	uint32 Generation = 0;
-	FWebToUEInstanceHandle HoveredNode;
-	FWebToUEInstanceHandle PressedNode;
-	FWebToUEInstanceHandle FocusedNode;
 	TMap<FName, TArray<FWebToUERuntimeBindingOp>> BindingOpsByField;
 	TArray<FWebToUECompiledResource> ResourceManifest;
 	TUniquePtr<FWebToUELayoutEngine> LayoutEngine;

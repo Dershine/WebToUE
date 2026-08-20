@@ -81,6 +81,7 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	SCOPE_CYCLE_COUNTER(STAT_WebToUE_Hydrate);
 	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Hydrate);
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Hydrate);
+	ResetInteractionState();
 	DocumentAsset = InDocument;
 	Presentation->Reset();
 	if (InDocument)
@@ -129,6 +130,7 @@ FText SWebToUEView::GetDisplayTextForTesting(const FWebToUENode& Node) const
 
 void SWebToUEView::SetRuntimeDocumentForTesting(TSharedRef<FWebToUEDocument> InDocument)
 {
+	ResetInteractionState();
 	RuntimeInstance->AdoptDocumentForTesting(MoveTemp(InDocument));
 	RebuildStylesAndBrushes();
 }
@@ -136,6 +138,30 @@ void SWebToUEView::SetRuntimeDocumentForTesting(TSharedRef<FWebToUEDocument> InD
 void SWebToUEView::LayoutForTesting(const FVector2f& ViewportSize) const
 {
 	Presentation->Layout(ViewportSize);
+}
+
+FWebToUENode* SWebToUEView::GetHoveredNodeForTesting(
+	FWebToUEInteractionIdentity Interaction) const
+{
+	return GetInteractionNode(HoveredNodes, Interaction);
+}
+
+FWebToUENode* SWebToUEView::GetPressedNodeForTesting(
+	FWebToUEInteractionIdentity Interaction) const
+{
+	return GetInteractionNode(PressedNodes, Interaction);
+}
+
+FWebToUENode* SWebToUEView::GetCapturedNodeForTesting(
+	FWebToUEInteractionIdentity Interaction) const
+{
+	return GetInteractionNode(CapturedNodes, Interaction);
+}
+
+FWebToUENode* SWebToUEView::GetFocusedNodeForTesting(uint32 SlateUserIndex) const
+{
+	return GetInteractionNode(
+		FocusedNodes, FWebToUEInteractionIdentity::NonPointer(SlateUserIndex));
 }
 
 bool SWebToUEView::GetRuntimeMemoryCensusForTesting(
@@ -147,7 +173,11 @@ bool SWebToUEView::GetRuntimeMemoryCensusForTesting(
 	}
 	OutCensus.SharedStyleTemplateKnownOwnedBytes =
 		RuntimeInstance->GetSharedStyleTemplateKnownOwnedBytesForTesting();
-	OutCensus.RuntimeKnownOwnedBytes = RuntimeInstance->GetKnownOwnedBytesForTesting();
+	OutCensus.RuntimeKnownOwnedBytes = RuntimeInstance->GetKnownOwnedBytesForTesting() +
+		EventListeners.GetAllocatedSize() + HoveredNodes.GetAllocatedSize() +
+		PressedNodes.GetAllocatedSize() + CapturedNodes.GetAllocatedSize() +
+		FocusedNodes.GetAllocatedSize() + HoverRefCounts.GetAllocatedSize() +
+		ActiveRefCounts.GetAllocatedSize() + FocusRefCounts.GetAllocatedSize();
 	OutCensus.PresentationKnownOwnedBytes = Presentation->GetKnownOwnedBytesForTesting();
 	OutCensus.RuntimeNodeCount = RuntimeInstance->GetRuntimeNodeCountForTesting();
 	OutCensus.RuntimeRuleCount = RuntimeInstance->GetRuntimeRuleCountForTesting();
@@ -883,28 +913,128 @@ void SWebToUEView::UpdatePseudoState(FWebToUENode* OldNode, FWebToUENode* NewNod
 	}
 }
 
-void SWebToUEView::SetHoveredNode(FWebToUENode* Node)
+FWebToUENode* SWebToUEView::GetInteractionNode(
+	const FInteractionNodeMap& Nodes,
+	FWebToUEInteractionIdentity Interaction) const
 {
-	FWebToUENode* OldNode = RuntimeInstance->GetHoveredNode();
-	if (OldNode == Node) return;
-	UpdatePseudoState(OldNode, Node, EWebToUEPseudoState::Hover, true);
-	RuntimeInstance->SetHoveredNode(Node);
+	const FWebToUEInstanceHandle* Handle = Nodes.Find(Interaction);
+	return Handle ? RuntimeInstance->ResolveNode(*Handle) : nullptr;
 }
 
-void SWebToUEView::SetPressedNode(FWebToUENode* Node)
+void SWebToUEView::SetInteractionNode(
+	FInteractionNodeMap& Nodes,
+	TMap<FWebToUEInstanceHandle, int32>& RefCounts,
+	FWebToUEInteractionIdentity Interaction,
+	FWebToUENode* Node,
+	EWebToUEPseudoState Flag,
+	bool bIncludeAncestors)
 {
-	FWebToUENode* OldNode = RuntimeInstance->GetPressedNode();
-	if (OldNode == Node) return;
-	UpdatePseudoState(OldNode, Node, EWebToUEPseudoState::Active, false);
-	RuntimeInstance->SetPressedNode(Node);
+	check(IsInGameThread());
+	if (!Interaction.IsValid())
+	{
+		return;
+	}
+	FWebToUENode* OldNode = GetInteractionNode(Nodes, Interaction);
+	if (OldNode == Node)
+	{
+		return;
+	}
+
+	TMap<FWebToUEInstanceHandle, int32> RefDeltas;
+	const auto AddPathDelta = [this, bIncludeAncestors, &RefDeltas](
+		FWebToUENode* Start, int32 Delta)
+	{
+		for (FWebToUENode* Current = Start; Current;
+			Current = bIncludeAncestors ? Current->Parent : nullptr)
+		{
+			const FWebToUEInstanceHandle Handle = RuntimeInstance->GetHandle(Current);
+			if (Handle.IsValid())
+			{
+				RefDeltas.FindOrAdd(Handle) += Delta;
+			}
+		}
+	};
+	AddPathDelta(OldNode, -1);
+	AddPathDelta(Node, 1);
+
+	TArray<FWebToUEInstanceHandle, TInlineAllocator<8>> Removed;
+	TArray<FWebToUEInstanceHandle, TInlineAllocator<8>> Added;
+	for (const TPair<FWebToUEInstanceHandle, int32>& Delta : RefDeltas)
+	{
+		const int32 Before = RefCounts.FindRef(Delta.Key);
+		const int32 After = FMath::Max(0, Before + Delta.Value);
+		if (After == 0)
+		{
+			RefCounts.Remove(Delta.Key);
+		}
+		else
+		{
+			RefCounts.Add(Delta.Key, After);
+		}
+		if (Before > 0 && After == 0)
+		{
+			Removed.Add(Delta.Key);
+		}
+		else if (Before == 0 && After > 0)
+		{
+			Added.Add(Delta.Key);
+		}
+	}
+	if (Node)
+	{
+		Nodes.Add(Interaction, RuntimeInstance->GetHandle(Node));
+	}
+	else
+	{
+		Nodes.Remove(Interaction);
+	}
+	for (const FWebToUEInstanceHandle Handle : Removed)
+	{
+		if (FWebToUENode* RemovedNode = RuntimeInstance->ResolveNode(Handle))
+		{
+			UpdatePseudoState(RemovedNode, nullptr, Flag, false);
+		}
+	}
+	for (const FWebToUEInstanceHandle Handle : Added)
+	{
+		if (FWebToUENode* AddedNode = RuntimeInstance->ResolveNode(Handle))
+		{
+			UpdatePseudoState(nullptr, AddedNode, Flag, false);
+		}
+	}
 }
 
-void SWebToUEView::SetFocusedNode(FWebToUENode* Node)
+void SWebToUEView::ResetInteractionState()
 {
-	FWebToUENode* OldNode = RuntimeInstance->GetFocusedNode();
-	if (OldNode == Node) return;
-	UpdatePseudoState(OldNode, Node, EWebToUEPseudoState::Focus, false);
-	RuntimeInstance->SetFocusedNode(Node);
+	HoveredNodes.Reset();
+	PressedNodes.Reset();
+	CapturedNodes.Reset();
+	FocusedNodes.Reset();
+	HoverRefCounts.Reset();
+	ActiveRefCounts.Reset();
+	FocusRefCounts.Reset();
+	LastEventDispatchResult = EWebToUEEventDispatchResult::DroppedInvalidPath;
+}
+
+void SWebToUEView::SetHoveredNode(
+	FWebToUENode* Node, FWebToUEInteractionIdentity Interaction)
+{
+	SetInteractionNode(HoveredNodes, HoverRefCounts, Interaction, Node,
+		EWebToUEPseudoState::Hover, true);
+}
+
+void SWebToUEView::SetPressedNode(
+	FWebToUENode* Node, FWebToUEInteractionIdentity Interaction)
+{
+	SetInteractionNode(PressedNodes, ActiveRefCounts, Interaction, Node,
+		EWebToUEPseudoState::Active, false);
+}
+
+void SWebToUEView::SetFocusedNode(FWebToUENode* Node, uint32 SlateUserIndex)
+{
+	SetInteractionNode(FocusedNodes, FocusRefCounts,
+		FWebToUEInteractionIdentity::NonPointer(SlateUserIndex), Node,
+		EWebToUEPseudoState::Focus, false);
 }
 
 bool SWebToUEView::IsSemanticFocusable(const FWebToUENode& Node) const
@@ -964,25 +1094,31 @@ void SWebToUEView::GetSemanticNodes(TArray<FWebToUESemanticNode>& OutNodes) cons
 	});
 }
 
-FWebToUEInstanceHandle SWebToUEView::GetFocusedSemanticNode() const
+FWebToUEInstanceHandle SWebToUEView::GetFocusedSemanticNode(uint32 SlateUserIndex) const
 {
-	return RuntimeInstance->GetHandle(RuntimeInstance->GetFocusedNode());
+	return RuntimeInstance->GetHandle(GetInteractionNode(
+		FocusedNodes, FWebToUEInteractionIdentity::NonPointer(SlateUserIndex)));
 }
 
-bool SWebToUEView::RequestSemanticFocus(FWebToUEInstanceHandle Handle)
+bool SWebToUEView::RequestSemanticFocus(
+	FWebToUEInstanceHandle Handle, uint32 SlateUserIndex)
 {
 	FWebToUENode* Node = RuntimeInstance->ResolveNode(Handle);
 	if (!Node || !IsSemanticFocusable(*Node)) return false;
-	SetFocusedNode(Node);
+	SetFocusedNode(Node, SlateUserIndex);
 	if (Presentation->ScrollIntoView(*Node)) Invalidate(EInvalidateWidgetReason::Paint);
 	return true;
 }
 
-bool SWebToUEView::ActivateSemanticNode(FWebToUEInstanceHandle Handle)
+bool SWebToUEView::ActivateSemanticNode(
+	FWebToUEInstanceHandle Handle,
+	uint32 SlateUserIndex,
+	EWebToUEInputModality InputModality)
 {
 	FWebToUENode* Node = RuntimeInstance->ResolveNode(Handle);
 	if (!Node || !IsSemanticFocusable(*Node)) return false;
-	DispatchClick(*Node);
+	DispatchClick(*Node,
+		FWebToUEInteractionIdentity::NonPointer(SlateUserIndex), InputModality);
 	return true;
 }
 
@@ -1026,13 +1162,17 @@ bool SWebToUEView::RemoveEventListener(FWebToUEEventListenerHandle Handle)
 
 FReply SWebToUEView::OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
 {
-	SetHoveredNode(HitTest(FVector2f(MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()))));
+	SetHoveredNode(
+		HitTest(FVector2f(MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()))),
+		FWebToUEInteractionIdentity::Pointer(
+			MouseEvent.GetUserIndex(), MouseEvent.GetPointerIndex()));
 	return FReply::Handled();
 }
 
 void SWebToUEView::OnMouseLeave(const FPointerEvent& MouseEvent)
 {
-	SetHoveredNode(nullptr);
+	SetHoveredNode(nullptr, FWebToUEInteractionIdentity::Pointer(
+		MouseEvent.GetUserIndex(), MouseEvent.GetPointerIndex()));
 	SLeafWidget::OnMouseLeave(MouseEvent);
 }
 
@@ -1041,27 +1181,54 @@ FReply SWebToUEView::OnMouseButtonDown(const FGeometry& MyGeometry, const FPoint
 	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton) return FReply::Unhandled();
 	FWebToUENode* Hit = HitTest(FVector2f(MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition())));
 	if (!Hit) return FReply::Unhandled();
-	SetFocusedNode(Hit);
-	SetPressedNode(Hit);
+	const FWebToUEInteractionIdentity Interaction = FWebToUEInteractionIdentity::Pointer(
+		MouseEvent.GetUserIndex(), MouseEvent.GetPointerIndex());
+	SetFocusedNode(Hit, MouseEvent.GetUserIndex());
+	SetPressedNode(Hit, Interaction);
+	CapturedNodes.Add(Interaction, RuntimeInstance->GetHandle(Hit));
 	return FReply::Handled().SetUserFocus(AsShared(), EFocusCause::Mouse, true).CaptureMouse(AsShared());
 }
 
 FReply SWebToUEView::OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
 {
-	FWebToUENode* PressedNode = RuntimeInstance->GetPressedNode();
-	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !PressedNode) return FReply::Unhandled();
-	FWebToUENode* Released = PressedNode;
-	const bool bActivate = HitTest(FVector2f(MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()))) == Released;
-	SetPressedNode(nullptr);
+	const FWebToUEInteractionIdentity Interaction = FWebToUEInteractionIdentity::Pointer(
+		MouseEvent.GetUserIndex(), MouseEvent.GetPointerIndex());
+	FWebToUENode* PressedNode = GetInteractionNode(PressedNodes, Interaction);
+	FWebToUENode* CapturedNode = GetInteractionNode(CapturedNodes, Interaction);
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton ||
+		!PressedNode || !CapturedNode || PressedNode != CapturedNode)
+	{
+		return FReply::Unhandled();
+	}
+	FWebToUENode* Released = CapturedNode;
+	const bool bActivate = HitTest(FVector2f(
+		MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()))) == Released;
+	SetPressedNode(nullptr, Interaction);
+	CapturedNodes.Remove(Interaction);
 	if (bActivate)
 	{
-		DispatchClick(*Released,
-			FWebToUEInteractionIdentity::Pointer(
-				MouseEvent.GetUserIndex(), MouseEvent.GetPointerIndex()),
+		DispatchClick(*Released, Interaction,
 			MouseEvent.IsTouchEvent()
 				? EWebToUEInputModality::Touch : EWebToUEInputModality::Pointer);
 	}
 	return FReply::Handled().ReleaseMouseCapture();
+}
+
+void SWebToUEView::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
+{
+	const FWebToUEInteractionIdentity Interaction = FWebToUEInteractionIdentity::Pointer(
+		CaptureLostEvent.UserIndex, CaptureLostEvent.PointerIndex);
+	FWebToUENode* CapturedNode = GetInteractionNode(CapturedNodes, Interaction);
+	SetPressedNode(nullptr, Interaction);
+	CapturedNodes.Remove(Interaction);
+	if (CapturedNode)
+	{
+		const FWebToUEEventPathSnapshot Snapshot = BuildEventPathSnapshot(
+			*CapturedNode, EWebToUERuntimeEventType::PointerCaptureLost,
+			Interaction, EWebToUEInputModality::Pointer, true, false);
+		SubmitRuntimeEvent(Snapshot, TUniqueFunction<void()>());
+	}
+	SLeafWidget::OnMouseCaptureLost(CaptureLostEvent);
 }
 
 FReply SWebToUEView::OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
@@ -1070,7 +1237,8 @@ FReply SWebToUEView::OnMouseWheel(const FGeometry& MyGeometry, const FPointerEve
 	return ScrollAt(LocalPosition, MouseEvent.GetWheelDelta()) ? FReply::Handled() : FReply::Unhandled();
 }
 
-bool SWebToUEView::MoveFocusSequential(int32 Direction, bool bWrap)
+bool SWebToUEView::MoveFocusSequential(
+	int32 Direction, bool bWrap, uint32 SlateUserIndex)
 {
 	TArray<FWebToUENode*> Nodes;
 	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
@@ -1088,7 +1256,8 @@ bool SWebToUEView::MoveFocusSequential(int32 Direction, bool bWrap)
 		return GetLayoutResult(A).PaintOrder < GetLayoutResult(B).PaintOrder;
 	});
 	if (Nodes.IsEmpty()) return false;
-	int32 Index = Nodes.IndexOfByKey(RuntimeInstance->GetFocusedNode());
+	int32 Index = Nodes.IndexOfByKey(GetInteractionNode(
+		FocusedNodes, FWebToUEInteractionIdentity::NonPointer(SlateUserIndex)));
 	if (Index == INDEX_NONE)
 	{
 		Index = Direction > 0 ? 0 : Nodes.Num() - 1;
@@ -1106,10 +1275,11 @@ bool SWebToUEView::MoveFocusSequential(int32 Direction, bool bWrap)
 			Index = NextIndex;
 		}
 	}
-	return RequestSemanticFocus(RuntimeInstance->GetHandle(Nodes[Index]));
+	return RequestSemanticFocus(RuntimeInstance->GetHandle(Nodes[Index]), SlateUserIndex);
 }
 
-bool SWebToUEView::MoveFocusSpatial(EUINavigation Direction)
+bool SWebToUEView::MoveFocusSpatial(
+	EUINavigation Direction, uint32 SlateUserIndex)
 {
 	if (Direction != EUINavigation::Left && Direction != EUINavigation::Right &&
 		Direction != EUINavigation::Up && Direction != EUINavigation::Down)
@@ -1128,12 +1298,13 @@ bool SWebToUEView::MoveFocusSpatial(EUINavigation Direction)
 		return GetLayoutResult(A).PaintOrder < GetLayoutResult(B).PaintOrder;
 	});
 	if (Candidates.IsEmpty()) return false;
-	FWebToUENode* Current = RuntimeInstance->GetFocusedNode();
+	FWebToUENode* Current = GetInteractionNode(
+		FocusedNodes, FWebToUEInteractionIdentity::NonPointer(SlateUserIndex));
 	if (!Current)
 	{
 		return RequestSemanticFocus(RuntimeInstance->GetHandle(
 			(Direction == EUINavigation::Left || Direction == EUINavigation::Up)
-				? Candidates.Last() : Candidates[0]));
+				? Candidates.Last() : Candidates[0]), SlateUserIndex);
 	}
 	const FVector2f CurrentCenter = Presentation->GetVisualPosition(*Current) +
 		GetLayoutResult(*Current).Size * 0.5f;
@@ -1164,14 +1335,15 @@ bool SWebToUEView::MoveFocusSpatial(EUINavigation Direction)
 			Best = Candidate;
 		}
 	}
-	return Best && RequestSemanticFocus(RuntimeInstance->GetHandle(Best));
+	return Best && RequestSemanticFocus(
+		RuntimeInstance->GetHandle(Best), SlateUserIndex);
 }
 
 void SWebToUEView::ActivateFocusedNode(
 	FWebToUEInteractionIdentity Interaction,
 	EWebToUEInputModality InputModality)
 {
-	FWebToUENode* FocusedNode = RuntimeInstance->GetFocusedNode();
+	FWebToUENode* FocusedNode = GetInteractionNode(FocusedNodes, Interaction);
 	if (FocusedNode && GetComputedStyle(*FocusedNode).bEnabled)
 	{
 		DispatchClick(*FocusedNode, Interaction, InputModality);
@@ -1182,7 +1354,8 @@ FReply SWebToUEView::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& Key
 {
 	if (KeyEvent.GetKey() == EKeys::Tab)
 	{
-		MoveFocusSequential(KeyEvent.IsShiftDown() ? -1 : 1, true);
+		MoveFocusSequential(
+			KeyEvent.IsShiftDown() ? -1 : 1, true, KeyEvent.GetUserIndex());
 		return FReply::Handled();
 	}
 	const FKey Key = KeyEvent.GetKey();
@@ -1209,22 +1382,27 @@ FNavigationReply SWebToUEView::OnNavigation(const FGeometry& MyGeometry,
 	const EUINavigation Direction = InNavigationEvent.GetNavigationType();
 	if (Direction == EUINavigation::Next || Direction == EUINavigation::Previous)
 	{
-		return MoveFocusSequential(Direction == EUINavigation::Next ? 1 : -1, false)
+		return MoveFocusSequential(Direction == EUINavigation::Next ? 1 : -1, false,
+			InNavigationEvent.GetUserIndex())
 			? FNavigationReply::Stop() : FNavigationReply::Escape();
 	}
-	return MoveFocusSpatial(Direction)
+	return MoveFocusSpatial(Direction, InNavigationEvent.GetUserIndex())
 		? FNavigationReply::Stop() : FNavigationReply::Escape();
 }
 
 FReply SWebToUEView::OnFocusReceived(const FGeometry& MyGeometry, const FFocusEvent& InFocusEvent)
 {
-	if (!RuntimeInstance->GetFocusedNode()) MoveFocusSequential(1, false);
+	if (!GetInteractionNode(FocusedNodes,
+		FWebToUEInteractionIdentity::NonPointer(InFocusEvent.GetUser())))
+	{
+		MoveFocusSequential(1, false, InFocusEvent.GetUser());
+	}
 	return FReply::Handled();
 }
 
 void SWebToUEView::OnFocusLost(const FFocusEvent& InFocusEvent)
 {
-	SetPressedNode(nullptr);
+	SetFocusedNode(nullptr, InFocusEvent.GetUser());
 	SLeafWidget::OnFocusLost(InFocusEvent);
 }
 
@@ -1448,7 +1626,15 @@ void SWebToUEView::DispatchClick(
 				}
 			}
 		};
+	SubmitRuntimeEvent(Snapshot, MoveTemp(DefaultAction));
+}
 
+void SWebToUEView::SubmitRuntimeEvent(
+	const FWebToUEEventPathSnapshot& Snapshot,
+	TUniqueFunction<void()>&& DefaultAction)
+{
+	check(IsInGameThread());
+	TWeakPtr<SWebToUEView> WeakThis = StaticCastSharedRef<SWebToUEView>(AsShared());
 	TSharedPtr<FWebToUEUpdateCoordinator, ESPMode::ThreadSafe> Coordinator =
 		StandaloneUpdateCoordinator;
 	if (UWebToUEView* View = Owner.Get())

@@ -277,9 +277,6 @@ void FWebToUERuntimeInstance::Reset()
 		++Generation;
 	}
 	RuntimeDocument.Reset();
-	HoveredNode = {};
-	PressedNode = {};
-	FocusedNode = {};
 	BindingOpsByField.Reset();
 	ResourceManifest.Reset();
 }

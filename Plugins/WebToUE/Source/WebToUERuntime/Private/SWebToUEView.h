@@ -30,9 +30,12 @@ public:
 	void RefreshBindings(UObject* DataContext, FName ChangedField = NAME_None);
 	TSet<FName> GetBoundFields() const;
 	void GetSemanticNodes(TArray<FWebToUESemanticNode>& OutNodes) const;
-	FWebToUEInstanceHandle GetFocusedSemanticNode() const;
-	bool RequestSemanticFocus(FWebToUEInstanceHandle Handle);
-	bool ActivateSemanticNode(FWebToUEInstanceHandle Handle);
+	FWebToUEInstanceHandle GetFocusedSemanticNode(uint32 SlateUserIndex = 0) const;
+	bool RequestSemanticFocus(FWebToUEInstanceHandle Handle, uint32 SlateUserIndex = 0);
+	bool ActivateSemanticNode(
+		FWebToUEInstanceHandle Handle,
+		uint32 SlateUserIndex = 0,
+		EWebToUEInputModality InputModality = EWebToUEInputModality::Unknown);
 	FWebToUEEventListenerHandle AddEventListener(
 		FWebToUEInstanceHandle Target,
 		EWebToUERuntimeEventType Type,
@@ -49,6 +52,7 @@ public:
 	virtual void OnMouseLeave(const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+	virtual void OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override;
 	virtual FReply OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& KeyEvent) override;
 	virtual FNavigationReply OnNavigation(const FGeometry& MyGeometry,
@@ -73,6 +77,10 @@ public:
 	FWebToUENode* AddDynamicTextNodeForTesting(FWebToUENode& Parent);
 	void SetHoveredNodeForTesting(FWebToUENode* Node) { SetHoveredNode(Node); }
 	void SetFocusedNodeForTesting(FWebToUENode* Node) { SetFocusedNode(Node); }
+	FWebToUENode* GetHoveredNodeForTesting(FWebToUEInteractionIdentity Interaction) const;
+	FWebToUENode* GetPressedNodeForTesting(FWebToUEInteractionIdentity Interaction) const;
+	FWebToUENode* GetCapturedNodeForTesting(FWebToUEInteractionIdentity Interaction) const;
+	FWebToUENode* GetFocusedNodeForTesting(uint32 SlateUserIndex) const;
 	void DispatchClickForTesting(
 		FWebToUENode& Node,
 		FWebToUEInteractionIdentity Interaction = FWebToUEInteractionIdentity::Pointer(0, 0),
@@ -151,6 +159,15 @@ private:
 	uint64 NextEventCorrelationId = 1;
 	EWebToUEEventDispatchResult LastEventDispatchResult =
 		EWebToUEEventDispatchResult::DroppedInvalidPath;
+	using FInteractionNodeMap =
+		TMap<FWebToUEInteractionIdentity, FWebToUEInstanceHandle>;
+	FInteractionNodeMap HoveredNodes;
+	FInteractionNodeMap PressedNodes;
+	FInteractionNodeMap CapturedNodes;
+	FInteractionNodeMap FocusedNodes;
+	TMap<FWebToUEInstanceHandle, int32> HoverRefCounts;
+	TMap<FWebToUEInstanceHandle, int32> ActiveRefCounts;
+	TMap<FWebToUEInstanceHandle, int32> FocusRefCounts;
 #if WITH_DEV_AUTOMATION_TESTS
 	TFunction<void(const FWebToUEEventPathSnapshot&)> DefaultEventObserverForTesting;
 #endif
@@ -169,15 +186,29 @@ private:
 	FText GetDisplayText(const FWebToUENode& Node) const;
 	FWebToUENode* HitTest(const FVector2f& LocalPosition) const;
 	bool ScrollAt(const FVector2f& LocalPosition, float WheelDelta);
-	void SetHoveredNode(FWebToUENode* Node);
-	void SetPressedNode(FWebToUENode* Node);
-	void SetFocusedNode(FWebToUENode* Node);
+	FWebToUENode* GetInteractionNode(
+		const FInteractionNodeMap& Nodes, FWebToUEInteractionIdentity Interaction) const;
+	void SetInteractionNode(
+		FInteractionNodeMap& Nodes,
+		TMap<FWebToUEInstanceHandle, int32>& RefCounts,
+		FWebToUEInteractionIdentity Interaction,
+		FWebToUENode* Node,
+		EWebToUEPseudoState Flag,
+		bool bIncludeAncestors);
+	void ResetInteractionState();
+	void SetHoveredNode(
+		FWebToUENode* Node,
+		FWebToUEInteractionIdentity Interaction = FWebToUEInteractionIdentity::Pointer(0, 0));
+	void SetPressedNode(
+		FWebToUENode* Node,
+		FWebToUEInteractionIdentity Interaction = FWebToUEInteractionIdentity::Pointer(0, 0));
+	void SetFocusedNode(FWebToUENode* Node, uint32 SlateUserIndex = 0);
 	void UpdatePseudoState(FWebToUENode* OldNode, FWebToUENode* NewNode,
 		EWebToUEPseudoState Flag, bool bIncludeAncestors);
 	void CollectPseudoDependencyTargets(FWebToUENode& ReasonNode,
 		EWebToUEPseudoState Flag, TArray<FWebToUEInstanceHandle>& OutTargets) const;
-	bool MoveFocusSequential(int32 Direction, bool bWrap);
-	bool MoveFocusSpatial(EUINavigation Direction);
+	bool MoveFocusSequential(int32 Direction, bool bWrap, uint32 SlateUserIndex = 0);
+	bool MoveFocusSpatial(EUINavigation Direction, uint32 SlateUserIndex = 0);
 	void ActivateFocusedNode(
 		FWebToUEInteractionIdentity Interaction = FWebToUEInteractionIdentity::NonPointer(0),
 		EWebToUEInputModality InputModality = EWebToUEInputModality::Unknown);
@@ -194,6 +225,9 @@ private:
 	EWebToUEEventDispatchResult EvaluateEvent(
 		const FWebToUEEventPathSnapshot& Snapshot,
 		FWebToUEUpdateTransaction& Transaction,
+		TUniqueFunction<void()>&& DefaultAction);
+	void SubmitRuntimeEvent(
+		const FWebToUEEventPathSnapshot& Snapshot,
 		TUniqueFunction<void()>&& DefaultAction);
 	void DispatchClick(
 		FWebToUENode& Node,
