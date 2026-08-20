@@ -32,6 +32,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPackagedExitPolicyTest,
 	"WebToUE.Benchmark.PackagedExitPolicy",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceTextureSmokeContractTest,
+	"WebToUE.Benchmark.ResourceTextureSmokeContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 bool FWebToUEBenchmarkCorpusContractTest::RunTest(const FString& Parameters)
 {
 	const FName Corpora[] = {
@@ -49,6 +53,10 @@ bool FWebToUEBenchmarkCorpusContractTest::RunTest(const FString& Parameters)
 		{
 			TestTrue(*FString::Printf(TEXT("%s contains compiled runtime nodes"),
 				*Corpus.ToString()), !Document->GetCompiledNodes().IsEmpty());
+			TestFalse(*FString::Printf(TEXT("%s is persisted at the current asset version"),
+				*Corpus.ToString()), Document->NeedsRecompile());
+			TestEqual(*FString::Printf(TEXT("%s preserves the frozen zero-resource corpus"),
+				*Corpus.ToString()), Document->GetResourceManifest().Num(), 0);
 		}
 
 		UWebToUEBenchmarkUserWidget* UmgWidget =
@@ -262,6 +270,66 @@ bool FWebToUEBenchmarkCorpusSlateOutputTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+bool FWebToUEResourceTextureSmokeContractTest::RunTest(const FString& Parameters)
+{
+	UWebToUEDocument* Document = LoadObject<UWebToUEDocument>(nullptr,
+		TEXT("/Game/WebToUEExamples/ResourceTextureSmoke.ResourceTextureSmoke"));
+	if (!TestNotNull(TEXT("The packaged resource smoke document loads"), Document))
+	{
+		return false;
+	}
+	TestEqual(TEXT("The fixture seals exactly one compiled resource"),
+		Document->GetResourceManifest().Num(), 1);
+	if (Document->GetResourceManifest().Num() != 1)
+	{
+		return false;
+	}
+	const FWebToUECompiledResource& Resource = Document->GetResourceManifest()[0];
+	TestEqual(TEXT("The fixture compiles an Unreal texture"), Resource.Kind,
+		EWebToUEResourceKind::Texture);
+	TestEqual(TEXT("The fixture retains its exact Engine asset path"),
+		Resource.Path.ToString(),
+		FString(TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture")));
+	TestTrue(TEXT("The fixture owns a deterministic ResourceId"),
+		!Resource.ResourceId.IsEmpty());
+	TestEqual(TEXT("The fixture records Unreal Asset provenance"),
+		Resource.Provenance.Origin, EWebToUEResourceOrigin::UnrealAsset);
+	TestEqual(TEXT("Default image residency is Visible"), Resource.Residency,
+		EWebToUEResidencyClass::Visible);
+	TArray<FWebToUEResourceContractDiagnostic> Diagnostics;
+	TestTrue(TEXT("The fixture passes the serialized resource contract"),
+		Document->ValidateResourceContract(Diagnostics));
+	const FWebToUECompiledNode* ImageNode = Document->GetCompiledNodes().FindByPredicate(
+		[](const FWebToUECompiledNode& Node)
+		{
+			return Node.Tag.Equals(TEXT("img"), ESearchCase::IgnoreCase);
+		});
+	TestNotNull(TEXT("The fixture contains its compiled image node"), ImageNode);
+	if (ImageNode)
+	{
+		TestEqual(TEXT("The image consumes the manifest ResourceId"),
+			ImageNode->ResourceId, Resource.ResourceId);
+	}
+
+	TestNotNull(TEXT("The test makes the Engine texture resident before View creation"),
+		LoadObject<UObject>(nullptr, *Resource.Path.ToString()));
+	FWebToUEPerformanceCapture Capture;
+	UWebToUEView* View = NewObject<UWebToUEView>(GetTransientPackage());
+	View->SetDocument(Document);
+	const TSharedRef<SWidget> Widget = View->TakeWidget();
+	Widget->SlatePrepass(1.0f);
+	View->LayoutForTesting(FVector2f(1280.0f, 720.0f));
+	const FWebToUEPerformanceSnapshot Workload = Capture.GetSnapshot();
+	FWebToUENode* RuntimeImage =
+		View->FindRuntimeNodeByIdForTesting(TEXT("engine-texture"));
+	TestNotNull(TEXT("The fixture hydrates its image node"), RuntimeImage);
+	TestEqual(TEXT("The View consumes one resident Engine texture"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::ResourceCacheHits), uint64(1));
+	TestTrue(TEXT("The Visible texture materializes a Slate brush"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::BrushBuilds) > 0);
+	return true;
+}
+
 bool FWebToUEPackagedExitPolicyTest::RunTest(const FString& Parameters)
 {
 	TestEqual(TEXT("Packaged result schema records M2.9 evidence"),
@@ -376,6 +444,28 @@ bool FWebToUEPackagedExitPolicyTest::RunTest(const FString& Parameters)
 	Negative.SecondViewKnownOwnedBytes = 1101;
 	TestFalse(TEXT("An excessive second-view known-owned census fails the gate"),
 		FWebToUEPackagedBenchmarkPolicy::ValidateWebToUEEvidence(Negative, Failures));
+
+	FWebToUEPackagedBenchmarkEvidence ResourceSmoke;
+	ResourceSmoke.CompiledNodeCount = 4;
+	ResourceSmoke.CompiledResourceCount = 1;
+	ResourceSmoke.SetupHydratedNodes = 4;
+	ResourceSmoke.SetupResourceAsyncRequests = 1;
+	ResourceSmoke.WarmupBrushBuilds = 1;
+	ResourceSmoke.SecondViewHydratedNodes = 4;
+	ResourceSmoke.SecondViewResourceCacheHits = 1;
+	TestTrue(TEXT("One async texture and one resident second-view hit pass the smoke gate"),
+		FWebToUEPackagedBenchmarkPolicy::ValidateResourceSmokeEvidence(
+			ResourceSmoke, Failures));
+	ResourceSmoke.SetupResourceAsyncRequests = 0;
+	TestFalse(TEXT("A resource smoke without one primary consumption fails closed"),
+		FWebToUEPackagedBenchmarkPolicy::ValidateResourceSmokeEvidence(
+			ResourceSmoke, Failures));
+	ResourceSmoke.SetupResourceAsyncRequests = 1;
+	ResourceSmoke.SecondViewResourceCacheHits = 0;
+	ResourceSmoke.SecondViewResourceAsyncRequests = 1;
+	TestFalse(TEXT("A second-view reload fails the resident reuse contract"),
+		FWebToUEPackagedBenchmarkPolicy::ValidateResourceSmokeEvidence(
+			ResourceSmoke, Failures));
 	return true;
 }
 

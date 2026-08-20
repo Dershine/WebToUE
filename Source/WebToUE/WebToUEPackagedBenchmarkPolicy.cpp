@@ -79,3 +79,56 @@ bool FWebToUEPackagedBenchmarkPolicy::ValidateWebToUEEvidence(
 	}
 	return OutFailures.IsEmpty();
 }
+
+bool FWebToUEPackagedBenchmarkPolicy::ValidateResourceSmokeEvidence(
+	const FWebToUEPackagedBenchmarkEvidence& Evidence,
+	TArray<FString>& OutFailures)
+{
+	using namespace WebToUE::PackagedBenchmark::Private;
+	OutFailures.Reset();
+	Require(Evidence.CompiledNodeCount > 0,
+		TEXT("resource smoke document has no nodes"), OutFailures);
+	Require(Evidence.CompiledResourceCount == ResourceSmokeExpectedCompiledResources,
+		TEXT("resource smoke document does not own exactly one compiled resource"),
+		OutFailures);
+	Require(Evidence.SetupHydratedNodes == static_cast<uint64>(Evidence.CompiledNodeCount),
+		TEXT("resource smoke primary view did not hydrate exactly one document"),
+		OutFailures);
+	Require(Evidence.SetupResourceLoadAttempts == 0 &&
+		Evidence.WarmupResourceLoadAttempts == 0 &&
+		Evidence.MeasurementResourceLoadAttempts == 0,
+		TEXT("resource smoke performed a synchronous resource load"), OutFailures);
+	Require(Evidence.SetupResourceFailures == 0 &&
+		Evidence.WarmupResourceFailures == 0 &&
+		Evidence.MeasurementResourceFailures == 0,
+		TEXT("resource smoke reported a resource failure"), OutFailures);
+	Require(Evidence.SetupResourceCancellations == 0 &&
+		Evidence.WarmupResourceCancellations == 0 &&
+		Evidence.MeasurementResourceCancellations == 0,
+		TEXT("resource smoke cancelled its primary resource"), OutFailures);
+	Require(Evidence.SetupResourceAsyncRequests + Evidence.SetupResourceCacheHits +
+		Evidence.WarmupResourceAsyncRequests + Evidence.WarmupResourceCacheHits == 1,
+		TEXT("resource smoke primary view did not consume exactly one resource"),
+		OutFailures);
+	Require(Evidence.SetupBrushBuilds + Evidence.WarmupBrushBuilds > 0,
+		TEXT("resource smoke did not build a Slate brush"), OutFailures);
+	Require(Evidence.MeasurementResourceAsyncRequests == 0,
+		TEXT("resource smoke started a resource request in the measurement window"),
+		OutFailures);
+	Require(Evidence.SecondViewHydratedNodes ==
+		static_cast<uint64>(Evidence.CompiledNodeCount),
+		TEXT("resource smoke second view did not hydrate exactly one document"),
+		OutFailures);
+	Require(Evidence.SecondViewResourceLoadAttempts == 0,
+		TEXT("resource smoke second view performed a synchronous resource load"),
+		OutFailures);
+	Require(Evidence.SecondViewResourceAsyncRequests == 0 &&
+		Evidence.SecondViewResourceCacheHits == 1,
+		TEXT("resource smoke second view did not reuse the resident texture"),
+		OutFailures);
+	Require(Evidence.SecondViewResourceFailures == 0 &&
+		Evidence.SecondViewResourceCancellations == 0,
+		TEXT("resource smoke second view did not retain a clean resource state"),
+		OutFailures);
+	return OutFailures.IsEmpty();
+}

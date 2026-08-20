@@ -468,9 +468,11 @@ bool FWebToUEBenchmarkRunner::Tick(float DeltaSeconds)
 
 bool FWebToUEBenchmarkRunner::SetupUi()
 {
+	const bool bResourceSmoke = Corpus == TEXT("ResourceTextureSmoke");
 	if ((Mode != TEXT("WebToUE") && Mode != TEXT("UMG")) ||
 		(Corpus != TEXT("MainMenu") && Corpus != TEXT("HUD") &&
-			Corpus != TEXT("ScrollableSettings")))
+			Corpus != TEXT("ScrollableSettings") && !bResourceSmoke) ||
+		(bResourceSmoke && Mode != TEXT("WebToUE")))
 	{
 		FailAndExit(TEXT("Invalid -WTUEBenchmark or -WTUECorpus value"));
 		return false;
@@ -1060,7 +1062,12 @@ void FWebToUEBenchmarkRunner::Finish()
 			WarmupWorkload.GetCounter(EWebToUEPerformanceCounter::DisplayListBuilds) > 0 &&
 			MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::PaintDrawElements) > 0);
 	bool bHasTrajectoryEvidence = TrajectoryStep > 0;
-	if (Mode == TEXT("UMG"))
+	const bool bResourceSmoke = Corpus == TEXT("ResourceTextureSmoke");
+	if (bResourceSmoke)
+	{
+		bHasTrajectoryEvidence = TrajectoryStep > 0;
+	}
+	else if (Mode == TEXT("UMG"))
 	{
 		bHasTrajectoryEvidence &= bUmgTrajectoryEffectObserved;
 	}
@@ -1111,18 +1118,48 @@ void FWebToUEBenchmarkRunner::Finish()
 			EWebToUEPerformanceCounter::BindingNodesUpdated);
 		Evidence.SetupResourceLoadAttempts = SetupWorkload.GetCounter(
 			EWebToUEPerformanceCounter::ResourceLoadAttempts);
+		Evidence.SetupResourceAsyncRequests = SetupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceAsyncRequests);
+		Evidence.SetupResourceCacheHits = SetupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceCacheHits);
 		Evidence.SetupResourceFailures = SetupWorkload.GetCounter(
 			EWebToUEPerformanceCounter::ResourceFailures);
+		Evidence.SetupResourceCancellations = SetupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceCancellations);
+		Evidence.SetupBrushBuilds = SetupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::BrushBuilds);
+		Evidence.WarmupResourceLoadAttempts = WarmupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceLoadAttempts);
+		Evidence.WarmupResourceAsyncRequests = WarmupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceAsyncRequests);
+		Evidence.WarmupResourceCacheHits = WarmupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceCacheHits);
+		Evidence.WarmupResourceFailures = WarmupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceFailures);
+		Evidence.WarmupResourceCancellations = WarmupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceCancellations);
+		Evidence.WarmupBrushBuilds = WarmupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::BrushBuilds);
 		Evidence.MeasurementResourceLoadAttempts = MeasurementWorkload.GetCounter(
 			EWebToUEPerformanceCounter::ResourceLoadAttempts);
 		Evidence.MeasurementResourceAsyncRequests = MeasurementWorkload.GetCounter(
 			EWebToUEPerformanceCounter::ResourceAsyncRequests);
+		Evidence.MeasurementResourceFailures = MeasurementWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceFailures);
+		Evidence.MeasurementResourceCancellations = MeasurementWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceCancellations);
 		Evidence.SecondViewHydratedNodes = SecondViewWorkload.GetCounter(
 			EWebToUEPerformanceCounter::HydratedNodes);
 		Evidence.SecondViewResourceLoadAttempts = SecondViewWorkload.GetCounter(
 			EWebToUEPerformanceCounter::ResourceLoadAttempts);
+		Evidence.SecondViewResourceAsyncRequests = SecondViewWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceAsyncRequests);
+		Evidence.SecondViewResourceCacheHits = SecondViewWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceCacheHits);
 		Evidence.SecondViewResourceFailures = SecondViewWorkload.GetCounter(
 			EWebToUEPerformanceCounter::ResourceFailures);
+		Evidence.SecondViewResourceCancellations = SecondViewWorkload.GetCounter(
+			EWebToUEPerformanceCounter::ResourceCancellations);
 		Evidence.SecondViewRssDeltaMiB = AfterSecondViewMemory.RssMiB -
 			BeforeSecondViewMemory.RssMiB;
 		Evidence.SecondViewLlmDeltaMiB = AfterSecondViewMemory.LlmMiB -
@@ -1136,8 +1173,10 @@ void FWebToUEBenchmarkRunner::Finish()
 			FirstViewCensus.SharedStyleTemplateBytes;
 		Evidence.SecondViewSharedTemplateBytes =
 			SecondViewCensus.SharedStyleTemplateBytes;
-		bProductPolicyPass =
-			FWebToUEPackagedBenchmarkPolicy::ValidateWebToUEEvidence(
+		bProductPolicyPass = bResourceSmoke
+			? FWebToUEPackagedBenchmarkPolicy::ValidateResourceSmokeEvidence(
+				Evidence, ProductPolicyFailures)
+			: FWebToUEPackagedBenchmarkPolicy::ValidateWebToUEEvidence(
 				Evidence, ProductPolicyFailures);
 	}
 	const double KnownSetupMs = ColdAssetLoadMs + ColdUiObjectConstructionMs +
@@ -1185,6 +1224,7 @@ void FWebToUEBenchmarkRunner::Finish()
 	Root->SetStringField(TEXT("trajectory"), Corpus == TEXT("HUD")
 		? TEXT("health FieldNotify/manual text toggle")
 		: Corpus == TEXT("MainMenu") ? TEXT("pointer hover plus periodic click")
+		: bResourceSmoke ? TEXT("packaged visible-resource observation")
 		: TEXT("pointer hover plus bidirectional wheel scroll"));
 	TSharedRef<FJsonObject> TrajectoryEvidence = MakeShared<FJsonObject>();
 	TrajectoryEvidence->SetNumberField(TEXT("steps_dispatched"), TrajectoryStep);
@@ -1293,7 +1333,9 @@ void FWebToUEBenchmarkRunner::Finish()
 	ProductPolicy->SetBoolField(TEXT("evaluated"), Mode == TEXT("WebToUE"));
 	ProductPolicy->SetBoolField(TEXT("passed"), bProductPolicyPass);
 	ProductPolicy->SetNumberField(TEXT("maximum_compiled_resources"),
-		FWebToUEPackagedBenchmarkPolicy::FrozenCorpusMaximumCompiledResources);
+		bResourceSmoke
+			? FWebToUEPackagedBenchmarkPolicy::ResourceSmokeExpectedCompiledResources
+			: FWebToUEPackagedBenchmarkPolicy::FrozenCorpusMaximumCompiledResources);
 	ProductPolicy->SetNumberField(TEXT("maximum_style_node_visits_per_trajectory"),
 		static_cast<double>(FWebToUEPackagedBenchmarkPolicy::MaximumStyleNodeVisitsPerTrajectory));
 	ProductPolicy->SetNumberField(TEXT("maximum_selector_evaluations_per_trajectory"),
