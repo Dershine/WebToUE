@@ -767,16 +767,6 @@ void SWebToUEView::CollectPseudoDependencyTargets(FWebToUENode& ReasonNode,
 void SWebToUEView::UpdatePseudoState(FWebToUENode* OldNode, FWebToUENode* NewNode,
 	EWebToUEPseudoState Flag, bool bIncludeAncestors)
 {
-	using namespace WebToUE::Runtime::PseudoInvalidation::Private;
-	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
-	if (!RuntimeDocument) return;
-
-	struct FTargetReason
-	{
-		FWebToUEInstanceHandle Target;
-		FWebToUEInstanceHandle Source;
-		int32 RuleIndex = INDEX_NONE;
-	};
 	TArray<FWebToUENode*> OldPath;
 	TArray<FWebToUENode*> NewPath;
 	for (FWebToUENode* Current = OldNode; Current;
@@ -789,6 +779,24 @@ void SWebToUEView::UpdatePseudoState(FWebToUENode* OldNode, FWebToUENode* NewNod
 	{
 		NewPath.Add(Current);
 	}
+	UpdatePseudoStateBatch(OldPath, NewPath, Flag);
+}
+
+void SWebToUEView::UpdatePseudoStateBatch(
+	TConstArrayView<FWebToUENode*> RemovedNodes,
+	TConstArrayView<FWebToUENode*> AddedNodes,
+	EWebToUEPseudoState Flag)
+{
+	using namespace WebToUE::Runtime::PseudoInvalidation::Private;
+	FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
+	if (!RuntimeDocument) return;
+
+	struct FTargetReason
+	{
+		FWebToUEInstanceHandle Target;
+		FWebToUEInstanceHandle Source;
+		int32 RuleIndex = INDEX_NONE;
+	};
 
 	TArray<FTargetReason> DirtyTargets;
 	const TArray<FWebToUEStyleRule>& Rules = RuntimeDocument->GetRules();
@@ -836,18 +844,16 @@ void SWebToUEView::UpdatePseudoState(FWebToUENode* OldNode, FWebToUENode* NewNod
 		}
 	};
 
-	for (FWebToUENode* Node : OldPath)
+	for (FWebToUENode* Node : RemovedNodes)
 	{
-		if (NewPath.Contains(Node)) continue;
 		CollectReasonTargets(*Node);
 		GetRuntimeState(*Node).PseudoStates &= ~Flag;
 		FWebToUEPerformanceCapture::RecordCounter(
 			EWebToUEPerformanceCounter::PseudoStateNodesChanged);
 		CollectReasonTargets(*Node);
 	}
-	for (FWebToUENode* Node : NewPath)
+	for (FWebToUENode* Node : AddedNodes)
 	{
-		if (OldPath.Contains(Node)) continue;
 		CollectReasonTargets(*Node);
 		GetRuntimeState(*Node).PseudoStates |= Flag;
 		FWebToUEPerformanceCapture::RecordCounter(
@@ -988,20 +994,23 @@ void SWebToUEView::SetInteractionNode(
 	{
 		Nodes.Remove(Interaction);
 	}
+	TArray<FWebToUENode*, TInlineAllocator<8>> RemovedNodes;
+	TArray<FWebToUENode*, TInlineAllocator<8>> AddedNodes;
 	for (const FWebToUEInstanceHandle Handle : Removed)
 	{
 		if (FWebToUENode* RemovedNode = RuntimeInstance->ResolveNode(Handle))
 		{
-			UpdatePseudoState(RemovedNode, nullptr, Flag, false);
+			RemovedNodes.Add(RemovedNode);
 		}
 	}
 	for (const FWebToUEInstanceHandle Handle : Added)
 	{
 		if (FWebToUENode* AddedNode = RuntimeInstance->ResolveNode(Handle))
 		{
-			UpdatePseudoState(nullptr, AddedNode, Flag, false);
+			AddedNodes.Add(AddedNode);
 		}
 	}
+	UpdatePseudoStateBatch(RemovedNodes, AddedNodes, Flag);
 }
 
 void SWebToUEView::ResetInteractionState()

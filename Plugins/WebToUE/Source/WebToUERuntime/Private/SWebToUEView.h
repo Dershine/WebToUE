@@ -205,6 +205,10 @@ private:
 	void SetFocusedNode(FWebToUENode* Node, uint32 SlateUserIndex = 0);
 	void UpdatePseudoState(FWebToUENode* OldNode, FWebToUENode* NewNode,
 		EWebToUEPseudoState Flag, bool bIncludeAncestors);
+	void UpdatePseudoStateBatch(
+		TConstArrayView<FWebToUENode*> RemovedNodes,
+		TConstArrayView<FWebToUENode*> AddedNodes,
+		EWebToUEPseudoState Flag);
 	void CollectPseudoDependencyTargets(FWebToUENode& ReasonNode,
 		EWebToUEPseudoState Flag, TArray<FWebToUEInstanceHandle>& OutTargets) const;
 	bool MoveFocusSequential(int32 Direction, bool bWrap, uint32 SlateUserIndex = 0);
