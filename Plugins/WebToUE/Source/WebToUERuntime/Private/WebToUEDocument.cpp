@@ -106,6 +106,8 @@ void UWebToUEDocument::CommitCompiledDocument(FWebToUECompiledDocumentData&& Com
 	CompiledBindingOps = MoveTemp(CompiledDocument.BindingOps);
 	RootNodeIndex = CompiledDocument.RootNodeIndex;
 	ResourceManifest = MoveTemp(CompiledDocument.ResourceManifest);
+	SealedResourceDependencies = MoveTemp(CompiledDocument.SealedResourceDependencies);
+	ResourceFreshness = MoveTemp(CompiledDocument.ResourceFreshness);
 }
 
 void UWebToUEDocument::PostInitProperties()

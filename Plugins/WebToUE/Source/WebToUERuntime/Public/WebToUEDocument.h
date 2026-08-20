@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
 #include "WebToUECoreTypes.h"
+#include "WebToUEResourceContract.h"
 #include "WebToUEDocument.generated.h"
 
 class UAssetImportData;
@@ -21,6 +22,10 @@ struct WEBTOUERUNTIME_API FWebToUECompiledResource
 	GENERATED_BODY()
 	UPROPERTY() EWebToUEResourceKind Kind = EWebToUEResourceKind::Texture;
 	UPROPERTY() FSoftObjectPath Path;
+	UPROPERTY() FString ResourceId;
+	UPROPERTY() FWebToUEResourceProvenance Provenance;
+	UPROPERTY() FString GroupId;
+	UPROPERTY() EWebToUEResidencyClass Residency = EWebToUEResidencyClass::Invalid;
 
 	bool operator==(const FWebToUECompiledResource& Other) const
 	{
@@ -114,6 +119,8 @@ struct WEBTOUERUNTIME_API FWebToUECompiledDocumentData
 	TArray<FWebToUECompiledBindingOp> BindingOps;
 	int32 RootNodeIndex = INDEX_NONE;
 	TArray<FWebToUECompiledResource> ResourceManifest;
+	TArray<FWebToUEResourceDependency> SealedResourceDependencies;
+	FWebToUECookFreshnessStamp ResourceFreshness;
 };
 
 UENUM(BlueprintType)
@@ -158,6 +165,11 @@ public:
 	TSharedPtr<const FWebToUERuntimeStyleTemplate> GetOrCreateRuntimeStyleTemplate() const;
 	int32 GetRootNodeIndex() const { return RootNodeIndex; }
 	const TArray<FWebToUECompiledResource>& GetResourceManifest() const { return ResourceManifest; }
+	const TArray<FWebToUEResourceDependency>& GetSealedResourceDependencies() const
+	{
+		return SealedResourceDependencies;
+	}
+	const FWebToUECookFreshnessStamp& GetResourceFreshness() const { return ResourceFreshness; }
 
 #if WITH_EDITORONLY_DATA
 	UPROPERTY(VisibleAnywhere, Category="WebToUE", meta=(MultiLine=true))
@@ -219,6 +231,12 @@ private:
 
 	UPROPERTY()
 	TArray<FWebToUECompiledResource> ResourceManifest;
+
+	UPROPERTY()
+	TArray<FWebToUEResourceDependency> SealedResourceDependencies;
+
+	UPROPERTY()
+	FWebToUECookFreshnessStamp ResourceFreshness;
 
 	mutable TSharedPtr<const FWebToUERuntimeStyleTemplate> RuntimeStyleTemplate;
 };

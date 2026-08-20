@@ -2,16 +2,136 @@
 
 #include "WebToUECompiler.h"
 #include "WebToUEDocument.h"
+#include "WebToUEResourceContract.h"
 #include "WebToUESettings.h"
 
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/AssetData.h"
 #include "EditorFramework/AssetImportData.h"
 #include "Internationalization/StringTable.h"
 #include "Engine/Texture2D.h"
 #include "HAL/FileManager.h"
+#include "Hash/Blake3.h"
+#include "IO/IoHash.h"
 #include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Modules/ModuleManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWebToUEImport, Log, All);
+
+namespace WebToUE::ResourceImport::Private
+{
+	static FString HashBuffer(const void* Data, uint64 Size)
+	{
+		return LexToString(FBlake3::HashBuffer(Data, Size)).ToLower();
+	}
+
+	static FString HashUtf8(const FString& Value)
+	{
+		const FTCHARToUTF8 Utf8(*Value);
+		return HashBuffer(Utf8.Get(), Utf8.Length());
+	}
+
+	static bool MakeLogicalSourceId(const FString& Filename, FString& OutLogicalId)
+	{
+		FString FullPath = FPaths::ConvertRelativePathToFull(Filename);
+		FPaths::NormalizeFilename(FullPath);
+		FString RelativePath = FullPath;
+		if (!FPaths::MakePathRelativeTo(RelativePath, *FPaths::ProjectDir()) ||
+			RelativePath.StartsWith(TEXT("../")))
+		{
+			return false;
+		}
+		FPaths::NormalizeFilename(RelativePath);
+		OutLogicalId = TEXT("source/") + RelativePath;
+		return true;
+	}
+
+	static FString MakeAssetDependencyId(const FSoftObjectPath& Path)
+	{
+		const FString PackageName = FPackageName::ObjectPathToPackageName(Path.ToString());
+		return PackageName.StartsWith(TEXT("/"))
+			? TEXT("asset/") + PackageName.RightChop(1)
+			: TEXT("asset/") + PackageName;
+	}
+
+	static int32 ResidencyRank(EWebToUEResidencyClass Residency)
+	{
+		switch (Residency)
+		{
+		case EWebToUEResidencyClass::Critical: return 0;
+		case EWebToUEResidencyClass::Visible: return 1;
+		case EWebToUEResidencyClass::Lazy: return 2;
+		default: return MAX_int32;
+		}
+	}
+
+	static EWebToUEResidencyClass ParseImageResidency(const FString& Value)
+	{
+		if (Value.IsEmpty() || Value.Equals(TEXT("visible"), ESearchCase::IgnoreCase))
+		{
+			return EWebToUEResidencyClass::Visible;
+		}
+		if (Value.Equals(TEXT("critical"), ESearchCase::IgnoreCase))
+		{
+			return EWebToUEResidencyClass::Critical;
+		}
+		if (Value.Equals(TEXT("lazy"), ESearchCase::IgnoreCase))
+		{
+			return EWebToUEResidencyClass::Lazy;
+		}
+		return EWebToUEResidencyClass::Invalid;
+	}
+
+	static bool HashFile(const FString& Filename, FString& OutHash)
+	{
+		TArray<uint8> Bytes;
+		if (!FFileHelper::LoadFileToArray(Bytes, *Filename))
+		{
+			return false;
+		}
+		OutHash = HashBuffer(Bytes.GetData(), Bytes.Num());
+		return true;
+	}
+
+	static bool HashAssetPackage(const FSoftObjectPath& Path, FString& OutHash)
+	{
+		const FString PackageNameString = FPackageName::ObjectPathToPackageName(Path.ToString());
+		if (!FPackageName::IsValidLongPackageName(PackageNameString))
+		{
+			return false;
+		}
+		const IAssetRegistry& AssetRegistry =
+			FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		FAssetPackageData PackageData;
+		if (AssetRegistry.TryGetAssetPackageData(FName(*PackageNameString), PackageData) !=
+			UE::AssetRegistry::EExists::Exists)
+		{
+			return false;
+		}
+		const FIoHash PackageSavedHash = PackageData.GetPackageSavedHash();
+		if (PackageSavedHash.IsZero())
+		{
+			return false;
+		}
+		OutHash = HashBuffer(PackageSavedHash.GetBytes(), sizeof(FIoHash::ByteArray));
+		return true;
+	}
+
+	static FWebToUEArtifactVersionSet CurrentArtifactVersions()
+	{
+		FWebToUEArtifactVersionSet Versions;
+		Versions.UiIr = { 1, 0 };
+		Versions.ResourceIr = { 1, 0 };
+		return Versions;
+	}
+
+	static FString CompilerFingerprint()
+	{
+		return HashUtf8(TEXT("WebToUE.Editor.ResourceImporter/1;UI-IR/1.0;Resource-IR/1.0"));
+	}
+}
 
 UWebToUEFactory::UWebToUEFactory()
 {
@@ -40,7 +160,7 @@ static FWebToUEAssetDiagnostic ConvertDiagnostic(const FWebToUEDiagnostic& Sourc
 }
 
 static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument& Source,
-	const UWebToUEDocument& Target)
+	const UWebToUEDocument& Target, const FString& SourceUnit)
 {
 	FWebToUECompiledDocumentData Result;
 	TMap<FString, FString> PreviousAutoKeys;
@@ -164,13 +284,45 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 		}
 	}
 
-	const auto AddResource = [&Result](EWebToUEResourceKind Kind, const FSoftObjectPath& Path)
+	const auto AddResource = [&Result, &SourceUnit](EWebToUEResourceKind Kind,
+		const FString& AuthorReference, EWebToUEResidencyClass Residency)
 	{
-		if (!Path.IsValid()) return;
+		const FSoftObjectPath Path(AuthorReference);
+		if (!Path.IsValid() && Kind != EWebToUEResourceKind::Texture) return;
+		if (FWebToUECompiledResource* Existing = Result.ResourceManifest.FindByPredicate(
+			[Kind, &Path](const FWebToUECompiledResource& Resource)
+			{
+				return Resource.Kind == Kind && Resource.Path == Path;
+			}))
+		{
+			if (Kind == EWebToUEResourceKind::Texture &&
+				WebToUE::ResourceImport::Private::ResidencyRank(Residency) <
+				WebToUE::ResourceImport::Private::ResidencyRank(Existing->Residency))
+			{
+				Existing->Residency = Residency;
+			}
+			return;
+		}
 		FWebToUECompiledResource Resource;
 		Resource.Kind = Kind;
 		Resource.Path = Path;
-		Result.ResourceManifest.AddUnique(MoveTemp(Resource));
+		if (Kind == EWebToUEResourceKind::Texture)
+		{
+			Resource.ResourceId =
+				TEXT("resource/texture/") +
+				WebToUE::ResourceImport::Private::HashUtf8(AuthorReference);
+			Resource.Provenance.Origin = EWebToUEResourceOrigin::UnrealAsset;
+			Resource.Provenance.SourceUnit = SourceUnit;
+			Resource.Provenance.AuthorReference = AuthorReference;
+			if (Path.IsValid())
+			{
+				Resource.Provenance.ResolvedDependencyId =
+					WebToUE::ResourceImport::Private::MakeAssetDependencyId(Path);
+			}
+			Resource.GroupId = TEXT("document/images");
+			Resource.Residency = Residency;
+		}
+		Result.ResourceManifest.Add(MoveTemp(Resource));
 	};
 	const UWebToUESettings* Settings = GetDefault<UWebToUESettings>();
 	Source.ForEachNode([&Source, &AddResource, Settings](FWebToUENode& Node)
@@ -178,17 +330,103 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 		if (Node.Tag == TEXT("img"))
 		{
 			AddResource(EWebToUEResourceKind::Texture,
-				FSoftObjectPath(Node.GetAttribute(TEXT("src"))));
+				Node.GetAttribute(TEXT("src")),
+				WebToUE::ResourceImport::Private::ParseImageResidency(
+					Node.GetAttribute(TEXT("data-ue-residency"))));
 		}
 		const FString StringTable = Node.GetAttribute(TEXT("data-ue-string-table"));
 		if (!StringTable.IsEmpty())
 		{
-			AddResource(EWebToUEResourceKind::StringTable, FSoftObjectPath(StringTable));
+			AddResource(EWebToUEResourceKind::StringTable, StringTable,
+				EWebToUEResidencyClass::Invalid);
 		}
 		AddResource(EWebToUEResourceKind::Font,
-			Settings->FindFontObjectPath(Source.GetComputedStyle(Node).FontFamily));
+			Settings->FindFontObjectPath(Source.GetComputedStyle(Node).FontFamily).ToString(),
+			EWebToUEResidencyClass::Invalid);
 	});
 	return Result;
+}
+
+static bool BuildResourceContract(const TArray<FString>& DependencyFiles,
+	FWebToUECompiledDocumentData& InOutDocument,
+	TArray<FWebToUEResourceContractDiagnostic>& OutDiagnostics)
+{
+	using namespace WebToUE::ResourceImport::Private;
+	OutDiagnostics.Reset();
+	FWebToUEResourceContractDescriptor Descriptor;
+	Descriptor.ContractVersion = { 1, 0 };
+	Descriptor.CompilerFingerprintBlake3 = CompilerFingerprint();
+	Descriptor.ArtifactVersions = CurrentArtifactVersions();
+
+	for (int32 Index = 0; Index < DependencyFiles.Num(); ++Index)
+	{
+		FString LogicalId;
+		FString ContentHash;
+		if (!MakeLogicalSourceId(DependencyFiles[Index], LogicalId) ||
+			!HashFile(DependencyFiles[Index], ContentHash))
+		{
+			OutDiagnostics.Add({ TEXT("WTUE-RES-001"), TEXT("dependencies.source"),
+				FString::Printf(TEXT("Source dependency is outside the project or unreadable: %s"),
+					*DependencyFiles[Index]) });
+			continue;
+		}
+		if (Index == 0)
+		{
+			Descriptor.DocumentId = TEXT("document/") + HashUtf8(LogicalId);
+		}
+		Descriptor.Dependencies.Add({ MoveTemp(LogicalId),
+			Index == 0 ? EWebToUEResourceDependencyKind::UiSource :
+				EWebToUEResourceDependencyKind::StyleSource,
+			MoveTemp(ContentHash) });
+	}
+
+	for (const FWebToUECompiledResource& Resource : InOutDocument.ResourceManifest)
+	{
+		if (Resource.Kind != EWebToUEResourceKind::Texture)
+		{
+			continue;
+		}
+		FString AssetHash;
+		if (!HashAssetPackage(Resource.Path, AssetHash))
+		{
+			OutDiagnostics.Add({ TEXT("WTUE-RES-001"),
+				FString::Printf(TEXT("resources.%s"), *Resource.ResourceId),
+				FString::Printf(TEXT("Unreal texture package is missing or has no saved content fingerprint: %s"),
+					*Resource.Path.ToString()) });
+		}
+		else if (!Descriptor.Dependencies.ContainsByPredicate(
+			[&Resource](const FWebToUEResourceDependency& Dependency)
+			{
+				return Dependency.LogicalId == Resource.Provenance.ResolvedDependencyId;
+			}))
+		{
+			Descriptor.Dependencies.Add({ Resource.Provenance.ResolvedDependencyId,
+				EWebToUEResourceDependencyKind::Resource, MoveTemp(AssetHash) });
+		}
+		Descriptor.Resources.Add({ Resource.ResourceId, Resource.Provenance });
+		Descriptor.ResidencyAssignments.Add({ Resource.ResourceId, FString(),
+			Resource.GroupId, Resource.Residency });
+	}
+
+	FWebToUEResourceContractSnapshot Snapshot;
+	TArray<FWebToUEResourceContractDiagnostic> PolicyDiagnostics;
+	const bool bPolicyValid = FWebToUEResourceContractPolicy::BuildSnapshot(
+		Descriptor, Snapshot, PolicyDiagnostics);
+	OutDiagnostics.Append(MoveTemp(PolicyDiagnostics));
+	OutDiagnostics.Sort([](const FWebToUEResourceContractDiagnostic& A,
+		const FWebToUEResourceContractDiagnostic& B)
+	{
+		if (A.Code != B.Code) return A.Code < B.Code;
+		if (A.Path != B.Path) return A.Path < B.Path;
+		return A.Detail < B.Detail;
+	});
+	if (!bPolicyValid || !OutDiagnostics.IsEmpty())
+	{
+		return false;
+	}
+	InOutDocument.SealedResourceDependencies = MoveTemp(Snapshot.Dependencies);
+	InOutDocument.ResourceFreshness = MoveTemp(Snapshot.Freshness);
+	return true;
 }
 
 bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FString& Filename, bool bPreserveLastGood)
@@ -260,7 +498,31 @@ bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FStri
 		}
 	}
 
-	const bool bHasErrors = Compiled->HasErrors();
+	bool bHasErrors = Compiled->HasErrors();
+	FWebToUECompiledDocumentData CompiledDocument;
+	if (!bHasErrors)
+	{
+		FString SourceUnit;
+		WebToUE::ResourceImport::Private::MakeLogicalSourceId(Filename, SourceUnit);
+		CompiledDocument = BuildCompiledDocument(*Compiled, Document, SourceUnit);
+		TArray<FWebToUEResourceContractDiagnostic> ResourceDiagnostics;
+		if (!BuildResourceContract(Dependencies, CompiledDocument, ResourceDiagnostics))
+		{
+			bHasErrors = true;
+		}
+		for (const FWebToUEResourceContractDiagnostic& ResourceDiagnostic : ResourceDiagnostics)
+		{
+			FWebToUEAssetDiagnostic& Diagnostic = Document.Diagnostics.AddDefaulted_GetRef();
+			Diagnostic.Severity = EWebToUEAssetDiagnosticSeverity::Error;
+			Diagnostic.File = Filename;
+			Diagnostic.Line = 1;
+			Diagnostic.Column = 1;
+			Diagnostic.Message = FString::Printf(TEXT("%s %s: %s"),
+				*ResourceDiagnostic.Code, *ResourceDiagnostic.Path, *ResourceDiagnostic.Detail);
+			UE_LOG(LogWebToUEImport, Error, TEXT("%s(1,1): %s"),
+				*Filename, *Diagnostic.Message);
+		}
+	}
 	if (!bHasErrors || !bPreserveLastGood || Document.GetCompiledNodes().IsEmpty())
 	{
 		Document.CompiledHtml = bHasErrors ? FString() : Html;
@@ -273,7 +535,7 @@ bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FStri
 		}
 		else
 		{
-			Document.CommitCompiledDocument(BuildCompiledDocument(*Compiled, Document));
+			Document.CommitCompiledDocument(MoveTemp(CompiledDocument));
 			Document.MarkRecompiled();
 		}
 	}

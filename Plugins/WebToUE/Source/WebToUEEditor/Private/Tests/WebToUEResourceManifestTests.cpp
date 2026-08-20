@@ -38,7 +38,8 @@ bool FWebToUEResourceManifestTest::RunTest(const FString& Parameters)
 
 	const FString Html = TEXT(
 		"<body><img src='/Engine/EngineResources/DefaultTexture.DefaultTexture'>"
-		"<img src='/Engine/EngineResources/DefaultTexture.DefaultTexture'>"
+		"<img src='/Engine/EngineResources/DefaultTexture.DefaultTexture' "
+		"data-ue-residency='critical'>"
 		"<p style='font-family: ManifestFont' "
 		"data-ue-string-table='/WebToUETests/ST_Manifest.ST_Manifest' "
 		"data-ue-string-key='Label'>Label</p></body>");
@@ -66,6 +67,38 @@ bool FWebToUEResourceManifestTest::RunTest(const FString& Parameters)
 		CountKind(EWebToUEResourceKind::Font), 1);
 	TestEqual(TEXT("The localized node produces one String Table entry"),
 		CountKind(EWebToUEResourceKind::StringTable), 1);
+	const FWebToUECompiledResource* TextureResource = Manifest.FindByPredicate(
+		[](const FWebToUECompiledResource& Resource)
+		{
+			return Resource.Kind == EWebToUEResourceKind::Texture;
+		});
+	TestNotNull(TEXT("The imported texture has a contract entry"), TextureResource);
+	if (TextureResource)
+	{
+		TestTrue(TEXT("The imported texture has a deterministic logical identity"),
+			TextureResource->ResourceId.StartsWith(TEXT("resource/texture/")) &&
+			TextureResource->ResourceId.Len() == 81);
+		TestEqual(TEXT("The imported texture records Unreal Asset provenance"),
+			TextureResource->Provenance.Origin, EWebToUEResourceOrigin::UnrealAsset);
+		TestEqual(TEXT("Duplicate references promote document residency to Critical"),
+			TextureResource->Residency, EWebToUEResidencyClass::Critical);
+	}
+	TestEqual(TEXT("The sealed contract contains UI Source and Texture package inputs"),
+		Document->GetSealedResourceDependencies().Num(), 2);
+	TestEqual(TEXT("The imported artifact declares Resource IR 1.0"),
+		Document->GetResourceFreshness().ArtifactVersions.ResourceIr.Major, uint16(1));
+	TestEqual(TEXT("The imported artifact has a BLAKE3 dependency closure"),
+		Document->GetResourceFreshness().DependencyClosureBlake3.Len(), 64);
+	const FWebToUECookFreshnessStamp LastGoodStamp = Document->GetResourceFreshness();
+	AddExpectedError(TEXT("WTUE-RES-001"), EAutomationExpectedErrorFlags::Contains, -1);
+	AddExpectedError(TEXT("WTUE-RES-003"), EAutomationExpectedErrorFlags::Contains, -1);
+	const FString InvalidHtml = TEXT("<body><img src='https://example.com/image.png'></body>");
+	TestTrue(TEXT("The invalid reimport source is written"),
+		FFileHelper::SaveStringToFile(InvalidHtml, *TestFilename));
+	TestFalse(TEXT("HTTP texture provenance fails closed"),
+		UWebToUEFactory::ImportIntoDocument(*Document, TestFilename, true));
+	TestTrue(TEXT("A failed reimport preserves the last-good sealed artifact"),
+		Document->GetResourceFreshness() == LastGoodStamp);
 	return true;
 }
 

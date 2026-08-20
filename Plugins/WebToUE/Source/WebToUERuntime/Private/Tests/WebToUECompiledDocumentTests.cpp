@@ -60,10 +60,26 @@ bool FWebToUECompiledDocumentBoundaryTest::RunTest(const FString& Parameters)
 	FWebToUECompiledDocumentData CompiledDocument;
 	CompiledDocument.LocalizationNamespace = TEXT("BoundaryTest");
 	CompiledDocument.RootNodeIndex = 0;
-	CompiledDocument.ResourceManifest.Add({ EWebToUEResourceKind::Texture,
-		FSoftObjectPath(TEXT("/WebToUETests/T_Boundary.T_Boundary")) });
+	FWebToUECompiledResource& TextureResource =
+		CompiledDocument.ResourceManifest.AddDefaulted_GetRef();
+	TextureResource.Kind = EWebToUEResourceKind::Texture;
+	TextureResource.Path = FSoftObjectPath(TEXT("/WebToUETests/T_Boundary.T_Boundary"));
+	TextureResource.ResourceId = TEXT("resource/texture/boundary");
+	TextureResource.Provenance = { EWebToUEResourceOrigin::UnrealAsset,
+		TEXT("source/boundary.html"), TEXT("/WebToUETests/T_Boundary.T_Boundary"),
+		TEXT("asset/WebToUETests/T_Boundary") };
+	TextureResource.GroupId = TEXT("document/images");
+	TextureResource.Residency = EWebToUEResidencyClass::Visible;
 	CompiledDocument.ResourceManifest.Add({ EWebToUEResourceKind::StringTable,
 		FSoftObjectPath(TEXT("/WebToUETests/ST_Boundary.ST_Boundary")) });
+	CompiledDocument.SealedResourceDependencies.Add({ TEXT("source/boundary.html"),
+		EWebToUEResourceDependencyKind::UiSource, FString::ChrN(64, TEXT('a')) });
+	CompiledDocument.ResourceFreshness.ContractVersion = { 1, 0 };
+	CompiledDocument.ResourceFreshness.DocumentId = TEXT("document/boundary");
+	CompiledDocument.ResourceFreshness.DependencyClosureBlake3 = FString::ChrN(64, TEXT('b'));
+	CompiledDocument.ResourceFreshness.ResourceManifestBlake3 = FString::ChrN(64, TEXT('c'));
+	CompiledDocument.ResourceFreshness.ArtifactVersions.UiIr = { 1, 0 };
+	CompiledDocument.ResourceFreshness.ArtifactVersions.ResourceIr = { 1, 0 };
 
 	FWebToUECompiledNode& Body = CompiledDocument.Nodes.AddDefaulted_GetRef();
 	Body.Type = static_cast<uint8>(EWebToUENodeType::Element);
@@ -103,6 +119,15 @@ bool FWebToUECompiledDocumentBoundaryTest::RunTest(const FString& Parameters)
 		Document->GetResourceManifest()[0].Kind, EWebToUEResourceKind::Texture);
 	TestEqual(TEXT("The second manifest entry retains String Table kind"),
 		Document->GetResourceManifest()[1].Kind, EWebToUEResourceKind::StringTable);
+	TestEqual(TEXT("The resource manifest retains logical identity"),
+		Document->GetResourceManifest()[0].ResourceId,
+		FString(TEXT("resource/texture/boundary")));
+	TestEqual(TEXT("The resource manifest retains document residency"),
+		Document->GetResourceManifest()[0].Residency, EWebToUEResidencyClass::Visible);
+	TestEqual(TEXT("The sealed dependency list crosses the asset boundary"),
+		Document->GetSealedResourceDependencies().Num(), 1);
+	TestEqual(TEXT("The freshness stamp crosses the asset boundary"),
+		Document->GetResourceFreshness().DocumentId, FString(TEXT("document/boundary")));
 
 	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
 	AddExpectedError(TEXT("/WebToUETests/T_Boundary"),
