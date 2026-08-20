@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
+#include "WebToUEAsyncWork.h"
 #include "WebToUEDocument.h"
 #include "WebToUEView.h"
 
@@ -16,6 +17,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUESessionFeedbackTest,
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEScreenHostTest,
 	"WebToUE.Runtime.ScreenHost",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEAsyncLifecycleTest,
+	"WebToUE.Runtime.AsyncLifecycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 namespace WebToUE::SessionHost::Tests
@@ -298,6 +303,130 @@ bool FWebToUEScreenHostTest::RunTest(const FString& Parameters)
 		FWebToUEScreenHost::CreateWithLayer(Layer, InvalidParams, Error);
 	TestFalse(TEXT("Screen Host rejects a missing compiled Document"), InvalidHost.IsValid());
 	TestTrue(TEXT("Rejected creation returns an actionable diagnostic"), !Error.IsEmpty());
+	return true;
+}
+
+bool FWebToUEAsyncLifecycleTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::SessionHost::Tests;
+	FContextObjects Objects;
+	UWebToUEDocument* FirstDocument = NewObject<UWebToUEDocument>(GetTransientPackage());
+	UWebToUEDocument* SecondDocument = NewObject<UWebToUEDocument>(GetTransientPackage());
+	FirstDocument->AddToRoot();
+	SecondDocument->AddToRoot();
+	ON_SCOPE_EXIT
+	{
+		SecondDocument->RemoveFromRoot();
+		FirstDocument->RemoveFromRoot();
+	};
+	for (UWebToUEDocument* Document : {FirstDocument, SecondDocument})
+	{
+		FWebToUECompiledDocumentData Data;
+		Data.RootNodeIndex = 0;
+		FWebToUECompiledNode& Root = Data.Nodes.AddDefaulted_GetRef();
+		Root.Type = static_cast<uint8>(EWebToUENodeType::Element);
+		Root.Tag = TEXT("body");
+		Document->CommitCompiledDocument(MoveTemp(Data));
+	}
+
+	const TSharedRef<FRecordingScreenLayer> Layer =
+		MakeShared<FRecordingScreenLayer>(Objects.LocalPlayer, Objects.World);
+	const TSharedRef<FWebToUEVirtualClock> Clock = MakeShared<FWebToUEVirtualClock>();
+	FWebToUEScreenHostCreateParams Params;
+	Params.Document = FirstDocument;
+	Params.DataContext = Objects.Data;
+	Params.CommandContext = Objects.Commands;
+	Params.SurfaceId = TEXT("webtoue.tests.async-lifecycle");
+	Params.Clock = Clock;
+	FString Error;
+	TUniquePtr<FWebToUEScreenHost> Host =
+		FWebToUEScreenHost::CreateWithLayer(Layer, Params, Error);
+	TestTrue(TEXT("Lifecycle fixture creates a Screen Host"), Host.IsValid());
+	if (!Host)
+	{
+		AddError(Error);
+		return false;
+	}
+	TestTrue(TEXT("Lifecycle fixture attaches so World cleanup ownership is bound"),
+		Host->Attach(Error));
+	TSharedPtr<FWebToUESession> Session = Host->GetSession();
+	TSharedRef<FWebToUEAsyncCoordinator, ESPMode::ThreadSafe> Async =
+		Session->GetAsyncCoordinator();
+	TArray<FString> Mutations;
+	const FWebToUEAsyncHandle OldTimer = Async->ScheduleTimer(
+		EWebToUEClockDomain::Test, 1.0,
+		[&Mutations](FWebToUEUpdateTransaction& Transaction)
+		{
+			Transaction.AddStateMutation(
+				[&Mutations]() { Mutations.Add(TEXT("old-timer")); });
+		}, Error);
+	const FWebToUEAsyncHandle OldCommand = Async->BeginCommand(
+		EWebToUEClockDomain::Test, 1.0,
+		[&Mutations](FWebToUEUpdateTransaction& Transaction)
+		{
+			Transaction.AddStateMutation(
+				[&Mutations]() { Mutations.Add(TEXT("old-timeout")); });
+		}, Error);
+	const FWebToUESessionHandle OldGeneration = Session->GetHandle();
+	Host->GetView()->SetDocument(SecondDocument);
+	TestTrue(TEXT("Replacing the hosted Document advances the Session generation"),
+		Session->GetHandle().GetGeneration() != OldGeneration.GetGeneration());
+	TestEqual(TEXT("Document replacement synchronously cancels old Timer and Command work"),
+		Async->GetPendingWorkCount(), 0);
+	TestTrue(TEXT("A Command Result arriving after View replacement is stale"),
+		Async->ResolveCommand(OldCommand,
+			[&Mutations](FWebToUEUpdateTransaction& Transaction)
+			{
+				Transaction.AddStateMutation(
+					[&Mutations]() { Mutations.Add(TEXT("old-result")); });
+			}) == EWebToUEAsyncResolveResult::DroppedStaleGeneration);
+	TestTrue(TEXT("Old Timer handle cannot cancel replacement-generation work"),
+		Async->Cancel(OldTimer) == EWebToUEAsyncCancelResult::DroppedStaleGeneration);
+	Clock->Advance(EWebToUEClockDomain::Test, 1.0, Error);
+	Async->Pump();
+	TestTrue(TEXT("No old-generation terminal mutates the replacement View"),
+		Mutations.IsEmpty());
+
+	const FWebToUEAsyncHandle CurrentTimer = Async->ScheduleTimer(
+		EWebToUEClockDomain::Test, 1.0,
+		[&Mutations](FWebToUEUpdateTransaction& Transaction)
+		{
+			Transaction.AddStateMutation(
+				[&Mutations]() { Mutations.Add(TEXT("cleaned-timer")); });
+		}, Error);
+	const FWebToUEAsyncHandle CurrentCommand = Async->BeginCommand(
+		EWebToUEClockDomain::Test, 1.0,
+		[&Mutations](FWebToUEUpdateTransaction& Transaction)
+		{
+			Transaction.AddStateMutation(
+				[&Mutations]() { Mutations.Add(TEXT("cleaned-timeout")); });
+		}, Error);
+	TestTrue(TEXT("Replacement generation accepts new lifecycle-owned work"),
+		CurrentTimer.IsValid() && CurrentCommand.IsValid());
+	FWorldDelegates::OnWorldCleanup.Broadcast(Objects.World, true, true);
+	TestTrue(TEXT("Matching World cleanup shuts down the Host and Session"),
+		!Session->IsActive() && Host->GetView() == nullptr && !Async->IsActive());
+	TestEqual(TEXT("World cleanup synchronously releases every pending async item"),
+		Async->GetPendingWorkCount(), 0);
+	TestTrue(TEXT("Result arriving after World cleanup is rejected as inactive"),
+		Async->ResolveCommand(CurrentCommand,
+			[&Mutations](FWebToUEUpdateTransaction& Transaction)
+			{
+				Transaction.AddStateMutation(
+					[&Mutations]() { Mutations.Add(TEXT("cleaned-result")); });
+			}) == EWebToUEAsyncResolveResult::RejectedInactive);
+	Clock->Advance(EWebToUEClockDomain::Test, 1.0, Error);
+	Async->Pump();
+	TestTrue(TEXT("World-cleaned Timer, timeout and result produce zero late mutation"),
+		Mutations.IsEmpty());
+	TestTrue(TEXT("Lifecycle trace distinguishes Generation and Session cancellation"),
+		Async->GetTrace().ContainsByPredicate([](const FWebToUEAsyncTrace& Entry)
+		{
+			return Entry.Outcome == EWebToUEAsyncOutcome::CancelledGeneration;
+		}) && Async->GetTrace().ContainsByPredicate([](const FWebToUEAsyncTrace& Entry)
+		{
+			return Entry.Outcome == EWebToUEAsyncOutcome::CancelledSession;
+		}));
 	return true;
 }
 

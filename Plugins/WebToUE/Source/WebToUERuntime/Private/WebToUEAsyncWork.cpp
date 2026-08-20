@@ -251,6 +251,10 @@ int32 FWebToUEAsyncCoordinator::Pump()
 			Observed);
 		++TerminalCount;
 	}
+	if (!PendingResolutions.IsEmpty())
+	{
+		SchedulePump();
+	}
 	return TerminalCount;
 }
 
