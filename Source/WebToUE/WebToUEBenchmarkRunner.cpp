@@ -5,11 +5,14 @@
 #include "WebToUEDemoViewModel.h"
 
 #include "WebToUEDocument.h"
+#include "WebToUEScreenHost.h"
 #include "WebToUEView.h"
 
 #include "DynamicRHI.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
+#include "Engine/LocalPlayer.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/LowLevelMemTracker.h"
 #include "HAL/PlatformFileManager.h"
@@ -316,13 +319,19 @@ FWebToUEBenchmarkRunner::~FWebToUEBenchmarkRunner()
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(TickerHandle);
 	}
-	if (ProbeWidget.IsValid())
+	if (PrimaryScreenHost)
+	{
+		PrimaryScreenHost->Shutdown();
+		PrimaryScreenHost.Reset();
+	}
+	else if (ProbeWidget.IsValid())
 	{
 		if (GEngine && GEngine->GameViewport)
 		{
 			GEngine->GameViewport->RemoveViewportWidgetContent(ProbeWidget.ToSharedRef());
 		}
 	}
+	SecondScreenHost.Reset();
 	PerformanceCapture.Reset();
 }
 
@@ -450,8 +459,15 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 	BeforeFirstViewMemory = CaptureMemoryPoint();
 	TSharedPtr<SWidget> BuiltTargetWidget;
 	UWorld* World = GEngine->GameViewport->GetWorld();
+	UGameInstance* GameInstance = GEngine->GameViewport->GetGameInstance();
+	ULocalPlayer* LocalPlayer = GameInstance ? GameInstance->GetFirstGamePlayer() : nullptr;
 	if (Mode == TEXT("WebToUE"))
 	{
+		if (!LocalPlayer)
+		{
+			FailAndExit(TEXT("WebToUE Screen Host requires the first LocalPlayer"));
+			return false;
+		}
 		const uint64 AssetLoadStartCycles = FPlatformTime::Cycles64();
 		const FString AssetPath = FString::Printf(TEXT("/Game/WebToUEExamples/%s.%s"),
 			*Corpus.ToString(), *Corpus.ToString());
@@ -476,16 +492,35 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 			Document->GetCompiledNodes().IsValidIndex(CompiledRootNodeIndex)
 				? TEXT("true") : TEXT("false"));
 		const uint64 UiObjectStartCycles = FPlatformTime::Cycles64();
-		UWebToUEView* View = NewObject<UWebToUEView>(GetTransientPackage());
 		UWebToUEDemoViewModel* ViewModel = NewObject<UWebToUEDemoViewModel>(GetTransientPackage());
-		View->SetDocument(Document);
-		View->SetDataContext(ViewModel);
+		FWebToUEScreenHostCreateParams HostParams;
+		HostParams.Document = Document;
+		HostParams.DataContext = ViewModel;
+		HostParams.SurfaceId = FName(*FString::Printf(
+			TEXT("webtoue.benchmark.%s.primary-screen"), *Corpus.ToString()));
+		HostParams.ZOrder = 1000;
+		FString HostError;
+		PrimaryScreenHost = FWebToUEScreenHost::CreateForLocalPlayer(
+			LocalPlayer, HostParams, HostError);
+		if (!PrimaryScreenHost)
+		{
+			FailAndExit(FString::Printf(TEXT("Failed to create WebToUE Screen Host: %s"),
+				*HostError));
+			return false;
+		}
+		UWebToUEView* View = PrimaryScreenHost->GetView();
 		PrimaryUiObject.Reset(View);
 		DataContextObject.Reset(ViewModel);
 		ColdUiObjectConstructionMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
 			UiObjectStartCycles, FPlatformTime::Cycles64());
 		const uint64 TakeWidgetStartCycles = FPlatformTime::Cycles64();
-		BuiltTargetWidget = View->TakeWidget();
+		if (!PrimaryScreenHost->BuildContent(HostError))
+		{
+			FailAndExit(FString::Printf(TEXT("Failed to build WebToUE Screen content: %s"),
+				*HostError));
+			return false;
+		}
+		BuiltTargetWidget = PrimaryScreenHost->GetContentWidget();
 		ColdTakeWidgetMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
 			TakeWidgetStartCycles, FPlatformTime::Cycles64());
 	}
@@ -555,17 +590,37 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 		TargetDesiredSize.X, TargetDesiredSize.Y,
 		*BuiltTargetWidget->GetVisibility().ToString());
 	const uint64 AttachStartCycles = FPlatformTime::Cycles64();
-	WebToUE::Benchmark::Private::ForceVolatileRecursive(BuiltTargetWidget.ToSharedRef());
-	const TSharedRef<WebToUE::Benchmark::Private::SBenchmarkProbe> MeasuringProbe =
-		SNew(WebToUE::Benchmark::Private::SBenchmarkProbe)
-		.Owner(this)[BuiltTargetWidget.ToSharedRef()];
-	TSharedRef<SInvalidationPanel> UncachedRoot = SNew(SInvalidationPanel)[MeasuringProbe];
-	UncachedRoot->SetCanCache(false);
-	UncachedRoot->ForceVolatile(true);
-	ProbeWidget = UncachedRoot;
+	const FWebToUEScreenContentWrapper BuildMeasuringRoot =
+		[this](TSharedRef<SWidget> Content) -> TSharedRef<SWidget>
+		{
+			WebToUE::Benchmark::Private::ForceVolatileRecursive(Content);
+			const TSharedRef<WebToUE::Benchmark::Private::SBenchmarkProbe> MeasuringProbe =
+				SNew(WebToUE::Benchmark::Private::SBenchmarkProbe)
+				.Owner(this)[Content];
+			TSharedRef<SInvalidationPanel> UncachedRoot =
+				SNew(SInvalidationPanel)[MeasuringProbe];
+			UncachedRoot->SetCanCache(false);
+			UncachedRoot->ForceVolatile(true);
+			ProbeWidget = UncachedRoot;
+			return UncachedRoot;
+		};
 	TargetWindow = GEngine->GameViewport->GetWindow();
 	TargetWindowPtr = TargetWindow.Pin().Get();
-	GEngine->GameViewport->AddViewportWidgetContent(ProbeWidget.ToSharedRef(), 1000);
+	if (Mode == TEXT("WebToUE"))
+	{
+		FString HostError;
+		if (!PrimaryScreenHost || !PrimaryScreenHost->Attach(BuildMeasuringRoot, HostError))
+		{
+			FailAndExit(FString::Printf(TEXT("Failed to attach WebToUE Screen Host: %s"),
+				*HostError));
+			return false;
+		}
+	}
+	else
+	{
+		ProbeWidget = BuildMeasuringRoot(BuiltTargetWidget.ToSharedRef());
+		GEngine->GameViewport->AddViewportWidgetContent(ProbeWidget.ToSharedRef(), 1000);
+	}
 	UiSetupCompleteCycles = FPlatformTime::Cycles64();
 	ColdAttachMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
 		AttachStartCycles, UiSetupCompleteCycles);
@@ -610,13 +665,33 @@ bool FWebToUEBenchmarkRunner::CaptureSecondViewEvidence()
 			UE_LOG(LogTemp, Error, TEXT("WTUE_BENCHMARK_SECOND_VIEW missing document"));
 			return false;
 		}
-		UWebToUEView* View = NewObject<UWebToUEView>(GetTransientPackage());
 		UWebToUEDemoViewModel* ViewModel = NewObject<UWebToUEDemoViewModel>(GetTransientPackage());
-		View->SetDocument(Document);
-		View->SetDataContext(ViewModel);
+		UGameInstance* GameInstance = GEngine->GameViewport->GetGameInstance();
+		ULocalPlayer* LocalPlayer = GameInstance ? GameInstance->GetFirstGamePlayer() : nullptr;
+		if (!LocalPlayer)
+		{
+			UE_LOG(LogTemp, Error,
+				TEXT("WTUE_BENCHMARK_SECOND_VIEW missing first LocalPlayer"));
+			return false;
+		}
+		FWebToUEScreenHostCreateParams HostParams;
+		HostParams.Document = Document;
+		HostParams.DataContext = ViewModel;
+		HostParams.SurfaceId = FName(*FString::Printf(
+			TEXT("webtoue.benchmark.%s.second-screen"), *Corpus.ToString()));
+		FString HostError;
+		SecondScreenHost = FWebToUEScreenHost::CreateForLocalPlayer(
+			LocalPlayer, HostParams, HostError);
+		if (!SecondScreenHost || !SecondScreenHost->BuildContent(HostError))
+		{
+			UE_LOG(LogTemp, Error,
+				TEXT("WTUE_BENCHMARK_SECOND_VIEW Screen Host failed: %s"), *HostError);
+			return false;
+		}
+		UWebToUEView* View = SecondScreenHost->GetView();
 		SecondUiObject.Reset(View);
 		SecondDataContextObject.Reset(ViewModel);
-		SecondTargetWidget = View->TakeWidget();
+		SecondTargetWidget = SecondScreenHost->GetContentWidget();
 	}
 	else
 	{

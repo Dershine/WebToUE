@@ -57,6 +57,7 @@ public:
 		const FWebToUEScreenHostCreateParams& Params,
 		FString& OutError);
 
+	bool BuildContent(FString& OutError);
 	bool Attach(const FWebToUEScreenContentWrapper& Wrapper, FString& OutError);
 	bool Attach(FString& OutError) { return Attach(FWebToUEScreenContentWrapper(), OutError); }
 	void Shutdown();

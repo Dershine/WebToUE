@@ -10,6 +10,7 @@ class FSlateWindowElementList;
 class ISlateViewportProvider;
 class SWidget;
 class SWindow;
+class FWebToUEScreenHost;
 class UWebToUEDocument;
 
 namespace WebToUE::Benchmark
@@ -150,6 +151,8 @@ private:
 	TAtomic<uint64> BackBufferBytes{0};
 	TQueue<double, EQueueMode::Mpsc> PendingBackBufferLatencyMs;
 	TUniquePtr<FWebToUEPerformanceCapture> PerformanceCapture;
+	TUniquePtr<FWebToUEScreenHost> PrimaryScreenHost;
+	TUniquePtr<FWebToUEScreenHost> SecondScreenHost;
 
 	bool Tick(float DeltaSeconds);
 	bool SetupUi();

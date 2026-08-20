@@ -131,14 +131,33 @@ TUniquePtr<FWebToUEScreenHost> FWebToUEScreenHost::CreateWithLayer(
 	NewView->SetRespectSafeZone(Params.bRespectSafeZone);
 	NewView->SetSession(NewSession);
 	Result->View.Reset(NewView);
-	Result->ContentWidget = NewView->TakeWidget();
-	if (!Result->ContentWidget)
-	{
-		NewSession->Invalidate();
-		OutError = TEXT("WebToUE Screen Host failed to build its View content.");
-		return nullptr;
-	}
 	return Result;
+}
+
+bool FWebToUEScreenHost::BuildContent(FString& OutError)
+{
+	OutError.Reset();
+	if (!IsInGameThread())
+	{
+		OutError = TEXT("WebToUE Screen Host content creation is Game Thread-only.");
+		return false;
+	}
+	if (ContentWidget)
+	{
+		return true;
+	}
+	if (!Session || !Session->IsActive() || !View)
+	{
+		OutError = TEXT("WebToUE Screen Host cannot build content for an inactive Session.");
+		return false;
+	}
+	ContentWidget = View->TakeWidget();
+	if (!ContentWidget)
+	{
+		OutError = TEXT("WebToUE Screen Host failed to build its View content.");
+		return false;
+	}
+	return true;
 }
 
 bool FWebToUEScreenHost::Attach(
@@ -155,9 +174,13 @@ bool FWebToUEScreenHost::Attach(
 		OutError = TEXT("WebToUE Screen Host is already attached.");
 		return false;
 	}
-	if (!Session || !Session->IsActive() || !ContentWidget || !Layer)
+	if (!Session || !Session->IsActive() || !Layer)
 	{
 		OutError = TEXT("WebToUE Screen Host cannot attach an inactive Session.");
+		return false;
+	}
+	if (!BuildContent(OutError))
+	{
 		return false;
 	}
 

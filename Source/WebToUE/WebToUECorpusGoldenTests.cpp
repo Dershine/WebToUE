@@ -147,6 +147,39 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUECorpusOptionalInputContractTest,
 	"WebToUE.Benchmark.CorpusOptionalInputContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUECorpusSurfaceContractTest,
+	"WebToUE.Benchmark.CorpusSurfaceContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FWebToUECorpusSurfaceContractTest::RunTest(const FString& Parameters)
+{
+	const FName Corpora[] = {
+		TEXT("MainMenu"), TEXT("HUD"), TEXT("ScrollableSettings")
+	};
+	const FString SourceDirectory = FPaths::Combine(
+		FPaths::ProjectDir(), TEXT("WebUI/Examples"));
+	for (const FName Corpus : Corpora)
+	{
+		const FString CorpusName = Corpus.ToString();
+		FString Html;
+		FString Css;
+		TestTrue(*FString::Printf(TEXT("%s frozen HTML source is readable"),
+			*CorpusName), FFileHelper::LoadFileToString(Html,
+				*FPaths::Combine(SourceDirectory, CorpusName + TEXT(".html"))));
+		TestTrue(*FString::Printf(TEXT("%s frozen CSS source is readable"),
+			*CorpusName), FFileHelper::LoadFileToString(Css,
+				*FPaths::Combine(SourceDirectory, CorpusName + TEXT(".css"))));
+		const FString Contract = (Html + TEXT("\n") + Css).ToLower();
+		TestFalse(*FString::Printf(TEXT("%s does not declare a World Surface"),
+			*CorpusName), Contract.Contains(TEXT("data-ue-surface=\"world\"")) ||
+			Contract.Contains(TEXT("data-ue-surface='world'")) ||
+			Contract.Contains(TEXT("world-space")) ||
+			Contract.Contains(TEXT("widgetcomponent")));
+	}
+	AddInfo(TEXT("P0_5_IF_USED world_surface_host=N/A corpus=MainMenu,HUD,ScrollableSettings reason=frozen-corpus-declares-screen-surfaces-only"));
+	return true;
+}
+
 bool FWebToUECorpusOptionalInputContractTest::RunTest(const FString& Parameters)
 {
 	const FName Corpora[] = {
