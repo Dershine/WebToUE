@@ -1,10 +1,12 @@
 # WebToUE 当前支持矩阵
 
-> 文档职责：记录 WTUE Web Subset、绑定、输入、资源、诊断与资产行为的精确当前边界。
+> 文档职责：记录 WTUE Web Subset、绑定、输入、UI Feedback、资源、诊断与资产行为的精确当前边界。
 >
 > 当前基线：2026-08-17，M3.0 Native Component Registry 合同。
 >
 > 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Behavior、UE Material、Native Component 作者声明/Compiler/宿主挂接、正式代码宿主和世界空间能力在各自实现与证据门完成前仍属于未支持。
+>
+> 2026-08-20 的 ADR-0005/路线调整只接受 UI Feedback Cue、Router/Profile 与 UE/项目音频复用边界；当前没有作者声明、Compiled Op、UI Session Router、Sound/MetaSound 资源、播放后端或 Packaged 证据，因此 UI 音效仍为未支持。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -68,7 +70,7 @@ Flex：
 
 显式继承：`color`、`font-family`、`font-size`、`font-weight`、`text-align`、`white-space`。
 
-## 3. 绑定、事件、输入与资源
+## 3. 绑定、事件、输入、反馈与资源
 
 绑定：
 
@@ -82,6 +84,8 @@ Flex：
 当前绑定只支持根 UObject 属性；嵌套路径、Converter 和双向绑定仍属 M3。文本绑定以 Instance Handle 保留节点级 Text Layout Cache；Cache Key 覆盖显示文本、RichText 模式、字体、颜色/文本样式、当前 Culture 和换行约束。文本值变化只重算目标文本；Desired Size 相同仅重绘，变化时记录目标 Measure 与文本到根的 Layout 依赖路径。`visible` 只产生 Paint/HitTest 影响；`enabled` 在同一 FieldNotify 刷新内先更新 Disabled Pseudo State，再匹配 `:disabled` 及其编译依赖目标。
 
 事件：`data-ue-on-click="EventName"` 广播 `EventName` 和 `ElementId`。
+
+UI Feedback/音效：当前未支持。UI Source 没有 Feedback/Sound 声明，Compiler 不生成 Feedback Cue/Behavior Op，Runtime 没有 UI Session Router/Profile、UE Sound/MetaSound 资源清单或播放路径，也没有 Hover/Focus 去重、Slider 限频、LocalPlayer/Surface Scope、预取/Cook 和诊断证据。ADR-0005 只规定后续由事务成功后的语义 UI Feedback Cue 经注入 Router 复用 UE/项目音频系统；不得把路线决定理解为当前可以直接引用或播放声音。
 
 Native Component C++ 边界：Runtime 模块已提供实验性的 `FWebToUENativeComponentRegistry`。注册项必须使用命名空间类型名和非零合同版本，可声明 `UScriptStruct` Props/Event 类型、能力位和带预期 `UClass` 的命名 Resource Slot；Factory/Instance 接口覆盖显式 Slate Widget、Measure、Pointer/Key Input、Focus、Semantic projection、Resource binding 和 Attach/Suspend/Resume/Detach，注册由 Game Thread 上的 move-only RAII token 持有。当前 UI Source 没有 Native Component 声明，Compiler 不生成组件 IR，Runtime Tree/Host 也不会查表或创建实例，因此这只是后续互操作前置合同，不是作者或产品可用能力，且 1.0 外部 API 稳定性尚未承诺。
 
@@ -118,6 +122,7 @@ WTUE Document 使用自定义版本 GUID，当前版本 `CssSrgbColors`（7）�
 - 输入框、文本编辑、IME、表单语义。
 - 可见滚动条、基本拖拽、触摸滚动、惯性和虚拟列表。冻结的 MainMenu/HUD/ScrollableSettings 已由自动化审计确认未使用可见滚动条/拖拽/触摸/惯性/水平溢出，因此 M2.8 的对应 `P0.5-if-used` 为有证据的 `N/A`；ScrollableSettings 只使用既有纵向滚轮路径。
 - CommonUI 深度组件/Action Router 集成和无障碍适配器；当前只承诺宿主边界协作与内部语义引用接口。
+- UI Feedback Cue 的作者声明/语义默认、Compiled UI/Behavior Op、Post-Commit 派发、Router/Profile、Sound/MetaSound 资源、预取/Cook、限频/去重、Screen/World Scope、Inspector/Trace 和真实播放证据。
 - Native Component 的 UI Source 声明、Compiler lowering、Compiled IR、Runtime Tree/Host 实例化和真实专用组件；当前只有实验性 C++ Registry/Factory/Instance 合同。
 - 嵌套属性路径、Converter、双向绑定、类型化事件载荷。
 - 组件、Props、Slots、条件节点、循环和 Keyed Diff。

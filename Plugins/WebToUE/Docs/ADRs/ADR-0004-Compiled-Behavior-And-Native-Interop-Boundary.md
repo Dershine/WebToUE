@@ -14,7 +14,7 @@ WebToUE 的长期目标不是只渲染静态 HTML/CSS，而是让项目以代码
 
 1. WebToUE 的默认 Runtime 继续不包含通用 JavaScript VM、DOM 或 Web API；“使用 TS 创作”不等于执行任意 JavaScript。
 2. 受限的 **Behavior Source** 进入正式主路线。它使用 WTUE 专用 TypeScript 语法，在 Editor/构建期静态验证并提前编译为带版本的 **Compiled Behavior IR**；Shipping 只消费 IR，不读取或解释 Behavior Source。
-3. 原生 Behavior Executor 只处理界面局部状态、受控纯表达式、事件编排、条件/列表所需的 Typed Mutation、动画调度以及类型化 UI Command。Gameplay 权威状态、网络权限和实际副作用仍属于游戏 C++。
+3. 原生 Behavior Executor 只处理界面局部状态、受控纯表达式、事件编排、条件/列表所需的 Typed Mutation、动画调度、UI Feedback Cue 以及类型化 UI Command。Gameplay 权威状态、网络权限和实际副作用仍属于游戏 C++；UI Feedback 的播放与资源边界另见 ADR-0005。
 4. Behavior 执行采用事务边界：事件求值先收集 Mutation 与 Command，再在安全边界原子提交结构、样式和状态变化；Paint、Layout 或输入遍历过程中不得即时破坏当前树。异步结果、Timer 和完成回调必须携带 UI Session/Instance Generation 与取消合同。
 5. 连续动画由原生 Animation IR/Track 和受控 UI Clock 执行。Behavior 只启动、取消、串联或响应动画，不以脚本逐帧计算插值；无活动 Track 时仍恢复零 UI Tick。
 6. C++ 协作使用显式版本化的数据与命令 Schema。FieldNotify/直接 C++ 是基础适配，UE MVVM 可作为可选 Adapter；Behavior 不得按字符串任意调用 UObject、UFUNCTION 或游戏世界。
@@ -43,5 +43,6 @@ WebToUE 的长期目标不是只渲染静态 HTML/CSS，而是让项目以代码
 
 - 后续路线必须先冻结 UI Session、事务、时间、事件、属性所有权、异步取消、Portal/多树映射和 Native Component 合同，再扩张动画和 Behavior 语法。
 - Material、Transform、Mask 或 Filter 必须区分普通 Brush、子树合成层和世界空间 Surface；允许 UE Material 不等于承诺浏览器级合成器。
+- UI Feedback 只作为事务提交后的语义意图进入 Behavior/Session，不把具体声音资产、播放 API、长期音乐状态或项目音频策略写入 Behavior IR；详细边界见 [ADR-0005](ADR-0005-UI-Feedback-And-Audio-Routing-Boundary.md)。
 - TS/TSX 编译器必须静态处理受限 AST，不默认执行任意组件函数、npm lifecycle script 或第三方构建代码。
 - Support Matrix 只按已取得的实现与证据更新：M3.0 可记录实验性 Native Component C++ Registry/Factory/Instance 合同，但在 UI Source、Compiler、Host/Runtime 实例化、真实组件、适用的 Packaged 性能与文档门全部通过前，不得宣称 Native Component 为产品可用能力；Behavior Source 与 Material 仍保持未支持。

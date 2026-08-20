@@ -86,6 +86,18 @@ _Avoid_: DOM Event、JavaScript Callback
 UI Session 向游戏代码发出的类型化意图；游戏代码负责权限、异步结果和实际 Gameplay 副作用。
 _Avoid_: 任意 UFUNCTION 调用、字符串回调、客户端权限证明
 
+**UI Feedback Cue（UI 反馈提示）**:
+由界面交互或界面状态结果产生的语义化瞬时表现意图；它描述反馈含义，不指定声音资产、播放 API 或 Gameplay 结果。
+_Avoid_: PlaySound、Audio Asset Path、UI Command
+
+**UI Feedback Profile（UI 反馈配置）**:
+把 UI Feedback Cue 映射到项目表现策略与资源的可版本化配置，允许按主题、玩家、UI Surface 和平台选择声音或其他本地反馈。
+_Avoid_: Widget Sound、硬编码 Sound、Web Audio
+
+**UI Feedback Router（UI 反馈路由器）**:
+在 UI Session 上下文中接收 UI Feedback Cue，并把它交给项目表现系统处理的边界。
+_Avoid_: 全局 Audio Singleton、Gameplay Command、Native Component
+
 **Native Component（原生组件）**:
 通过显式注册合同向 UI Source 开放的 UE 原生界面扩展，用于承载 WTUE 核心语义不应自行复制的专用能力。
 _Avoid_: 任意 UObject、隐式 UMG 回退、每节点 Widget
