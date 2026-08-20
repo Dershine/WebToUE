@@ -65,6 +65,19 @@
 - M3.9：逻辑 Resource provenance、Document/Route fallback/promotion、Critical/Visible/Lazy、BLAKE3-256 dependency/manifest/compiler seal、Cook freshness stamp、独立层版本与 `WTUE-RES-001..005`；现有 Compiler/资产/View/Cook 尚未产品接入。
 - M3.5～M3.9 `P0.5-if-used`：五条路线均为无条件 `P0.5` Runtime/Compiler/Cook 前置，裁决为 `N/A`；具体 Material、真实 Portal、Component/Keyed List、状态保留式热重载、类型化 Data/Command 与 stale-source Cook 产品接入仍由后续路线单独验收。
 
+### M4 已完成微观路线——宏观 1 / 9
+
+- M4.1 `6903e34`：接管上一窗口 9 个未提交文件，完成 Unreal Texture importer 的确定性 ResourceId、Unreal Asset provenance、Document residency、BLAKE3-256 Source/Asset dependency closure、独立层版本与 freshness stamp；非法/缺失/HTTP/机器路径失败关闭且保留 last-good。首次修正 `WTUE-RES-003` 预期诊断后，5 / 5 聚焦 Automation 与安全 Editor build 通过。
+- M4.1 `ccddf69`：资产版本升级至 `ResourceConsumerContract`（9）；Compiled Node 序列化 ResourceId，Hydration 在创建 Runtime Tree 前验证 Resource IR/Manifest/assignment。Presentation 改为 ResourceId-indexed View-owned state、async handle 与 strong resolved object；Critical 在 activation、Visible 在可见布局、Lazy 只经显式入口请求，失败为确定性无图片 fallback。9 / 9 聚焦 Automation 与 Editor build 通过。
+- M4.1 `99ad868`：Cook `PreSave` 复用 Importer 的单一 `BuildResourceContract` 路径，从当前 Source 与 AssetRegistry package-saved fingerprint 重建 expected stamp；不一致或 validator 不可用以 `WTUE-RES-004` Error 失败。真实 Cooking `FObjectPreSaveContext`、last-good source drift、10 / 10 聚焦 Automation 与 Editor build 通过。
+- M4.1 `507c616` / `394cb94`：新增 `/Game/WebToUEExamples/ResourceTextureSmoke` Engine Texture fixture、专用 packaged resource policy 与 `Tools/Invoke-WebToUEResourceSmoke.ps1`；MainMenu/HUD/ScrollableSettings 持久资产升级到当前版本且继续保持 0 compiled resources。真实 Development smoke 首次暴露第二 View 仅 prepass、未进入可见 Paint 边界，随后让 harness 在 Shipping 可用的 Slate Paint 路径取证并以同一边界 Automation 锁定；不把失败的首轮 gate 计为通过。
+- 最终正确性门：`git diff --check` 通过；`StartsWith:WebToUE` 90 / 90、0 failed、0 skipped（8.583 秒）；ResourceTextureSmoke/PackagedExitPolicy、Importer、Resource Contract/Hydration/Lifecycle/Residency、Reimport/Cook freshness 与旧资产当前版本均在完整集合内通过。
+- 最终 Editor 门：UE 5.8 Win64 Editor Development 5 / 5 actions 通过并启动 PID `31456`；最终 Shipping 发布后 Editor PID `27168` readiness、MCP HTTP 200、Python UE `5.8.1-56057345`、Project 与 `Lvl_TopDown` World 探针健康。
+- 最终发布门：tracked Development/Shipping BuildCookRun Operations `d5342bea9249450db4d531b7473bbae2` / `cf6395f42be04034bc7da68c793792c4` 均为 AutomationTool ExitCode 0，各 585 packages、2,250 chunks、250.23 MiB；这些记录只证明对应 Build/Cook/Stage/Pak/IoStore 与 Editor 恢复门。
+- 独立 Packaged Runtime/视觉门：`Development-394cb94-20260820T1445Z` / `Shipping-394cb94-20260820T1451Z` 均 `success=true`；每个进程加载 1 个 compiled Engine Texture，主 View 1 次 cache hit、第二 View 1 次 resident cache hit，async request、同步加载、failure、cancellation 均为 0。两张 1920×1080 PNG SHA-256 均为 `C863BABAB3B42BD416F8921B7EC5D99DFC03156E717B4D3A0345D42E628DE2A9`，Development 已目视确认 Engine `DefaultTexture` Brush，Shipping 与其逐字节相同。
+- K=1 结论只覆盖该单 Texture fixture 的 Resource 请求/命中/失败/取消/同步加载数量和 View-owned 状态；不外推大型资源页首帧、RSS/LLM/VRAM、Material/PSO/Glyph、Route/释放或 WTUE↔UMG 产品性能等价。
+- `P0.5-if-used`：冻结 MainMenu/HUD/ScrollableSettings 仍没有图片，额外视觉样式/目标游戏资源工作量为有证据的 `N/A`；无条件 `P0.5` Texture/Brush 产品合同由独立 Engine fixture 与真实 Packaged 路径完成，不以 N/A 跳过。
+
 ## 2. 性能测量政策与固定语料
 
 正式可比较环境指纹为 `79E20297`：UE `5.8.1-56057345`、Windows 11 25H2、i7-12700KF（12 核/20 线程）、32 GB、RTX 5050、Win64 WindowsEditor Development。Sampling policy schema `1` 使用 1 次 warmup、20 个计量样本、median P50 和 nearest-rank P95；当前 budget policy schema `9` 分离 Observe/Enforce，只对稳定达标路径启用硬门。
