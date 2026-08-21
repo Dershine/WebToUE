@@ -24,6 +24,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUERelativeTextureWatcherTest,
 	"WebToUE.Editor.RelativeTextureWatcher",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUERelativeTextureCookFreshnessTest,
+	"WebToUE.Editor.RelativeTextureCookFreshness",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace WebToUE::RelativeTextureSource::Tests
 {
 	static FString HashUtf8(const FString& Value)
@@ -188,6 +192,26 @@ bool FWebToUERelativeTextureSourceTest::RunTest(const FString& Parameters)
 				Assets->DeleteAsset(ExpectedPackage));
 		}
 	}, 0.25f));
+	return true;
+}
+
+bool FWebToUERelativeTextureCookFreshnessTest::RunTest(const FString& Parameters)
+{
+	UWebToUEDocument* Document = LoadObject<UWebToUEDocument>(nullptr,
+		TEXT("/Game/WebToUEExamples/ResourceTextureSmoke.ResourceTextureSmoke"));
+	if (!TestNotNull(TEXT("The persisted relative texture fixture loads"), Document))
+	{
+		return false;
+	}
+	TArray<FWebToUEResourceContractDiagnostic> Diagnostics;
+	const bool bFresh = UWebToUEFactory::ValidateCookFreshness(*Document, Diagnostics);
+	for (const FWebToUEResourceContractDiagnostic& Diagnostic : Diagnostics)
+	{
+		AddError(FString::Printf(TEXT("%s %s: %s"), *Diagnostic.Code,
+			*Diagnostic.Path, *Diagnostic.Detail));
+	}
+	TestTrue(TEXT("The persisted relative texture fixture is Cook-fresh across processes"),
+		bFresh);
 	return true;
 }
 

@@ -5,8 +5,6 @@
 #include "WebToUEResourceContract.h"
 #include "WebToUESettings.h"
 
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "AssetRegistry/AssetData.h"
 #include "AssetImportTask.h"
 #include "AssetToolsModule.h"
 #include "EditorFramework/AssetImportData.h"
@@ -15,11 +13,9 @@
 #include "Engine/Texture2D.h"
 #include "HAL/FileManager.h"
 #include "Hash/Blake3.h"
-#include "IO/IoHash.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
-#include "Modules/ModuleManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWebToUEImport, Log, All);
 
@@ -305,29 +301,9 @@ namespace WebToUE::ResourceImport::Private
 		{
 			return false;
 		}
-		IAssetRegistry& AssetRegistry =
-			FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 		const FString PackageFilename = FPackageName::LongPackageNameToFilename(
 			PackageNameString, FPackageName::GetAssetPackageExtension());
-		AssetRegistry.ScanFilesSynchronous({ PackageFilename }, true);
-		FAssetPackageData PackageData;
-		auto ReadPackageData = [&AssetRegistry, &PackageNameString, &PackageData]()
-		{
-			return AssetRegistry.TryGetAssetPackageData(
-				FName(*PackageNameString), PackageData) ==
-				UE::AssetRegistry::EExists::Exists;
-		};
-		if (!ReadPackageData())
-		{
-			return false;
-		}
-		const FIoHash PackageSavedHash = PackageData.GetPackageSavedHash();
-		if (PackageSavedHash.IsZero())
-		{
-			return false;
-		}
-		OutHash = HashBuffer(PackageSavedHash.GetBytes(), sizeof(FIoHash::ByteArray));
-		return true;
+		return HashFile(PackageFilename, OutHash);
 	}
 
 	static FWebToUEArtifactVersionSet CurrentArtifactVersions()
