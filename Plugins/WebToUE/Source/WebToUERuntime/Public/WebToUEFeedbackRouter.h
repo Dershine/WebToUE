@@ -93,6 +93,17 @@ class WEBTOUERUNTIME_API FWebToUEEngineFeedbackBackend final
 {
 public:
 	virtual bool Play(const FWebToUEFeedbackPlaybackRequest& Request) override;
+	int32 GetAttemptCount() const { return AttemptCount; }
+	int32 GetSuccessfulPlayCount() const { return SuccessfulPlayCount; }
+	const TOptional<FWebToUEFeedbackPlaybackRequest>& GetLastSuccessfulRequest() const
+	{
+		return LastSuccessfulRequest;
+	}
+
+private:
+	int32 AttemptCount = 0;
+	int32 SuccessfulPlayCount = 0;
+	TOptional<FWebToUEFeedbackPlaybackRequest> LastSuccessfulRequest;
 };
 
 class WEBTOUERUNTIME_API FWebToUERecordingFeedbackBackend final

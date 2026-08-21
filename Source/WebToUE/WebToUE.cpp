@@ -2,12 +2,18 @@
 
 #include "WebToUE.h"
 #include "WebToUEBenchmarkRunner.h"
+#include "WebToUEFeedbackSmokeRunner.h"
 #include "Modules/ModuleManager.h"
 
 void FWebToUEModule::StartupModule()
 {
 	FDefaultGameModuleImpl::StartupModule();
-	if (FWebToUEBenchmarkRunner::IsRequested())
+	if (FWebToUEFeedbackSmokeRunner::IsRequested())
+	{
+		FeedbackSmokeRunner = MakeUnique<FWebToUEFeedbackSmokeRunner>();
+		FeedbackSmokeRunner->Start();
+	}
+	else if (FWebToUEBenchmarkRunner::IsRequested())
 	{
 		BenchmarkRunner = MakeUnique<FWebToUEBenchmarkRunner>();
 		BenchmarkRunner->Start();
@@ -16,6 +22,7 @@ void FWebToUEModule::StartupModule()
 
 void FWebToUEModule::ShutdownModule()
 {
+	FeedbackSmokeRunner.Reset();
 	BenchmarkRunner.Reset();
 	FDefaultGameModuleImpl::ShutdownModule();
 }

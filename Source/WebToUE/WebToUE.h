@@ -6,6 +6,7 @@
 #include "Modules/ModuleManager.h"
 
 class FWebToUEBenchmarkRunner;
+class FWebToUEFeedbackSmokeRunner;
 
 class FWebToUEModule final : public FDefaultGameModuleImpl
 {
@@ -15,5 +16,6 @@ public:
 
 private:
 	TUniquePtr<FWebToUEBenchmarkRunner> BenchmarkRunner;
+	TUniquePtr<FWebToUEFeedbackSmokeRunner> FeedbackSmokeRunner;
 };
 

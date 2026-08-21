@@ -7,8 +7,11 @@
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
+#include "Sound/SoundBase.h"
+#include "Sound/SoundConcurrency.h"
 #include "WebToUEAsyncWork.h"
 #include "WebToUEDocument.h"
+#include "WebToUEFeedbackRouter.h"
 #include "WebToUEView.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUESessionFeedbackTest,
@@ -17,6 +20,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUESessionFeedbackTest,
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEScreenHostTest,
 	"WebToUE.Runtime.ScreenHost",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEScreenHostFeedbackProfileTest,
+	"WebToUE.Runtime.ScreenHostFeedbackProfile",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEAsyncLifecycleTest,
@@ -85,6 +92,64 @@ namespace WebToUE::SessionHost::Tests
 			LocalPlayer->RemoveFromRoot();
 			World->RemoveFromRoot();
 		}
+	};
+
+	class FManualFeedbackResources final : public IWebToUEFeedbackResourceProvider
+	{
+	public:
+		virtual EWebToUEFeedbackResidencyRequest Request(
+			TConstArrayView<FSoftObjectPath> Paths,
+			TFunction<void()> Completion) override
+		{
+			TArray<FSoftObjectPath> Missing;
+			for (const FSoftObjectPath& Path : Paths)
+			{
+				if (!Residents.Contains(Path)) Missing.Add(Path);
+			}
+			if (Missing.IsEmpty()) return EWebToUEFeedbackResidencyRequest::Ready;
+			Pending.Add(MoveTemp(Completion));
+			return EWebToUEFeedbackResidencyRequest::Pending;
+		}
+
+		virtual UObject* FindResident(const FSoftObjectPath& Path) const override
+		{
+			if (UObject* const* Object = Residents.Find(Path)) return *Object;
+			return nullptr;
+		}
+
+		virtual void CancelAll() override
+		{
+			++CancelCount;
+			Pending.Reset();
+			Residents.Reset();
+		}
+
+		void MakeResident(UWebToUEFeedbackProfile& Profile)
+		{
+			for (const FWebToUEFeedbackCueProfile& Cue : Profile.Cues)
+			{
+				for (const TSoftObjectPtr<USoundBase>& Variant : Cue.Variants)
+				{
+					Residents.Add(Variant.ToSoftObjectPath(), Variant.LoadSynchronous());
+				}
+				if (!Cue.Concurrency.IsNull())
+				{
+					Residents.Add(Cue.Concurrency.ToSoftObjectPath(),
+						Cue.Concurrency.LoadSynchronous());
+				}
+			}
+			TArray<TFunction<void()>> Completions = MoveTemp(Pending);
+			for (TFunction<void()>& Completion : Completions)
+			{
+				if (Completion) Completion();
+			}
+		}
+
+		int32 CancelCount = 0;
+
+	private:
+		TMap<FSoftObjectPath, UObject*> Residents;
+		TArray<TFunction<void()>> Pending;
 	};
 
 	static FWebToUESessionCreateParams MakeSessionParams(
@@ -303,6 +368,74 @@ bool FWebToUEScreenHostTest::RunTest(const FString& Parameters)
 		FWebToUEScreenHost::CreateWithLayer(Layer, InvalidParams, Error);
 	TestFalse(TEXT("Screen Host rejects a missing compiled Document"), InvalidHost.IsValid());
 	TestTrue(TEXT("Rejected creation returns an actionable diagnostic"), !Error.IsEmpty());
+	return true;
+}
+
+bool FWebToUEScreenHostFeedbackProfileTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::SessionHost::Tests;
+	FContextObjects Objects;
+	UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
+	FWebToUECompiledDocumentData CompiledDocument;
+	CompiledDocument.RootNodeIndex = 0;
+	FWebToUECompiledNode& Root = CompiledDocument.Nodes.AddDefaulted_GetRef();
+	Root.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	Root.Tag = TEXT("body");
+	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
+	Document->AddToRoot();
+	ON_SCOPE_EXIT { Document->RemoveFromRoot(); };
+	UWebToUEFeedbackProfile* Profile = LoadObject<UWebToUEFeedbackProfile>(nullptr,
+		TEXT("/Game/WebToUEExamples/Audio/DA_WTUE_FeedbackProfile."
+			"DA_WTUE_FeedbackProfile"));
+	if (!TestNotNull(TEXT("The Screen Host Feedback Profile fixture loads"), Profile))
+	{
+		return false;
+	}
+	const TSharedRef<FRecordingScreenLayer> Layer =
+		MakeShared<FRecordingScreenLayer>(Objects.LocalPlayer, Objects.World);
+	const TSharedRef<FWebToUERecordingFeedbackBackend> Backend =
+		MakeShared<FWebToUERecordingFeedbackBackend>();
+	const TSharedRef<FManualFeedbackResources> Resources =
+		MakeShared<FManualFeedbackResources>();
+	FWebToUEScreenHostCreateParams Params;
+	Params.Document = Document;
+	Params.SurfaceId = TEXT("webtoue.tests.feedback-profile-screen");
+	Params.Clock = MakeShared<FWebToUEVirtualClock>();
+	Params.FeedbackProfile = Profile;
+	Params.FeedbackBackend = Backend;
+	Params.FeedbackResourceProvider = Resources;
+	FString Error;
+	TUniquePtr<FWebToUEScreenHost> Host =
+		FWebToUEScreenHost::CreateWithLayer(Layer, Params, Error);
+	if (!TestNotNull(TEXT("A Profile creates the default Profile Router in Screen Host"),
+		Host.Get()))
+	{
+		AddError(Error);
+		return false;
+	}
+	TestFalse(TEXT("Critical Feedback residency initially gates the Host Session"),
+		Host->GetSession()->IsReadyForInteraction());
+	TestFalse(TEXT("Attach fails closed before Critical Feedback is resident"),
+		Host->Attach(Error));
+	TestTrue(TEXT("The gated Attach reports an actionable Critical resource diagnostic"),
+		Error.Contains(TEXT("Critical Feedback")) && Layer->AddCount == 0);
+	Resources->MakeResident(*Profile);
+	TestTrue(TEXT("Async Critical completion opens the Host interaction gate"),
+		Host->GetSession()->IsReadyForInteraction());
+	TestTrue(TEXT("The same Host attaches after Critical completion"), Host->Attach(Error));
+	const EWebToUEFeedbackDispatchResult Dispatch =
+		Host->GetSession()->DispatchCommittedFeedback(
+			Host->GetSession()->MakeFeedbackRequest(
+				TEXT("webtoue.feedback.confirm"), TEXT("screen-host"), 901,
+				EWebToUEInputModality::Pointer, EWebToUEFeedbackScope::LocalPlayer));
+	TestEqual(TEXT("The Host-created Router reaches its injected project backend"),
+		Dispatch, EWebToUEFeedbackDispatchResult::Routed);
+	TestTrue(TEXT("Screen Host playback remains explicitly 2D"),
+		Backend->GetRecords().Num() == 1 &&
+		Backend->GetRecords()[0].Mode == EWebToUEFeedbackPlaybackMode::Screen2D);
+	Host->Shutdown();
+	TestEqual(TEXT("Screen Host shutdown cancels Profile residency ownership"),
+		Resources->CancelCount, 1);
 	return true;
 }
 

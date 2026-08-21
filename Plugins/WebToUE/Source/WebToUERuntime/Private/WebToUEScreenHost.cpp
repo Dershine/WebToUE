@@ -1,6 +1,7 @@
 #include "WebToUEScreenHost.h"
 
 #include "WebToUEDocument.h"
+#include "WebToUEFeedbackRouter.h"
 #include "WebToUEView.h"
 
 #include "Engine/GameInstance.h"
@@ -115,6 +116,12 @@ TUniquePtr<FWebToUEScreenHost> FWebToUEScreenHost::CreateWithLayer(
 	SessionParams.Environment = Params.Environment;
 	SessionParams.Clock = Params.Clock;
 	SessionParams.FeedbackRouter = Params.FeedbackRouter;
+	if (!SessionParams.FeedbackRouter && Params.FeedbackProfile)
+	{
+		SessionParams.FeedbackRouter = FWebToUEProfileFeedbackRouter::Create(
+			Params.FeedbackProfile, Params.FeedbackBackend,
+			Params.FeedbackSettingsProvider, Params.FeedbackResourceProvider);
+	}
 	TSharedPtr<FWebToUESession> NewSession = FWebToUESession::Create(SessionParams, OutError);
 	if (!NewSession)
 	{
@@ -177,6 +184,11 @@ bool FWebToUEScreenHost::Attach(
 	if (!Session || !Session->IsActive() || !Layer)
 	{
 		OutError = TEXT("WebToUE Screen Host cannot attach an inactive Session.");
+		return false;
+	}
+	if (!Session->IsReadyForInteraction())
+	{
+		OutError = TEXT("WebToUE Screen Host is waiting for Critical Feedback resources.");
 		return false;
 	}
 	if (!BuildContent(OutError))

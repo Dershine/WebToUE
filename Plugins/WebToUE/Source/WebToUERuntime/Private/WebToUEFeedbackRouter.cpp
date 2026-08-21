@@ -116,6 +116,7 @@ bool FWebToUEEngineFeedbackBackend::Play(
 	const FWebToUEFeedbackPlaybackRequest& Request)
 {
 	check(IsInGameThread());
+	++AttemptCount;
 	UWorld* World = Request.World.Get();
 	if (!World || !Request.Sound || !FMath::IsFinite(Request.VolumeMultiplier) ||
 		!FMath::IsFinite(Request.PitchMultiplier))
@@ -128,11 +129,15 @@ bool FWebToUEEngineFeedbackBackend::Play(
 			Request.WorldLocation, FRotator::ZeroRotator,
 			Request.VolumeMultiplier, Request.PitchMultiplier, 0.0f,
 			nullptr, Request.Concurrency, Request.OwningActor.Get());
+		++SuccessfulPlayCount;
+		LastSuccessfulRequest = Request;
 		return true;
 	}
 	UGameplayStatics::PlaySound2D(World, Request.Sound,
 		Request.VolumeMultiplier, Request.PitchMultiplier, 0.0f,
 		Request.Concurrency, Request.OwningActor.Get(), true);
+	++SuccessfulPlayCount;
+	LastSuccessfulRequest = Request;
 	return true;
 }
 

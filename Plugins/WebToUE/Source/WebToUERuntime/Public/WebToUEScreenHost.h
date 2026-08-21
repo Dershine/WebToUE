@@ -5,8 +5,12 @@
 #include "WebToUESession.h"
 
 class SWidget;
+class IWebToUEFeedbackBackend;
+class IWebToUEFeedbackResourceProvider;
+class IWebToUEFeedbackSettingsProvider;
 class ULocalPlayer;
 class UWebToUEDocument;
+class UWebToUEFeedbackProfile;
 class UWebToUEView;
 class UWorld;
 
@@ -29,7 +33,12 @@ struct WEBTOUERUNTIME_API FWebToUEScreenHostCreateParams
 	FName SurfaceId = TEXT("webtoue.screen.default");
 	FWebToUEEnvironmentContext Environment;
 	TSharedPtr<IWebToUEClock> Clock;
+	/** Explicit Router wins; otherwise a Profile creates the default UE Router. */
 	TSharedPtr<IWebToUEFeedbackRouter> FeedbackRouter;
+	UWebToUEFeedbackProfile* FeedbackProfile = nullptr;
+	TSharedPtr<IWebToUEFeedbackBackend> FeedbackBackend;
+	TSharedPtr<IWebToUEFeedbackSettingsProvider> FeedbackSettingsProvider;
+	TSharedPtr<IWebToUEFeedbackResourceProvider> FeedbackResourceProvider;
 	int32 ZOrder = 0;
 	bool bRespectSafeZone = true;
 };

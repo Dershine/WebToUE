@@ -634,7 +634,7 @@ M4.3a 当时在静态 Brush 边界停止；下述 M4.3b 现已闭环，因此宏
 
 本路线完成后停止，宏观 M4 更新到 `3 / 9`；未进入 Transform、Animation、Transition 或 Compositing。
 
-### M4.4——Feedback Profile And UE Router 🚧 5 / 7
+### M4.4——Feedback Profile And UE Router 🚧 6 / 7
 
 本路线已激活。冻结 MainMenu/HUD/ScrollableSettings 没有 Feedback Cue/Sound 作者声明，额外目标游戏 Cue 集合、World Surface 空间反馈和对应资源/性能工作量暂定为有证据的 `P0.5-if-used=N/A`；版本化 Profile、Critical 资源/Cook、默认 UE Router 与确定性策略本身是无条件 `P0.5`，必须用受控 SoundWave/SoundCue/MetaSound fixture 和真实 Packaged 路径验收。Behavior `EmitFeedbackCue`、语义控件默认 Cue 与作者覆盖仍归 M5，不得由本路线提前引入。
 
@@ -642,7 +642,7 @@ M4.3a 当时在静态 Brush 边界停止；下述 M4.3b 现已闭环，因此宏
 - [x] Profile 资源消费 M3.9 的 Resource Identity/provenance/residency/dependency closure/freshness 合同；Critical 资源和 Concurrency 依赖跨 Editor 重启仍可验证，Cook 在 package drift 或 stale seal 时以稳定诊断拒绝。
 - [x] Session 激活时只异步预取 Critical 资源并在其完成前保持不可交互；首次 Feedback 派发不执行同步加载，缺项、未驻留和加载失败可观测降级且不阻塞原 UI 事务。
 - [x] Router 消费 LocalPlayer-aware 用户静音/音量设置，并以 Session/LocalPlayer/Viewport/Surface scope key 执行 correlation-aware 去重、Cooldown、Throttle、确定性 Variant 和 UE Concurrency 传递；策略状态有界并随 Session 释放。
-- [ ] Screen Surface 只生成 2D 播放意图；World Surface 只按显式 Profile 策略选择 Drop、2D 或 Host Owner 位置 3D。默认 UE backend 与项目注入 backend 共用类型化播放请求，Core 不依赖音频中间件、Sound 路径不进入 Behavior/UI Command。
+- [x] Screen Surface 只生成 2D 播放意图；World Surface 只按显式 Profile 策略选择 Drop、2D 或 Host Owner 位置 3D。默认 UE backend 与项目注入 backend 共用类型化播放请求，Core 不依赖音频中间件、Sound 路径不进入 Behavior/UI Command。
 - [x] 红绿 Automation 覆盖双 LocalPlayer、Hover/Focus 同事件去重、快速 Slider 限频、用户静音、Profile 缺项、Critical 未驻留、Session/Generation 销毁、Screen 2D 与 World 策略，并提供确定性 requested/committed/deduplicated/throttled/routed/missing/dropped trace。
 - [ ] 持久 Profile/音频 fixture、跨进程 freshness、完整 Automation、UE 5.8 Win64 Editor Development、Development/Shipping BuildCookRun 与独立 Packaged Feedback smoke 全部通过；Packaged 只证明受控资源驻留、路由/策略和进程内 UE backend 调用，不把扬声器实际出声、输入到像素或大型音频 Corpus 成本伪装为已测。
 
