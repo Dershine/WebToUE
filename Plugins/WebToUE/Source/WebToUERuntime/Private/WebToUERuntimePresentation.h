@@ -6,6 +6,7 @@
 #include "WebToUEPropertyOwnership.h"
 
 #include "Layout/SlateRect.h"
+#include "Math/TransformCalculus2D.h"
 #include "UObject/StrongObjectPtr.h"
 
 class FPaintArgs;
@@ -95,6 +96,18 @@ struct FWebToUESpatialCellRange
 	}
 };
 
+/** One transformed overflow boundary in a command's ancestor clip chain. */
+struct FWebToUEClipZone
+{
+	FVector2f TopLeft = FVector2f::ZeroVector;
+	FVector2f TopRight = FVector2f::ZeroVector;
+	FVector2f BottomLeft = FVector2f::ZeroVector;
+	FVector2f BottomRight = FVector2f::ZeroVector;
+	FVector2f LocalSize = FVector2f::ZeroVector;
+	FTransform2D LocalToView;
+	FSlateRect Bounds = FSlateRect(0.0f, 0.0f, 0.0f, 0.0f);
+};
+
 struct FWebToUEPaintCommand
 {
 	FWebToUEInstanceHandle Owner;
@@ -103,6 +116,13 @@ struct FWebToUEPaintCommand
 	FSlateRect ClipBounds = FSlateRect(0.0f, 0.0f, 0.0f, 0.0f);
 	FSlateRect VisibleBounds = FSlateRect(0.0f, 0.0f, 0.0f, 0.0f);
 	FSlateRect SubtreeBounds = FSlateRect(0.0f, 0.0f, 0.0f, 0.0f);
+	FVector2f LocalSize = FVector2f::ZeroVector;
+	FTransform2D LocalToView;
+	FTransform2D ViewToLocal;
+	FTransform2D InheritedVisualTransform;
+	FTransform2D DescendantVisualTransform;
+	FVector2f InheritedScrollOffset = FVector2f::ZeroVector;
+	TArray<FWebToUEClipZone, TInlineAllocator<4>> ClipChain;
 	FWebToUEPaintBatchKey BatchKey;
 	FWebToUESpatialCellRange SpatialCells;
 	float Opacity = 1.0f;
@@ -113,6 +133,7 @@ struct FWebToUEPaintCommand
 	bool bScrollable = false;
 	bool bEnabled = true;
 	bool bHasClip = false;
+	bool bInvertibleTransform = true;
 	bool bSpatiallyIndexed = false;
 	bool bLargeSpatialEntry = false;
 };
@@ -145,6 +166,7 @@ public:
 	bool ScrollIntoView(const FWebToUENode& Node);
 	void ApplyScrollOffsetChange(const FWebToUENode& Node);
 	FVector2f GetVisualPosition(const FWebToUENode& Node) const;
+	FSlateRect GetVisualBounds(const FWebToUENode& Node) const;
 	TConstArrayView<FWebToUEInstanceHandle> GetPaintOrder(const FWebToUENode& Parent) const;
 	FText GetDisplayText(const FWebToUENode& Node) const;
 	bool RequestLazyResource(const FString& ResourceId) const;
@@ -279,15 +301,17 @@ private:
 	void BuildDisplaySubtree(const FWebToUEDocument& RuntimeDocument,
 		const FWebToUENode& Node, float ParentOpacity, bool bParentDisplayed,
 		bool bParentEnabled, int32 Depth,
-		const FVector2f& InheritedScrollOffset, const FSlateRect& InheritedClip,
-		bool bHasInheritedClip) const;
+		const FVector2f& InheritedScrollOffset,
+		const FTransform2D& InheritedVisualTransform,
+		TConstArrayView<FWebToUEClipZone> InheritedClipChain) const;
 	int32 PatchDisplaySubtree(const FWebToUENode& Node,
 		bool bIncludeDescendants = true) const;
 	void UpdateDisplayCommand(const FWebToUEDocument& RuntimeDocument,
 		const FWebToUENode& Node, FWebToUEPaintCommand& Command,
 		float ParentOpacity, bool bParentDisplayed, bool bParentEnabled, int32 Depth,
 		const FVector2f& InheritedScrollOffset,
-		const FSlateRect& InheritedClip, bool bHasInheritedClip) const;
+		const FTransform2D& InheritedVisualTransform,
+		TConstArrayView<FWebToUEClipZone> InheritedClipChain) const;
 	void UpdateDisplaySubtreeBounds(const FWebToUENode& Node) const;
 	void RebuildDisplaySpatialIndex() const;
 	void AddDisplayCommandToSpatialIndex(int32 CommandIndex) const;

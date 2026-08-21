@@ -120,6 +120,100 @@ namespace WebToUE::Runtime::Presentation::Private
 		return HashCombineFast(Hash, GetTypeHash(Rect.Bottom));
 	}
 
+	static float ResolveTransformLength(const FWebToUELength& Length, float Extent)
+	{
+		return Length.Unit == EWebToUEUnit::Percent
+			? Extent * Length.Value * 0.01f : Length.Value;
+	}
+
+	static FTransform2D ResolveLocalTransform(
+		const FWebToUEComputedStyle& Style, const FVector2f& Size)
+	{
+		const FWebToUEVisualTransformValue& Value = Style.Transform;
+		const FVector2f Translation = Value.TranslationPixels +
+			Value.TranslationByWidth * Size.X + Value.TranslationByHeight * Size.Y;
+		const FVector2f Origin(
+			ResolveTransformLength(Style.TransformOrigin.X, Size.X),
+			ResolveTransformLength(Style.TransformOrigin.Y, Size.Y));
+		const FTransform2D Affine(
+			FMatrix2x2(Value.M00, Value.M01, Value.M10, Value.M11), Translation);
+		return FTransform2D(-Origin).Concatenate(Affine).Concatenate(FTransform2D(Origin));
+	}
+
+	static bool TryInvertTransform(const FTransform2D& Transform,
+		FTransform2D& OutInverse)
+	{
+		float A = 0.0f;
+		float B = 0.0f;
+		float C = 0.0f;
+		float D = 0.0f;
+		Transform.GetMatrix().GetMatrix(A, B, C, D);
+		const FVector2D Translation = Transform.GetTranslation();
+		const float Determinant = A * D - B * C;
+		if (!FMath::IsFinite(A) || !FMath::IsFinite(B) || !FMath::IsFinite(C) ||
+			!FMath::IsFinite(D) || !FMath::IsFinite(Translation.X) ||
+			!FMath::IsFinite(Translation.Y) || FMath::IsNearlyZero(Determinant))
+		{
+			return false;
+		}
+		OutInverse = Transform.Inverse();
+		return !OutInverse.ContainsNaN();
+	}
+
+	static FSlateRect TransformRectBounds(
+		const FTransform2D& Transform, const FVector2f& Size)
+	{
+		const FVector2f Points[] = {
+			Transform.TransformPoint(FVector2f::ZeroVector),
+			Transform.TransformPoint(FVector2f(Size.X, 0.0f)),
+			Transform.TransformPoint(FVector2f(0.0f, Size.Y)),
+			Transform.TransformPoint(Size)
+		};
+		FSlateRect Bounds(Points[0].X, Points[0].Y, Points[0].X, Points[0].Y);
+		for (int32 Index = 1; Index < UE_ARRAY_COUNT(Points); ++Index)
+		{
+			Bounds.Left = FMath::Min(Bounds.Left, Points[Index].X);
+			Bounds.Top = FMath::Min(Bounds.Top, Points[Index].Y);
+			Bounds.Right = FMath::Max(Bounds.Right, Points[Index].X);
+			Bounds.Bottom = FMath::Max(Bounds.Bottom, Points[Index].Y);
+		}
+		return Bounds;
+	}
+
+	static FWebToUEClipZone MakeClipZone(
+		const FTransform2D& LocalToView, const FVector2f& Size)
+	{
+		FWebToUEClipZone Zone;
+		Zone.LocalSize = Size;
+		Zone.LocalToView = LocalToView;
+		Zone.TopLeft = LocalToView.TransformPoint(FVector2f::ZeroVector);
+		Zone.TopRight = LocalToView.TransformPoint(FVector2f(Size.X, 0.0f));
+		Zone.BottomLeft = LocalToView.TransformPoint(FVector2f(0.0f, Size.Y));
+		Zone.BottomRight = LocalToView.TransformPoint(Size);
+		Zone.Bounds = TransformRectBounds(LocalToView, Size);
+		return Zone;
+	}
+
+	static bool IsPointInsideClipZone(
+		const FWebToUEClipZone& Zone, const FVector2f& Point)
+	{
+		return FSlateClippingZone(Zone.TopLeft, Zone.TopRight,
+			Zone.BottomLeft, Zone.BottomRight).IsPointInside(Point);
+	}
+
+	static uint32 HashClipChain(TConstArrayView<FWebToUEClipZone> ClipChain)
+	{
+		uint32 Hash = 0;
+		for (const FWebToUEClipZone& Zone : ClipChain)
+		{
+			Hash = HashCombineFast(Hash, GetTypeHash(Zone.TopLeft));
+			Hash = HashCombineFast(Hash, GetTypeHash(Zone.TopRight));
+			Hash = HashCombineFast(Hash, GetTypeHash(Zone.BottomLeft));
+			Hash = HashCombineFast(Hash, GetTypeHash(Zone.BottomRight));
+		}
+		return Hash;
+	}
+
 	static uint32 MakeBatchResourceKey(const FWebToUENode& Node,
 		const FWebToUEComputedStyle& Style)
 	{
@@ -272,6 +366,10 @@ uint64 FWebToUERuntimePresentation::GetKnownOwnedBytesForTesting() const
 	for (const TPair<uint64, TArray<int32>>& Pair : DisplaySpatialCells)
 	{
 		Bytes += Pair.Value.GetAllocatedSize();
+	}
+	for (const FWebToUEPaintCommand& Command : DisplayCommands)
+	{
+		Bytes += Command.ClipChain.GetAllocatedSize();
 	}
 	for (const TPair<FWebToUEInstanceHandle, TSharedPtr<FSlateBrush>>& Pair : Brushes)
 	{
@@ -1187,7 +1285,7 @@ void FWebToUERuntimePresentation::RebuildDisplayList() const
 	DisplayCommandIndices.Reserve(RuntimeNodeCount);
 	DisplayCommandRanges.Reserve(RuntimeNodeCount);
 	BuildDisplaySubtree(*RuntimeDocument, *RuntimeDocument->Root, 1.0f, true, true,
-		0, FVector2f::ZeroVector, FSlateRect(), false);
+		0, FVector2f::ZeroVector, FTransform2D(), {});
 	DisplayQueryMarks.SetNumZeroed(DisplayCommands.Num());
 	DisplayQueryScratch.Reserve(DisplayCommands.Num());
 	DirtyRects.Reserve(DisplayCommands.Num());
@@ -1202,31 +1300,58 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 	const FWebToUEDocument& RuntimeDocument, const FWebToUENode& Node,
 	FWebToUEPaintCommand& Command, float ParentOpacity, bool bParentDisplayed,
 	bool bParentEnabled, int32 Depth, const FVector2f& InheritedScrollOffset,
-	const FSlateRect& InheritedClip, bool bHasInheritedClip) const
+	const FTransform2D& InheritedVisualTransform,
+	TConstArrayView<FWebToUEClipZone> InheritedClipChain) const
 {
+	using namespace WebToUE::Runtime::Presentation::Private;
 	const FWebToUEComputedStyle& Style = GetStyle(Node);
 	const FWebToUERuntimeLayoutResult& LayoutResult = GetLayout(Node);
 	const FVector2f Position = LayoutResult.Position - InheritedScrollOffset;
 	const FVector2f Size = LayoutResult.Size;
+	const FTransform2D LocalTransform = ResolveLocalTransform(Style, Size);
+	const FTransform2D NodeSpaceTransform = FTransform2D(-Position)
+		.Concatenate(LocalTransform)
+		.Concatenate(FTransform2D(Position))
+		.Concatenate(InheritedVisualTransform);
 	Command.Owner = RuntimeInstance.GetHandle(&Node);
 	Command.Type = Node.Type == EWebToUENodeType::Text
 		? EWebToUEPaintCommandType::Text : EWebToUEPaintCommandType::Box;
-	Command.Bounds = FSlateRect(Position.X, Position.Y,
-		Position.X + Size.X, Position.Y + Size.Y);
+	Command.LocalSize = Size;
+	Command.InheritedScrollOffset = InheritedScrollOffset;
+	Command.InheritedVisualTransform = InheritedVisualTransform;
+	Command.DescendantVisualTransform = NodeSpaceTransform;
+	Command.LocalToView = FTransform2D(Position).Concatenate(NodeSpaceTransform);
+	Command.bInvertibleTransform = TryInvertTransform(
+		Command.LocalToView, Command.ViewToLocal);
+	Command.Bounds = TransformRectBounds(Command.LocalToView, Size);
 	Command.Depth = Depth;
 	Command.Opacity = ParentOpacity * Style.Opacity;
 	Command.bDisplayed = bParentDisplayed && RuntimeDocument.IsDisplayed(Node);
-	if (bHasInheritedClip && (!InheritedClip.IsValid() || InheritedClip.IsEmpty()))
+	Command.ClipChain.Reset(InheritedClipChain.Num());
+	Command.ClipChain.Append(InheritedClipChain);
+	if (!Style.Transform.IsIdentity())
 	{
-		Command.bDisplayed = false;
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::VisualTransformCommandsResolved);
 	}
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::ClipChainZonesResolved,
+		Command.ClipChain.Num());
 	Command.bEnabled = bParentEnabled && Style.bEnabled;
-	Command.bHasClip = bHasInheritedClip;
-	Command.ClipBounds = InheritedClip;
+	Command.bHasClip = !Command.ClipChain.IsEmpty();
+	Command.ClipBounds = FSlateRect();
 	Command.VisibleBounds = Command.bDisplayed ? Command.Bounds : FSlateRect();
-	if (Command.bDisplayed && Command.bHasClip)
+	bool bHasCombinedClipBounds = false;
+	for (const FWebToUEClipZone& Clip : Command.ClipChain)
 	{
-		Command.VisibleBounds = Command.Bounds.IntersectionWith(Command.ClipBounds);
+		Command.ClipBounds = bHasCombinedClipBounds
+			? Command.ClipBounds.IntersectionWith(Clip.Bounds) : Clip.Bounds;
+		bHasCombinedClipBounds = true;
+		if (Command.bDisplayed)
+		{
+			Command.VisibleBounds = Command.VisibleBounds.IntersectionWith(Clip.Bounds);
+			if (!IsUsableRect(Command.VisibleBounds)) Command.bDisplayed = false;
+		}
 	}
 	Command.SubtreeBounds = Command.VisibleBounds;
 	Command.bDrawable = Node.Type == EWebToUENodeType::Text;
@@ -1248,8 +1373,7 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 		WebToUE::Runtime::Presentation::Private::MakeBatchResourceKey(Node, Style);
 	Command.BatchKey.ShaderKey =
 		WebToUE::Runtime::Presentation::Private::MakeBatchShaderKey(Node, Style, Size);
-	Command.BatchKey.ClipKey = Command.bHasClip
-		? WebToUE::Runtime::Presentation::Private::HashRect(Command.ClipBounds) : 0;
+	Command.BatchKey.ClipKey = Command.bHasClip ? HashClipChain(Command.ClipChain) : 0;
 	Command.BatchKey.bClipped = Command.bHasClip;
 	Command.BatchKey.DrawEffects = static_cast<uint8>(Command.bEnabled
 		? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect);
@@ -1258,27 +1382,27 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 void FWebToUERuntimePresentation::BuildDisplaySubtree(
 	const FWebToUEDocument& RuntimeDocument, const FWebToUENode& Node,
 	float ParentOpacity, bool bParentDisplayed, bool bParentEnabled, int32 Depth,
-	const FVector2f& InheritedScrollOffset, const FSlateRect& InheritedClip,
-	bool bHasInheritedClip) const
+	const FVector2f& InheritedScrollOffset,
+	const FTransform2D& InheritedVisualTransform,
+	TConstArrayView<FWebToUEClipZone> InheritedClipChain) const
 {
 	const int32 RangeStart = DisplayCommands.Num();
 	const int32 CommandIndex = DisplayCommands.AddDefaulted();
 	FWebToUEPaintCommand& Command = DisplayCommands[CommandIndex];
 	UpdateDisplayCommand(RuntimeDocument, Node, Command, ParentOpacity, bParentDisplayed,
-		bParentEnabled, Depth, InheritedScrollOffset, InheritedClip, bHasInheritedClip);
+		bParentEnabled, Depth, InheritedScrollOffset, InheritedVisualTransform,
+		InheritedClipChain);
 	const FWebToUEInstanceHandle OwnerHandle = Command.Owner;
 	const float ChildOpacity = Command.Opacity;
 	const bool bChildDisplayed = Command.bDisplayed;
 	const bool bChildEnabled = Command.bEnabled;
 	DisplayCommandIndices.Add(OwnerHandle, CommandIndex);
 
-	FSlateRect ChildClip = InheritedClip;
-	bool bHasChildClip = bHasInheritedClip;
+	TArray<FWebToUEClipZone, TInlineAllocator<4>> ChildClipChain = Command.ClipChain;
 	if (RuntimeDocument.ClipsOverflow(Node))
 	{
-		ChildClip = bHasInheritedClip
-			? InheritedClip.IntersectionWith(Command.Bounds) : Command.Bounds;
-		bHasChildClip = true;
+		ChildClipChain.Add(WebToUE::Runtime::Presentation::Private::MakeClipZone(
+			Command.LocalToView, Command.LocalSize));
 	}
 	const FVector2f ChildScrollOffset = InheritedScrollOffset +
 		(RuntimeDocument.IsScrollable(Node)
@@ -1288,7 +1412,8 @@ void FWebToUERuntimePresentation::BuildDisplaySubtree(
 		const FWebToUENode* Child = RuntimeInstance.ResolveNode(ChildHandle);
 		if (!Child) continue;
 		BuildDisplaySubtree(RuntimeDocument, *Child, ChildOpacity, bChildDisplayed,
-			bChildEnabled, Depth + 1, ChildScrollOffset, ChildClip, bHasChildClip);
+			bChildEnabled, Depth + 1, ChildScrollOffset,
+			Command.DescendantVisualTransform, ChildClipChain);
 	}
 	DisplayCommandRanges.Add(OwnerHandle,
 		{ RangeStart, DisplayCommands.Num() - RangeStart });
@@ -1533,17 +1658,20 @@ int32 FWebToUERuntimePresentation::PatchDisplaySubtree(
 			bParentEnabled = ParentCommand.bEnabled;
 		}
 	}
-	const FVector2f InheritedScrollOffset = GetLayout(Node).Position -
-		RootCommand.Bounds.GetTopLeft2f();
-	const FSlateRect InheritedClip = RootCommand.ClipBounds;
-	const bool bHasInheritedClip = RootCommand.bHasClip;
+	const FVector2f InheritedScrollOffset = RootCommand.InheritedScrollOffset;
+	const FTransform2D InheritedVisualTransform =
+		RootCommand.InheritedVisualTransform;
+	TArray<FWebToUEClipZone, TInlineAllocator<4>> InheritedClipChain =
+		RootCommand.ClipChain;
 	const int32 RootDepth = RootCommand.Depth;
 
 	int32 PatchedCount = 0;
 	const auto Patch = [&](const auto& Self, const FWebToUENode& Current,
 		float InParentOpacity,
 		bool bInParentDisplayed, bool bInParentEnabled, int32 Depth,
-		const FVector2f& InScrollOffset, const FSlateRect& InClip, bool bInHasClip)
+		const FVector2f& InScrollOffset,
+		const FTransform2D& InVisualTransform,
+		TConstArrayView<FWebToUEClipZone> InClipChain)
 	{
 		const int32* CommandIndex =
 			DisplayCommandIndices.Find(RuntimeInstance.GetHandle(&Current));
@@ -1552,16 +1680,16 @@ int32 FWebToUERuntimePresentation::PatchDisplaySubtree(
 		const FSlateRect PreviousBounds = Command.VisibleBounds;
 		RemoveDisplayCommandFromSpatialIndex(*CommandIndex);
 		UpdateDisplayCommand(*RuntimeDocument, Current, Command, InParentOpacity,
-			bInParentDisplayed, bInParentEnabled, Depth, InScrollOffset, InClip, bInHasClip);
+			bInParentDisplayed, bInParentEnabled, Depth, InScrollOffset,
+			InVisualTransform, InClipChain);
 		AddDisplayCommandToSpatialIndex(*CommandIndex);
 		AddDirtyRegion(PreviousBounds, Command.VisibleBounds, *CommandIndex);
 		++PatchedCount;
-		FSlateRect ChildClip = InClip;
-		bool bHasChildClip = bInHasClip;
+		TArray<FWebToUEClipZone, TInlineAllocator<4>> ChildClipChain = Command.ClipChain;
 		if (RuntimeDocument->ClipsOverflow(Current))
 		{
-			ChildClip = bInHasClip ? InClip.IntersectionWith(Command.Bounds) : Command.Bounds;
-			bHasChildClip = true;
+			ChildClipChain.Add(WebToUE::Runtime::Presentation::Private::MakeClipZone(
+				Command.LocalToView, Command.LocalSize));
 		}
 		const FVector2f ChildScrollOffset = InScrollOffset +
 			(RuntimeDocument->IsScrollable(Current)
@@ -1574,14 +1702,16 @@ int32 FWebToUERuntimePresentation::PatchDisplaySubtree(
 				{
 					Self(Self, *Child, Command.Opacity, Command.bDisplayed,
 						Command.bEnabled, Depth + 1,
-						ChildScrollOffset, ChildClip, bHasChildClip);
+						ChildScrollOffset, Command.DescendantVisualTransform,
+						ChildClipChain);
 				}
 			}
 		}
 		UpdateDisplaySubtreeBounds(Current);
 	};
 	Patch(Patch, Node, ParentOpacity, bParentDisplayed, bParentEnabled,
-		RootDepth, InheritedScrollOffset, InheritedClip, bHasInheritedClip);
+		RootDepth, InheritedScrollOffset, InheritedVisualTransform,
+		InheritedClipChain);
 	for (const FWebToUENode* Ancestor = Node.Parent; Ancestor; Ancestor = Ancestor->Parent)
 	{
 		UpdateDisplaySubtreeBounds(*Ancestor);
@@ -1667,15 +1797,14 @@ int32 FWebToUERuntimePresentation::PaintCommand(
 	const FWebToUENode* Node = RuntimeInstance.ResolveNode(Command.Owner);
 	if (!Node) return LayerId;
 	const FWebToUEComputedStyle& Style = GetStyle(*Node);
-	const FVector2f Position(Command.Bounds.Left, Command.Bounds.Top);
-	const FVector2f Size = Command.Bounds.GetSize2f();
-	bool bPushedClip = false;
-	if (Command.bHasClip)
+	const FVector2f Size = Command.LocalSize;
+	int32 PushedClipCount = 0;
+	for (const FWebToUEClipZone& Clip : Command.ClipChain)
 	{
 		Out.PushClip(FSlateClippingZone(Geometry.MakeChild(
-			Command.ClipBounds.GetSize2f(),
-			FSlateLayoutTransform(Command.ClipBounds.GetTopLeft2f()))));
-		bPushedClip = true;
+			Clip.LocalSize, FSlateLayoutTransform(), Clip.LocalToView,
+			FVector2f::ZeroVector)));
+		++PushedClipCount;
 	}
 
 	const float DrawOpacity =
@@ -1684,7 +1813,7 @@ int32 FWebToUERuntimePresentation::PaintCommand(
 	{
 		if (const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(Command.Owner))
 		{
-			FVector2f DrawPosition = Position;
+			FVector2f DrawPosition = FVector2f::ZeroVector;
 			FVector2f DrawSize = Size;
 			bool bClipImage = false;
 			if (Node->Tag == TEXT("img"))
@@ -1704,13 +1833,17 @@ int32 FWebToUERuntimePresentation::PaintCommand(
 			}
 			if (bClipImage)
 			{
-				Out.PushClip(FSlateClippingZone(
-					Geometry.MakeChild(Size, FSlateLayoutTransform(Position))));
+				Out.PushClip(FSlateClippingZone(Geometry.MakeChild(
+					Size, FSlateLayoutTransform(), Command.LocalToView,
+					FVector2f::ZeroVector)));
 			}
 			FLinearColor DrawTint = (*Brush)->GetTint(WidgetStyle);
 			DrawTint.A *= DrawOpacity;
+			const FTransform2D DrawTransform = FTransform2D(DrawPosition)
+				.Concatenate(Command.LocalToView);
 			FSlateDrawElement::MakeBox(Out, LayerId++,
-				Geometry.ToPaintGeometry(DrawSize, FSlateLayoutTransform(DrawPosition)),
+				Geometry.ToPaintGeometry(DrawSize, FSlateLayoutTransform(),
+					DrawTransform, FVector2f::ZeroVector),
 				Brush->Get(), bParentEnabled && Command.bEnabled
 					? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect,
 				DrawTint);
@@ -1722,8 +1855,9 @@ int32 FWebToUERuntimePresentation::PaintCommand(
 	else
 	{
 		FSlateTextBlockLayout& TextLayout = PrepareTextLayout(*Node, Style, Size.X);
-		const FGeometry TextGeometry =
-			Geometry.MakeChild(Size, FSlateLayoutTransform(Position));
+		const FGeometry TextGeometry = Geometry.MakeChild(
+			Size, FSlateLayoutTransform(), Command.LocalToView,
+			FVector2f::ZeroVector);
 		FWidgetStyle TextWidgetStyle = WidgetStyle;
 		TextWidgetStyle.BlendColorAndOpacityTint(
 			FLinearColor(1.0f, 1.0f, 1.0f, Command.Opacity));
@@ -1732,7 +1866,7 @@ int32 FWebToUERuntimePresentation::PaintCommand(
 		FWebToUEPerformanceCapture::RecordCounter(
 			EWebToUEPerformanceCounter::PaintDrawElements);
 	}
-	if (bPushedClip) Out.PopClip();
+	while (PushedClipCount-- > 0) Out.PopClip();
 	return LayerId;
 }
 
@@ -1911,12 +2045,28 @@ TConstArrayView<FWebToUEInstanceHandle> FWebToUERuntimePresentation::GetPaintOrd
 
 FVector2f FWebToUERuntimePresentation::GetVisualPosition(const FWebToUENode& Node) const
 {
+	if (bDisplayListDirty && !bLayoutDirty) RebuildDisplayList();
+	const int32* CommandIndex = DisplayCommandIndices.Find(RuntimeInstance.GetHandle(&Node));
+	if (CommandIndex && DisplayCommands.IsValidIndex(*CommandIndex) &&
+		WebToUE::Runtime::Presentation::Private::IsUsableRect(
+			DisplayCommands[*CommandIndex].Bounds))
+	{
+		return DisplayCommands[*CommandIndex].Bounds.GetTopLeft2f();
+	}
 	FVector2f ScrollOffset = FVector2f::ZeroVector;
 	for (const FWebToUENode* Parent = Node.Parent; Parent; Parent = Parent->Parent)
 	{
 		ScrollOffset += GetState(*Parent).ScrollOffset;
 	}
 	return GetLayout(Node).Position - ScrollOffset;
+}
+
+FSlateRect FWebToUERuntimePresentation::GetVisualBounds(const FWebToUENode& Node) const
+{
+	if (bDisplayListDirty && !bLayoutDirty) RebuildDisplayList();
+	const int32* CommandIndex = DisplayCommandIndices.Find(RuntimeInstance.GetHandle(&Node));
+	return CommandIndex && DisplayCommands.IsValidIndex(*CommandIndex)
+		? DisplayCommands[*CommandIndex].VisibleBounds : FSlateRect();
 }
 
 FWebToUENode* FWebToUERuntimePresentation::HitTest(const FVector2f& LocalPosition) const
@@ -1940,7 +2090,29 @@ FWebToUENode* FWebToUERuntimePresentation::HitTest(const FVector2f& LocalPositio
 			EWebToUEPerformanceCounter::HitTestCommandsVisited);
 		const FWebToUEPaintCommand& Command = DisplayCommands[CommandIndex];
 		if (!Command.bInteractive || !Command.bEnabled ||
+			!Command.bInvertibleTransform ||
 			!Command.VisibleBounds.ContainsPoint(FVector2D(LocalPosition)))
+		{
+			continue;
+		}
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::InverseHitTests);
+		bool bInsideClipChain = true;
+		for (const FWebToUEClipZone& Clip : Command.ClipChain)
+		{
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::ExactClipTests);
+			if (!WebToUE::Runtime::Presentation::Private::IsPointInsideClipZone(
+				Clip, LocalPosition))
+			{
+				bInsideClipChain = false;
+				break;
+			}
+		}
+		if (!bInsideClipChain) continue;
+		const FVector2f NodeLocal = Command.ViewToLocal.TransformPoint(LocalPosition);
+		if (NodeLocal.X < 0.0f || NodeLocal.Y < 0.0f ||
+			NodeLocal.X > Command.LocalSize.X || NodeLocal.Y > Command.LocalSize.Y)
 		{
 			continue;
 		}
@@ -1975,6 +2147,20 @@ bool FWebToUERuntimePresentation::ScrollAt(
 		const FWebToUEPaintCommand& Command = DisplayCommands[CommandIndex];
 		if (!Command.bScrollable ||
 			!Command.VisibleBounds.ContainsPoint(FVector2D(LocalPosition))) continue;
+		bool bInsideClipChain = true;
+		for (const FWebToUEClipZone& Clip : Command.ClipChain)
+		{
+			bInsideClipChain &=
+				WebToUE::Runtime::Presentation::Private::IsPointInsideClipZone(
+					Clip, LocalPosition);
+		}
+		if (!bInsideClipChain || !Command.bInvertibleTransform) continue;
+		const FVector2f NodeLocal = Command.ViewToLocal.TransformPoint(LocalPosition);
+		if (NodeLocal.X < 0.0f || NodeLocal.Y < 0.0f ||
+			NodeLocal.X > Command.LocalSize.X || NodeLocal.Y > Command.LocalSize.Y)
+		{
+			continue;
+		}
 		FWebToUENode* Node = RuntimeInstance.ResolveNode(Command.Owner);
 		if (!Node) continue;
 		FWebToUERuntimeNodeState& State = GetState(*Node);

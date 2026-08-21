@@ -377,7 +377,11 @@ bool FWebToUETypedPropertiesTest::RunTest(const FString& Parameters)
 		{TEXT("text-align"), TEXT("right"), EWebToUECssProperty::TextAlign, EWebToUEStyleValueType::Keyword},
 		{TEXT("white-space"), TEXT("nowrap"), EWebToUECssProperty::WhiteSpace, EWebToUEStyleValueType::Keyword},
 		{TEXT("object-fit"), TEXT("cover"), EWebToUECssProperty::ObjectFit, EWebToUEStyleValueType::Keyword},
-		{TEXT("z-index"), TEXT("7"), EWebToUECssProperty::ZIndex, EWebToUEStyleValueType::Integer}
+		{TEXT("z-index"), TEXT("7"), EWebToUECssProperty::ZIndex, EWebToUEStyleValueType::Integer},
+		{TEXT("transform"), TEXT("translate(25%, 10px) rotate(90deg) scale(2, 0.5)"),
+			EWebToUECssProperty::Transform, EWebToUEStyleValueType::Transform},
+		{TEXT("transform-origin"), TEXT("left 25%"),
+			EWebToUECssProperty::TransformOrigin, EWebToUEStyleValueType::TransformOrigin}
 	};
 
 	TSet<uint8> SeenPropertyIds;
@@ -405,7 +409,28 @@ bool FWebToUETypedPropertiesTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("CSS hexadecimal RGB channels convert from sRGB to linear space"),
 		SrgbColor.TypedValue.Color,
 		FLinearColor::FromSRGBColor(FColor(0x12, 0x34, 0x56, 0x78)));
+	FWebToUEStyleDeclaration Transform;
+	TestTrue(TEXT("The controlled transform list compiles into affine typed IR"),
+		WebToUE::Private::TryParseCssDeclaration(TEXT("transform"),
+			TEXT("translate(25%, 10px) rotate(90deg) scale(2, 0.5)"), Transform));
+	TestTrue(TEXT("Percentage translate remains box-size-relative in typed IR"),
+		Transform.TypedValue.Transform.TranslationByWidth.SizeSquared() > 0.0f);
+	TestTrue(TEXT("The transform matrix records rotation and non-uniform scale"),
+		!FMath::IsNearlyZero(Transform.TypedValue.Transform.M01) &&
+		!FMath::IsNearlyZero(Transform.TypedValue.Transform.M10));
 	FWebToUEStyleDeclaration InvalidDeclaration;
+	TestFalse(TEXT("Unsupported transform functions fail closed"),
+		WebToUE::Private::TryParseCssDeclaration(TEXT("transform"),
+			TEXT("skew(10deg)"), InvalidDeclaration));
+	TestFalse(TEXT("Unitless translate values fail closed"),
+		WebToUE::Private::TryParseCssDeclaration(TEXT("transform"),
+			TEXT("translate(10, 0)"), InvalidDeclaration));
+	TestFalse(TEXT("Empty transform arguments fail closed"),
+		WebToUE::Private::TryParseCssDeclaration(TEXT("transform"),
+			TEXT("translate(10px,, 20px)"), InvalidDeclaration));
+	TestFalse(TEXT("Unsupported transform-origin units fail closed"),
+		WebToUE::Private::TryParseCssDeclaration(TEXT("transform-origin"),
+			TEXT("1em 2px"), InvalidDeclaration));
 	TestFalse(TEXT("Unsupported properties do not receive an ID"),
 		WebToUE::Private::TryParseCssDeclaration(TEXT("made-up-property"), TEXT("1px"), InvalidDeclaration));
 	TestFalse(TEXT("Invalid values do not produce typed declarations"),
@@ -417,7 +442,7 @@ bool FWebToUEPropertyMetadataTest::RunTest(const FString& Parameters)
 {
 	using namespace WebToUE::Private;
 	const TConstArrayView<FWebToUECssPropertyMetadata> Metadata = GetAllCssPropertyMetadata();
-	TestEqual(TEXT("All 52 supported properties have metadata"), Metadata.Num(), 52);
+	TestEqual(TEXT("All 54 supported properties have metadata"), Metadata.Num(), 54);
 	TSet<FString> Names;
 	TSet<EWebToUECssProperty> InheritedProperties;
 	for (int32 Index = 0; Index < Metadata.Num(); ++Index)
@@ -493,7 +518,8 @@ bool FWebToUEPropertyMetadataTest::RunTest(const FString& Parameters)
 			EWebToUECssProperty::AlignSelf, EWebToUECssProperty::Border,
 			EWebToUECssProperty::BorderWidth, EWebToUECssProperty::BorderStyle } },
 		{ PaintHitTest, TArray<EWebToUECssProperty>{
-			EWebToUECssProperty::Visibility, EWebToUECssProperty::ZIndex } },
+			EWebToUECssProperty::Visibility, EWebToUECssProperty::ZIndex,
+			EWebToUECssProperty::Transform, EWebToUECssProperty::TransformOrigin } },
 		{ Paint, TArray<EWebToUECssProperty>{
 			EWebToUECssProperty::Color, EWebToUECssProperty::Background,
 			EWebToUECssProperty::BackgroundColor, EWebToUECssProperty::BorderColor,

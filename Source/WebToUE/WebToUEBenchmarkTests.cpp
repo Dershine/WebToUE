@@ -17,12 +17,14 @@
 #include "Engine/Texture2D.h"
 #include "Hash/Blake3.h"
 #include "Input/HittestGrid.h"
+#include "Layout/Clipping.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
 #include "Rendering/DrawElements.h"
 #include "Types/PaintArgs.h"
 #include "Widgets/SWidget.h"
+#include "Widgets/SWindow.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEBenchmarkCorpusContractTest,
 	"WebToUE.Benchmark.CorpusContract",
@@ -46,6 +48,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceMaterialSmokeContractTest,
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceMaterialParameterSmokeContractTest,
 	"WebToUE.Benchmark.ResourceMaterialParameterSmokeContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETransformClipSmokeContractTest,
+	"WebToUE.Benchmark.TransformClipSmokeContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebToUEBenchmarkCorpusContractTest::RunTest(const FString& Parameters)
@@ -554,6 +560,79 @@ bool FWebToUEResourceMaterialParameterSmokeContractTest::RunTest(
 	TestEqual(TEXT("The typed update performs no resource load"),
 		Workload.GetCounter(EWebToUEPerformanceCounter::ResourceLoadAttempts),
 		uint64(0));
+	return true;
+}
+
+bool FWebToUETransformClipSmokeContractTest::RunTest(const FString& Parameters)
+{
+	UWebToUEDocument* Document = LoadObject<UWebToUEDocument>(nullptr,
+		TEXT("/Game/WebToUEExamples/TransformClipSmoke.TransformClipSmoke"));
+	if (!TestNotNull(TEXT("The packaged transform/clip smoke document loads"), Document))
+	{
+		return false;
+	}
+	TestFalse(TEXT("The transform/clip fixture is persisted at the current version"),
+		Document->NeedsRecompile());
+	TestEqual(TEXT("Visual transform/clip introduces no Runtime resource"),
+		Document->GetResourceManifest().Num(), 0);
+
+	UWebToUEView* View = NewObject<UWebToUEView>(GetTransientPackage());
+	View->SetDocument(Document);
+	const TSharedRef<SWidget> Widget = View->TakeWidget();
+	Widget->SlatePrepass(1.0f);
+	const TSharedRef<SWindow> PaintWindow = SNew(SWindow)
+		.ClientSize(FVector2D(1280.0, 720.0));
+	FHittestGrid HittestGrid;
+	FSlateWindowElementList DrawElements(PaintWindow);
+	const FGeometry Geometry = FGeometry::MakeRoot(
+		FVector2D(1280.0, 720.0), FSlateLayoutTransform());
+	const FPaintArgs PaintArgs(
+		nullptr, HittestGrid, FVector2D::ZeroVector, 0.0, 0.0f);
+	FWebToUEPerformanceSnapshot Workload;
+	{
+		FWebToUEPerformanceCapture Capture;
+		Widget->Paint(PaintArgs, Geometry,
+			FSlateRect(0.0f, 0.0f, 1280.0f, 720.0f), DrawElements, 0,
+			FWidgetStyle(), true);
+		Workload = Capture.GetSnapshot();
+	}
+	TestTrue(TEXT("The persistent fixture resolves at least three transforms"),
+		Workload.GetCounter(
+			EWebToUEPerformanceCounter::VisualTransformCommandsResolved) >= 3);
+	TestTrue(TEXT("The persistent fixture resolves a nested clip chain"),
+		Workload.GetCounter(
+			EWebToUEPerformanceCounter::ClipChainZonesResolved) >= 2);
+	TestTrue(TEXT("The persistent fixture reaches Slate paint"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::PaintDrawElements) > 0);
+	const bool bHasStencilClip = DrawElements.GetClippingManager().GetClippingStates()
+		.ContainsByPredicate([](const FSlateClippingState& State)
+		{
+			return State.GetClippingMethod() == EClippingMethod::Stencil;
+		});
+	TestTrue(TEXT("Rotated overflow boundaries reach Slate as stencil clips"),
+		bHasStencilClip);
+	const auto& RoundedBoxes = DrawElements.GetUncachedDrawElements()
+		.Get<(uint8)EElementType::ET_RoundedBox>();
+	TestTrue(TEXT("The packaged fixture emits a non-identity Slate render transform"),
+		RoundedBoxes.ContainsByPredicate([](const auto& Element)
+		{
+			return !Element.GetRenderTransform().IsIdentity();
+		}));
+
+	TArray<FWebToUESemanticNode> Semantics;
+	View->GetSemanticNodes(Semantics);
+	const FWebToUESemanticNode* Target = Semantics.FindByPredicate(
+		[](const FWebToUESemanticNode& Node)
+		{
+			return Node.ElementId == TEXT("transform-target");
+		});
+	TestNotNull(TEXT("The transformed target remains in the semantic projection"), Target);
+	if (Target)
+	{
+		TestTrue(TEXT("Semantic bounds consume transformed and clipped geometry"),
+			Target->bVisible && Target->bEnabled && Target->Bounds.IsValid() &&
+			!Target->Bounds.IsEmpty());
+	}
 	return true;
 }
 

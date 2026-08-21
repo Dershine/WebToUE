@@ -154,7 +154,9 @@ enum class EWebToUECssProperty : uint8
 	TextAlign,
 	WhiteSpace,
 	ObjectFit,
-	ZIndex
+	ZIndex,
+	Transform,
+	TransformOrigin
 };
 
 UENUM()
@@ -169,7 +171,9 @@ enum class EWebToUEStyleValueType : uint8
 	Color,
 	String,
 	Flex,
-	Border
+	Border,
+	Transform,
+	TransformOrigin
 };
 
 UENUM()
@@ -231,6 +235,42 @@ struct WEBTOUECORE_API FWebToUEBorderValue
 	UPROPERTY() bool bHasColor = false;
 };
 
+/**
+ * A resolved-order 2D affine transform whose translation can still depend on the
+ * target border-box width and height. This keeps Compiled UI IR independent from
+ * Slate while preserving percentage translate semantics without reparsing source.
+ */
+USTRUCT()
+struct WEBTOUECORE_API FWebToUEVisualTransformValue
+{
+	GENERATED_BODY()
+
+	UPROPERTY() float M00 = 1.0f;
+	UPROPERTY() float M01 = 0.0f;
+	UPROPERTY() float M10 = 0.0f;
+	UPROPERTY() float M11 = 1.0f;
+	UPROPERTY() FVector2f TranslationPixels = FVector2f::ZeroVector;
+	UPROPERTY() FVector2f TranslationByWidth = FVector2f::ZeroVector;
+	UPROPERTY() FVector2f TranslationByHeight = FVector2f::ZeroVector;
+
+	bool IsIdentity() const
+	{
+		return FMath::IsNearlyEqual(M00, 1.0f) && FMath::IsNearlyZero(M01) &&
+			FMath::IsNearlyZero(M10) && FMath::IsNearlyEqual(M11, 1.0f) &&
+			TranslationPixels.IsNearlyZero() && TranslationByWidth.IsNearlyZero() &&
+			TranslationByHeight.IsNearlyZero();
+	}
+};
+
+USTRUCT()
+struct WEBTOUECORE_API FWebToUETransformOriginValue
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FWebToUELength X = FWebToUELength::Percent(50.0f);
+	UPROPERTY() FWebToUELength Y = FWebToUELength::Percent(50.0f);
+};
+
 USTRUCT()
 struct WEBTOUECORE_API FWebToUEStyleValue
 {
@@ -246,6 +286,8 @@ struct WEBTOUECORE_API FWebToUEStyleValue
 	UPROPERTY() FString String;
 	UPROPERTY() FWebToUEFlexValue Flex;
 	UPROPERTY() FWebToUEBorderValue Border;
+	UPROPERTY() FWebToUEVisualTransformValue Transform;
+	UPROPERTY() FWebToUETransformOriginValue TransformOrigin;
 };
 
 struct WEBTOUECORE_API FWebToUEStyleDeclaration
@@ -296,6 +338,8 @@ struct WEBTOUECORE_API FWebToUEComputedStyle
 	FString WhiteSpace = TEXT("normal");
 	FString ObjectFit = TEXT("fill");
 	int32 ZIndex = 0;
+	FWebToUEVisualTransformValue Transform;
+	FWebToUETransformOriginValue TransformOrigin;
 };
 
 struct WEBTOUECORE_API FWebToUERuntimeNodeState

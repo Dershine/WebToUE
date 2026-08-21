@@ -69,11 +69,13 @@ namespace WebToUE::Private
 			{ EWebToUECssProperty::TextAlign, TEXT("text-align"), true, Paint },
 			{ EWebToUECssProperty::WhiteSpace, TEXT("white-space"), true, Measure },
 			{ EWebToUECssProperty::ObjectFit, TEXT("object-fit"), false, Paint },
-			{ EWebToUECssProperty::ZIndex, TEXT("z-index"), false, PaintHitTest }
+			{ EWebToUECssProperty::ZIndex, TEXT("z-index"), false, PaintHitTest },
+			{ EWebToUECssProperty::Transform, TEXT("transform"), false, PaintHitTest },
+			{ EWebToUECssProperty::TransformOrigin, TEXT("transform-origin"), false, PaintHitTest }
 		};
 
 		static_assert(UE_ARRAY_COUNT(PropertyMetadata) ==
-			static_cast<uint8>(EWebToUECssProperty::ZIndex) + 1,
+			static_cast<uint8>(EWebToUECssProperty::TransformOrigin) + 1,
 			"Every serialized CSS property ID must have exactly one metadata entry.");
 	}
 
@@ -253,6 +255,255 @@ namespace WebToUE::Private
 		return true;
 	}
 
+	static FVector2f TransformSymbolicVector(
+		const FWebToUEVisualTransformValue& Transform, const FVector2f& Vector)
+	{
+		return FVector2f(
+			Vector.X * Transform.M00 + Vector.Y * Transform.M10,
+			Vector.X * Transform.M01 + Vector.Y * Transform.M11);
+	}
+
+	/** Return the affine result of applying A first and B second. */
+	static FWebToUEVisualTransformValue ConcatenateTransform(
+		const FWebToUEVisualTransformValue& A,
+		const FWebToUEVisualTransformValue& B)
+	{
+		FWebToUEVisualTransformValue Result;
+		Result.M00 = A.M00 * B.M00 + A.M01 * B.M10;
+		Result.M01 = A.M00 * B.M01 + A.M01 * B.M11;
+		Result.M10 = A.M10 * B.M00 + A.M11 * B.M10;
+		Result.M11 = A.M10 * B.M01 + A.M11 * B.M11;
+		Result.TranslationPixels =
+			TransformSymbolicVector(B, A.TranslationPixels) + B.TranslationPixels;
+		Result.TranslationByWidth =
+			TransformSymbolicVector(B, A.TranslationByWidth) + B.TranslationByWidth;
+		Result.TranslationByHeight =
+			TransformSymbolicVector(B, A.TranslationByHeight) + B.TranslationByHeight;
+		return Result;
+	}
+
+	static bool IsFiniteTransform(const FWebToUEVisualTransformValue& Transform)
+	{
+		return FMath::IsFinite(Transform.M00) && FMath::IsFinite(Transform.M01) &&
+			FMath::IsFinite(Transform.M10) && FMath::IsFinite(Transform.M11) &&
+			FMath::IsFinite(Transform.TranslationPixels.X) &&
+			FMath::IsFinite(Transform.TranslationPixels.Y) &&
+			FMath::IsFinite(Transform.TranslationByWidth.X) &&
+			FMath::IsFinite(Transform.TranslationByWidth.Y) &&
+			FMath::IsFinite(Transform.TranslationByHeight.X) &&
+			FMath::IsFinite(Transform.TranslationByHeight.Y);
+	}
+
+	static bool TryParseTransformLength(const FString& Raw, FWebToUELength& OutLength)
+	{
+		const FString Value = Raw.TrimStartAndEnd().ToLower();
+		if (!Value.EndsWith(TEXT("px")) && !Value.EndsWith(TEXT("%")))
+		{
+			return false;
+		}
+		return TryParseLength(Value, OutLength) && OutLength.Unit != EWebToUEUnit::Auto;
+	}
+
+	static void SetTranslateComponent(FWebToUEVisualTransformValue& Transform,
+		const FWebToUELength& Length, bool bXAxis)
+	{
+		if (Length.Unit == EWebToUEUnit::Pixels)
+		{
+			if (bXAxis) Transform.TranslationPixels.X = Length.Value;
+			else Transform.TranslationPixels.Y = Length.Value;
+		}
+		else if (Length.Unit == EWebToUEUnit::Percent)
+		{
+			if (bXAxis) Transform.TranslationByWidth.X = Length.Value * 0.01f;
+			else Transform.TranslationByHeight.Y = Length.Value * 0.01f;
+		}
+	}
+
+	static bool TryParseTransformFunction(const FString& FunctionName,
+		FString Arguments, FWebToUEVisualTransformValue& OutTransform)
+	{
+		bool bHasTokenSinceComma = false;
+		for (const TCHAR Char : Arguments)
+		{
+			if (Char == TEXT(','))
+			{
+				if (!bHasTokenSinceComma) return false;
+				bHasTokenSinceComma = false;
+			}
+			else if (!FChar::IsWhitespace(Char))
+			{
+				bHasTokenSinceComma = true;
+			}
+		}
+		if (!bHasTokenSinceComma) return false;
+		Arguments.ReplaceInline(TEXT(","), TEXT(" "));
+		TArray<FString> Parts;
+		Arguments.ParseIntoArrayWS(Parts);
+		const FString Name = FunctionName.ToLower();
+		if (Name == TEXT("translate") || Name == TEXT("translatex") ||
+			Name == TEXT("translatey"))
+		{
+			const int32 MaxParts = Name == TEXT("translate") ? 2 : 1;
+			if (Parts.IsEmpty() || Parts.Num() > MaxParts) return false;
+			FWebToUELength First;
+			if (!TryParseTransformLength(Parts[0], First)) return false;
+			if (Name == TEXT("translatey")) SetTranslateComponent(OutTransform, First, false);
+			else SetTranslateComponent(OutTransform, First, true);
+			if (Name == TEXT("translate") && Parts.Num() == 2)
+			{
+				FWebToUELength Second;
+				if (!TryParseTransformLength(Parts[1], Second)) return false;
+				SetTranslateComponent(OutTransform, Second, false);
+			}
+			return true;
+		}
+		if (Name == TEXT("scale") || Name == TEXT("scalex") || Name == TEXT("scaley"))
+		{
+			const int32 MaxParts = Name == TEXT("scale") ? 2 : 1;
+			if (Parts.IsEmpty() || Parts.Num() > MaxParts) return false;
+			float First = 0.0f;
+			if (!TryParseNumber(Parts[0], First) || !FMath::IsFinite(First)) return false;
+			float ScaleX = 1.0f;
+			float ScaleY = 1.0f;
+			if (Name == TEXT("scalex")) ScaleX = First;
+			else if (Name == TEXT("scaley")) ScaleY = First;
+			else
+			{
+				ScaleX = First;
+				ScaleY = First;
+				if (Parts.Num() == 2 &&
+					(!TryParseNumber(Parts[1], ScaleY) || !FMath::IsFinite(ScaleY)))
+				{
+					return false;
+				}
+			}
+			OutTransform.M00 = ScaleX;
+			OutTransform.M11 = ScaleY;
+			return true;
+		}
+		if (Name == TEXT("rotate"))
+		{
+			if (Parts.Num() != 1) return false;
+			FString Angle = Parts[0].ToLower();
+			if (!Angle.EndsWith(TEXT("deg"))) return false;
+			Angle.LeftChopInline(3);
+			float Degrees = 0.0f;
+			if (!TryParseNumber(Angle, Degrees) || !FMath::IsFinite(Degrees)) return false;
+			const float Radians = FMath::DegreesToRadians(Degrees);
+			const float Cos = FMath::Cos(Radians);
+			const float Sin = FMath::Sin(Radians);
+			OutTransform.M00 = Cos;
+			OutTransform.M01 = Sin;
+			OutTransform.M10 = -Sin;
+			OutTransform.M11 = Cos;
+			return true;
+		}
+		return false;
+	}
+
+	static bool TryParseVisualTransform(FString Raw,
+		FWebToUEVisualTransformValue& OutTransform)
+	{
+		Raw = Raw.TrimStartAndEnd();
+		if (Raw.Equals(TEXT("none"), ESearchCase::IgnoreCase))
+		{
+			OutTransform = FWebToUEVisualTransformValue();
+			return true;
+		}
+		if (Raw.IsEmpty()) return false;
+		FWebToUEVisualTransformValue Combined;
+		int32 Cursor = 0;
+		int32 FunctionCount = 0;
+		while (Cursor < Raw.Len())
+		{
+			while (Cursor < Raw.Len() && FChar::IsWhitespace(Raw[Cursor])) ++Cursor;
+			const int32 NameStart = Cursor;
+			while (Cursor < Raw.Len() && FChar::IsAlpha(Raw[Cursor])) ++Cursor;
+			if (Cursor == NameStart || Cursor >= Raw.Len() || Raw[Cursor] != TEXT('(')) return false;
+			const FString Name = Raw.Mid(NameStart, Cursor - NameStart);
+			const int32 ArgumentsStart = ++Cursor;
+			while (Cursor < Raw.Len() && Raw[Cursor] != TEXT(')'))
+			{
+				if (Raw[Cursor] == TEXT('(')) return false;
+				++Cursor;
+			}
+			if (Cursor >= Raw.Len()) return false;
+			FWebToUEVisualTransformValue Operation;
+			if (!TryParseTransformFunction(Name,
+				Raw.Mid(ArgumentsStart, Cursor - ArgumentsStart), Operation))
+			{
+				return false;
+			}
+			// CSS transform functions compose from right to left for points.
+			Combined = ConcatenateTransform(Operation, Combined);
+			++FunctionCount;
+			++Cursor;
+		}
+		if (FunctionCount == 0 || !IsFiniteTransform(Combined)) return false;
+		OutTransform = Combined;
+		return true;
+	}
+
+	static bool TryParseOriginToken(const FString& Raw, bool bXAxis,
+		FWebToUELength& OutLength)
+	{
+		const FString Token = Raw.TrimStartAndEnd().ToLower();
+		if (Token == TEXT("center"))
+		{
+			OutLength = FWebToUELength::Percent(50.0f);
+			return true;
+		}
+		if (bXAxis && Token == TEXT("left"))
+		{
+			OutLength = FWebToUELength::Percent(0.0f);
+			return true;
+		}
+		if (bXAxis && Token == TEXT("right"))
+		{
+			OutLength = FWebToUELength::Percent(100.0f);
+			return true;
+		}
+		if (!bXAxis && Token == TEXT("top"))
+		{
+			OutLength = FWebToUELength::Percent(0.0f);
+			return true;
+		}
+		if (!bXAxis && Token == TEXT("bottom"))
+		{
+			OutLength = FWebToUELength::Percent(100.0f);
+			return true;
+		}
+		return TryParseTransformLength(Token, OutLength);
+	}
+
+	static bool TryParseTransformOrigin(const FString& Raw,
+		FWebToUETransformOriginValue& OutOrigin)
+	{
+		TArray<FString> Parts;
+		Raw.ParseIntoArrayWS(Parts);
+		if (Parts.IsEmpty() || Parts.Num() > 2) return false;
+		OutOrigin = FWebToUETransformOriginValue();
+		if (Parts.Num() == 1)
+		{
+			const FString Token = Parts[0].ToLower();
+			if (Token == TEXT("top") || Token == TEXT("bottom"))
+			{
+				return TryParseOriginToken(Token, false, OutOrigin.Y);
+			}
+			return TryParseOriginToken(Token, true, OutOrigin.X);
+		}
+		if ((Parts[0].Equals(TEXT("top"), ESearchCase::IgnoreCase) ||
+			 Parts[0].Equals(TEXT("bottom"), ESearchCase::IgnoreCase)) &&
+			(Parts[1].Equals(TEXT("left"), ESearchCase::IgnoreCase) ||
+			 Parts[1].Equals(TEXT("right"), ESearchCase::IgnoreCase) ||
+			 Parts[1].Equals(TEXT("center"), ESearchCase::IgnoreCase)))
+		{
+			Swap(Parts[0], Parts[1]);
+		}
+		return TryParseOriginToken(Parts[0], true, OutOrigin.X) &&
+			TryParseOriginToken(Parts[1], false, OutOrigin.Y);
+	}
+
 	bool TryGetCssProperty(const FString& Name, EWebToUECssProperty& OutProperty)
 	{
 		static const TMap<FString, EWebToUECssProperty> Properties = []
@@ -329,6 +580,12 @@ namespace WebToUE::Private
 		case EWebToUECssProperty::ZIndex:
 			OutValue.Type = EWebToUEStyleValueType::Integer;
 			return TryParseInteger(Value, OutValue.Integer);
+		case EWebToUECssProperty::Transform:
+			OutValue.Type = EWebToUEStyleValueType::Transform;
+			return TryParseVisualTransform(Value, OutValue.Transform);
+		case EWebToUECssProperty::TransformOrigin:
+			OutValue.Type = EWebToUEStyleValueType::TransformOrigin;
+			return TryParseTransformOrigin(Value, OutValue.TransformOrigin);
 		case EWebToUECssProperty::Color:
 		case EWebToUECssProperty::Background:
 		case EWebToUECssProperty::BackgroundColor:
@@ -473,6 +730,8 @@ namespace WebToUE::Private
 		case EWebToUECssProperty::WhiteSpace: Style.WhiteSpace = KeywordToString(Value.Keyword); break;
 		case EWebToUECssProperty::ObjectFit: Style.ObjectFit = KeywordToString(Value.Keyword); break;
 		case EWebToUECssProperty::ZIndex: Style.ZIndex = Value.Integer; break;
+		case EWebToUECssProperty::Transform: Style.Transform = Value.Transform; break;
+		case EWebToUECssProperty::TransformOrigin: Style.TransformOrigin = Value.TransformOrigin; break;
 		default: break;
 		}
 	}
@@ -600,6 +859,17 @@ namespace WebToUE::Private
 		case EWebToUECssProperty::WhiteSpace: return A.WhiteSpace == B.WhiteSpace;
 		case EWebToUECssProperty::ObjectFit: return A.ObjectFit == B.ObjectFit;
 		case EWebToUECssProperty::ZIndex: return A.ZIndex == B.ZIndex;
+		case EWebToUECssProperty::Transform:
+			return FMath::IsNearlyEqual(A.Transform.M00, B.Transform.M00) &&
+				FMath::IsNearlyEqual(A.Transform.M01, B.Transform.M01) &&
+				FMath::IsNearlyEqual(A.Transform.M10, B.Transform.M10) &&
+				FMath::IsNearlyEqual(A.Transform.M11, B.Transform.M11) &&
+				A.Transform.TranslationPixels.Equals(B.Transform.TranslationPixels) &&
+				A.Transform.TranslationByWidth.Equals(B.Transform.TranslationByWidth) &&
+				A.Transform.TranslationByHeight.Equals(B.Transform.TranslationByHeight);
+		case EWebToUECssProperty::TransformOrigin:
+			return EqualLength(A.TransformOrigin.X, B.TransformOrigin.X) &&
+				EqualLength(A.TransformOrigin.Y, B.TransformOrigin.Y);
 		default: return true;
 		}
 	}

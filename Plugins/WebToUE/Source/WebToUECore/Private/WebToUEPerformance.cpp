@@ -86,7 +86,11 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.material_instances_created"),
 		TEXT("workload.material_instances_reused"),
 		TEXT("workload.material_instances_released"),
-		TEXT("workload.material_brush_patches")
+		TEXT("workload.material_brush_patches"),
+		TEXT("workload.visual_transform_commands_resolved"),
+		TEXT("workload.clip_chain_zones_resolved"),
+		TEXT("workload.inverse_hit_tests"),
+		TEXT("workload.exact_clip_tests")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -321,6 +325,10 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::MaterialInstancesReused: return TEXT("material_instances_reused");
 	case EWebToUEPerformanceCounter::MaterialInstancesReleased: return TEXT("material_instances_released");
 	case EWebToUEPerformanceCounter::MaterialBrushPatches: return TEXT("material_brush_patches");
+	case EWebToUEPerformanceCounter::VisualTransformCommandsResolved: return TEXT("visual_transform_commands_resolved");
+	case EWebToUEPerformanceCounter::ClipChainZonesResolved: return TEXT("clip_chain_zones_resolved");
+	case EWebToUEPerformanceCounter::InverseHitTests: return TEXT("inverse_hit_tests");
+	case EWebToUEPerformanceCounter::ExactClipTests: return TEXT("exact_clip_tests");
 	default: return TEXT("unknown");
 	}
 }

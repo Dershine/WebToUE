@@ -40,6 +40,12 @@ bool FWebToUEAssetVersionTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Assets without relative texture metadata require recompilation"),
 		FWebToUEAssetVersion::RequiresRecompile(
 			FWebToUEAssetVersion::ResourceConsumerContract));
+	TestTrue(TEXT("Assets without static Material brush metadata require recompilation"),
+		FWebToUEAssetVersion::RequiresRecompile(
+			FWebToUEAssetVersion::RelativeTextureSources));
+	TestTrue(TEXT("Assets without typed visual transforms require recompilation"),
+		FWebToUEAssetVersion::RequiresRecompile(
+			FWebToUEAssetVersion::StaticMaterialBrushes));
 	TestFalse(TEXT("Assets at the latest version do not require recompilation"),
 		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::LatestVersion));
 	return true;

@@ -483,10 +483,12 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 	const bool bResourceSmoke = Corpus == TEXT("ResourceTextureSmoke") ||
 		Corpus == TEXT("ResourceMaterialSmoke") ||
 		Corpus == TEXT("ResourceMaterialParameterSmoke");
+	const bool bVisualTransformSmoke = Corpus == TEXT("TransformClipSmoke");
 	if ((Mode != TEXT("WebToUE") && Mode != TEXT("UMG")) ||
 		(Corpus != TEXT("MainMenu") && Corpus != TEXT("HUD") &&
-			Corpus != TEXT("ScrollableSettings") && !bResourceSmoke) ||
-		(bResourceSmoke && Mode != TEXT("WebToUE")))
+			Corpus != TEXT("ScrollableSettings") && !bResourceSmoke &&
+			!bVisualTransformSmoke) ||
+		((bResourceSmoke || bVisualTransformSmoke) && Mode != TEXT("WebToUE")))
 	{
 		FailAndExit(TEXT("Invalid -WTUEBenchmark or -WTUECorpus value"));
 		return false;
@@ -771,10 +773,12 @@ bool FWebToUEBenchmarkRunner::CaptureSecondViewEvidence()
 	if (Mode == TEXT("WebToUE") &&
 		(Corpus == TEXT("ResourceTextureSmoke") ||
 		 Corpus == TEXT("ResourceMaterialSmoke") ||
-		 Corpus == TEXT("ResourceMaterialParameterSmoke")))
+		 Corpus == TEXT("ResourceMaterialParameterSmoke") ||
+		 Corpus == TEXT("TransformClipSmoke")))
 	{
 		FHittestGrid HittestGrid;
-		FSlateWindowElementList DrawElements(nullptr);
+		FSlateWindowElementList DrawElements(
+			GEngine->GameViewport->GetWindow());
 		const FGeometry Geometry = FGeometry::MakeRoot(
 			FVector2D(1920.0, 1080.0), FSlateLayoutTransform());
 		const FPaintArgs PaintArgs(
@@ -824,6 +828,28 @@ FVector2D FWebToUEBenchmarkRunner::GetTrajectoryScreenPosition() const
 	{
 		const FGeometry& Geometry = TargetWidget->GetPaintSpaceGeometry();
 		const FVector2D LocalSize = Geometry.GetLocalSize();
+		if (Corpus == TEXT("TransformClipSmoke") && Mode == TEXT("WebToUE"))
+		{
+			if ((TrajectoryStep & 1) == 0)
+			{
+				return Geometry.LocalToAbsolute(FVector2D(24.0, 24.0));
+			}
+			if (const UWebToUEView* View = Cast<UWebToUEView>(PrimaryUiObject.Get()))
+			{
+				TArray<FWebToUESemanticNode> Semantics;
+				View->GetSemanticNodes(Semantics);
+				if (const FWebToUESemanticNode* Target = Semantics.FindByPredicate(
+					[](const FWebToUESemanticNode& Node)
+					{
+						return Node.ElementId == TEXT("transform-target");
+					}))
+				{
+					return Geometry.LocalToAbsolute(FVector2D(
+						(Target->Bounds.Left + Target->Bounds.Right) * 0.5,
+						(Target->Bounds.Top + Target->Bounds.Bottom) * 0.5));
+				}
+			}
+		}
 		if (Corpus == TEXT("MainMenu"))
 		{
 			return Geometry.LocalToAbsolute(FVector2D(
@@ -1141,6 +1167,7 @@ void FWebToUEBenchmarkRunner::Finish()
 	const bool bMaterialResourceSmoke = Corpus == TEXT("ResourceMaterialSmoke") ||
 		bDynamicMaterialParameterSmoke;
 	const bool bResourceSmoke = bTextureResourceSmoke || bMaterialResourceSmoke;
+	const bool bVisualTransformSmoke = Corpus == TEXT("TransformClipSmoke");
 	bool bResourceIdentityValid = !bResourceSmoke;
 	const FWebToUECompiledResource* SmokeResource = nullptr;
 	if (bResourceSmoke && BenchmarkDocument.IsValid() &&
@@ -1240,7 +1267,58 @@ void FWebToUEBenchmarkRunner::Finish()
 				MeasurementWorkload.GetCounter(
 					EWebToUEPerformanceCounter::DisplaySpatialIndexPatches) > 0;
 		}
+		else if (bVisualTransformSmoke)
+		{
+			bHasTrajectoryEvidence &=
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::VisualTransformCommandsResolved) > 0 &&
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::ClipChainZonesResolved) >= 2 &&
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::InverseHitTests) > 0 &&
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::ExactClipTests) >= 2 &&
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::DisplaySpatialIndexPatches) > 0 &&
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::YogaStyleWrites) == 0 &&
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::YogaNodesDirtied) == 0 &&
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::YogaLayoutResultsChanged) == 0;
+		}
 	}
+	FSlateRect TransformSemanticBounds;
+	bool bTransformSemanticFound = false;
+	if (bVisualTransformSmoke)
+	{
+		if (const UWebToUEView* View = Cast<UWebToUEView>(PrimaryUiObject.Get()))
+		{
+			TArray<FWebToUESemanticNode> Semantics;
+			View->GetSemanticNodes(Semantics);
+			if (const FWebToUESemanticNode* Target = Semantics.FindByPredicate(
+				[](const FWebToUESemanticNode& Node)
+				{
+					return Node.ElementId == TEXT("transform-target");
+				}))
+			{
+				TransformSemanticBounds = Target->Bounds;
+				bTransformSemanticFound = Target->bVisible && Target->bEnabled &&
+					Target->Bounds.IsValid() && !Target->Bounds.IsEmpty();
+			}
+		}
+	}
+	const bool bVisualTransformEvidenceValid = !bVisualTransformSmoke ||
+		(bTransformSemanticFound && CompiledResourceCount == 0 &&
+			WarmupWorkload.GetCounter(
+				EWebToUEPerformanceCounter::VisualTransformCommandsResolved) >= 3 &&
+			WarmupWorkload.GetCounter(
+				EWebToUEPerformanceCounter::ClipChainZonesResolved) >= 2 &&
+			SecondViewWorkload.GetCounter(
+				EWebToUEPerformanceCounter::VisualTransformCommandsResolved) >= 3 &&
+			SecondViewWorkload.GetCounter(
+				EWebToUEPerformanceCounter::ClipChainZonesResolved) >= 2 &&
+			bHasTrajectoryEvidence);
 	TArray<FString> ProductPolicyFailures;
 	bool bProductPolicyPass = true;
 	if (Mode == TEXT("WebToUE"))
@@ -1352,7 +1430,7 @@ void FWebToUEBenchmarkRunner::Finish()
 	const bool bSuccess = Samples.Num() == RequestedSamples && bScreenshotExists &&
 		bHasRendererEvidence && bHasInputToDisplay && bHasWebToUERuntimeWork &&
 		bHasTrajectoryEvidence && bSecondViewEvidence && bColdAttributionComplete &&
-		bProductPolicyPass && bResourceIdentityValid;
+		bProductPolicyPass && bResourceIdentityValid && bVisualTransformEvidenceValid;
 
 	FString Csv(TEXT("frame,gt_ms,rt_ms,gpu_ms,ui_draw_elements,window_slate_batches,"
 		"window_slate_vertices,window_slate_indices,ui_geometric_overdraw_ratio,"
@@ -1389,6 +1467,8 @@ void FWebToUEBenchmarkRunner::Finish()
 		: Corpus == TEXT("MainMenu") ? TEXT("pointer hover plus periodic click")
 		: bDynamicMaterialParameterSmoke
 			? TEXT("one typed Vector parameter update after MID warmup")
+		: bVisualTransformSmoke
+			? TEXT("pointer alternates across a transformed target to patch hover transform")
 		: bResourceSmoke ? TEXT("packaged visible-resource observation")
 		: TEXT("pointer hover plus bidirectional wheel scroll"));
 	TSharedRef<FJsonObject> TrajectoryEvidence = MakeShared<FJsonObject>();
@@ -1400,6 +1480,8 @@ void FWebToUEBenchmarkRunner::Finish()
 		? TEXT("UMG counterpart reports the resulting hover, scroll-offset, or HUD text/visibility state change.")
 		: bDynamicMaterialParameterSmoke
 			? TEXT("Warmup creates one View-owned MID; measurement commits one typed Vector update and patches only its Material brush/display command; the second View creates an isolated MID.")
+		: bVisualTransformSmoke
+			? TEXT("Measurement alternates pointer entry/exit over transformed semantic bounds and records inverse hit, exact nested-clip tests, transform/display/spatial patches, dirty regions, and zero Yoga mutation.")
 		: Corpus == TEXT("HUD")
 			? TEXT("Measurement window records binding field reads, executed ops, and updated nodes.")
 			: Corpus == TEXT("MainMenu")
@@ -1470,6 +1552,66 @@ void FWebToUEBenchmarkRunner::Finish()
 			ResourceEvidence);
 	}
 	Root->SetObjectField(TEXT("compiled_document"), DocumentContract);
+	if (bVisualTransformSmoke)
+	{
+		TSharedRef<FJsonObject> TransformEvidence = MakeShared<FJsonObject>();
+		TransformEvidence->SetBoolField(TEXT("evaluated"), true);
+		TransformEvidence->SetBoolField(TEXT("passed"),
+			bVisualTransformEvidenceValid);
+		TransformEvidence->SetBoolField(TEXT("semantic_target_found"),
+			bTransformSemanticFound);
+		TSharedRef<FJsonObject> SemanticBounds = MakeShared<FJsonObject>();
+		SemanticBounds->SetNumberField(TEXT("left"), TransformSemanticBounds.Left);
+		SemanticBounds->SetNumberField(TEXT("top"), TransformSemanticBounds.Top);
+		SemanticBounds->SetNumberField(TEXT("right"), TransformSemanticBounds.Right);
+		SemanticBounds->SetNumberField(TEXT("bottom"), TransformSemanticBounds.Bottom);
+		TransformEvidence->SetObjectField(TEXT("semantic_bounds"), SemanticBounds);
+		TransformEvidence->SetNumberField(TEXT("warmup_transform_commands"),
+			WarmupWorkload.GetCounter(
+				EWebToUEPerformanceCounter::VisualTransformCommandsResolved));
+		TransformEvidence->SetNumberField(TEXT("warmup_clip_zones"),
+			WarmupWorkload.GetCounter(
+				EWebToUEPerformanceCounter::ClipChainZonesResolved));
+		TransformEvidence->SetNumberField(TEXT("measurement_transform_commands"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::VisualTransformCommandsResolved));
+		TransformEvidence->SetNumberField(TEXT("measurement_clip_zones"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::ClipChainZonesResolved));
+		TransformEvidence->SetNumberField(TEXT("measurement_inverse_hit_tests"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::InverseHitTests));
+		TransformEvidence->SetNumberField(TEXT("measurement_exact_clip_tests"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::ExactClipTests));
+		TransformEvidence->SetNumberField(TEXT("measurement_display_patches"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::DisplayCommandsPatched));
+		TransformEvidence->SetNumberField(TEXT("measurement_spatial_patches"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::DisplaySpatialIndexPatches));
+		TransformEvidence->SetNumberField(TEXT("measurement_dirty_rects"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::DirtyRectsAdded));
+		TransformEvidence->SetNumberField(TEXT("measurement_yoga_style_writes"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::YogaStyleWrites));
+		TransformEvidence->SetNumberField(TEXT("measurement_yoga_nodes_dirtied"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::YogaNodesDirtied));
+		TransformEvidence->SetNumberField(TEXT("measurement_yoga_results_changed"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::YogaLayoutResultsChanged));
+		TransformEvidence->SetNumberField(TEXT("second_view_transform_commands"),
+			SecondViewWorkload.GetCounter(
+				EWebToUEPerformanceCounter::VisualTransformCommandsResolved));
+		TransformEvidence->SetNumberField(TEXT("second_view_clip_zones"),
+			SecondViewWorkload.GetCounter(
+				EWebToUEPerformanceCounter::ClipChainZonesResolved));
+		TransformEvidence->SetStringField(TEXT("contract"),
+			TEXT("Semantic bounds and the 128px broad-phase spatial index consume transformed/clipped AABBs; hit testing then evaluates every clip quad and inverse-transforms into the local border box. K=1 hover changes remain paint/hit-only and do not write or dirty Yoga."));
+		Root->SetObjectField(TEXT("visual_transform"), TransformEvidence);
+	}
 	if (bDynamicMaterialParameterSmoke)
 	{
 		TSharedRef<FJsonObject> ParameterEvidence = MakeShared<FJsonObject>();
@@ -1669,6 +1811,9 @@ void FWebToUEBenchmarkRunner::Finish()
 			Failures.Add(MakeShared<FJsonValueString>(TEXT("second view evidence unavailable")));
 		if (!bColdAttributionComplete)
 			Failures.Add(MakeShared<FJsonValueString>(TEXT("cold-start attribution incomplete")));
+		if (!bVisualTransformEvidenceValid)
+			Failures.Add(MakeShared<FJsonValueString>(
+				TEXT("visual transform/clip evidence incomplete")));
 		for (const FString& Failure : ProductPolicyFailures)
 		{
 			Failures.Add(MakeShared<FJsonValueString>(Failure));

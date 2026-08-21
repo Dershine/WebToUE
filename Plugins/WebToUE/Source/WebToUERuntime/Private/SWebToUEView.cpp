@@ -1298,16 +1298,13 @@ void SWebToUEView::GetSemanticNodes(TArray<FWebToUESemanticNode>& OutNodes) cons
 	RuntimeDocument->ForEachNode([this, RuntimeDocument, &OutNodes](FWebToUENode& Node)
 	{
 		if (!Node.IsInteractive()) return;
-		const FWebToUERuntimeLayoutResult& Layout = GetLayoutResult(Node);
-		const FVector2f Position = Presentation->GetVisualPosition(Node);
 		const FWebToUERuntimeNodeState& State = GetRuntimeState(Node);
 		const FWebToUEComputedStyle& Style = GetComputedStyle(Node);
 		FWebToUESemanticNode& Semantic = OutNodes.AddDefaulted_GetRef();
 		Semantic.Handle = RuntimeInstance->GetHandle(&Node);
 		Semantic.ElementId = FName(*Node.GetAttribute(TEXT("id")));
 		Semantic.Label = BuildSemanticLabel(Node);
-		Semantic.Bounds = FSlateRect(Position.X, Position.Y,
-			Position.X + Layout.Size.X, Position.Y + Layout.Size.Y);
+		Semantic.Bounds = Presentation->GetVisualBounds(Node);
 		Semantic.Role = Node.Tag == TEXT("button")
 			? EWebToUESemanticRole::Button : EWebToUESemanticRole::GenericAction;
 		Semantic.bVisible = RuntimeDocument->IsDisplayed(Node) && State.bRuntimeVisible;
@@ -1528,15 +1525,17 @@ bool SWebToUEView::MoveFocusSpatial(
 			(Direction == EUINavigation::Left || Direction == EUINavigation::Up)
 				? Candidates.Last() : Candidates[0]), SlateUserIndex);
 	}
-	const FVector2f CurrentCenter = Presentation->GetVisualPosition(*Current) +
-		GetLayoutResult(*Current).Size * 0.5f;
+	const FSlateRect CurrentBounds = Presentation->GetVisualBounds(*Current);
+	const FVector2f CurrentCenter = CurrentBounds.GetTopLeft2f() +
+		CurrentBounds.GetSize2f() * 0.5f;
 	FWebToUENode* Best = nullptr;
 	float BestScore = TNumericLimits<float>::Max();
 	for (FWebToUENode* Candidate : Candidates)
 	{
 		if (Candidate == Current) continue;
-		const FVector2f Center = Presentation->GetVisualPosition(*Candidate) +
-			GetLayoutResult(*Candidate).Size * 0.5f;
+		const FSlateRect CandidateBounds = Presentation->GetVisualBounds(*Candidate);
+		const FVector2f Center = CandidateBounds.GetTopLeft2f() +
+			CandidateBounds.GetSize2f() * 0.5f;
 		const FVector2f Delta = Center - CurrentCenter;
 		float Primary = 0.0f;
 		float Secondary = 0.0f;

@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+  <style>
+    body {
+      width: 1280px;
+      height: 720px;
+      padding: 72px 160px;
+      background-color: #08111f;
+      color: #e9f4ff;
+      font-size: 28px;
+    }
+
+    #heading {
+      width: 760px;
+      height: 56px;
+      margin-bottom: 28px;
+      color: #a7c8e8;
+      font-size: 32px;
+    }
+
+    #outer-clip {
+      width: 720px;
+      height: 430px;
+      overflow: hidden;
+      padding: 36px;
+      background-color: #15304a;
+      border: 4px solid #61b4e4;
+      border-radius: 26px;
+      transform: translate(52px, 18px) rotate(-5deg);
+      transform-origin: center center;
+    }
+
+    #inner-clip {
+      width: 610px;
+      height: 310px;
+      overflow: hidden;
+      padding: 24px;
+      background-color: #244c67;
+      border: 3px solid #9ad7ef;
+      border-radius: 20px;
+      transform: translate(36px, 24px) rotate(9deg);
+      transform-origin: 20% 30%;
+    }
+
+    #transform-target {
+      width: 480px;
+      height: 176px;
+      padding: 28px;
+      background-color: #ff784f;
+      color: #1b1020;
+      border: 5px solid #ffd3a6;
+      border-radius: 18px;
+      font-size: 34px;
+      transform: translate(92px, 58px) rotate(16deg) scale(1.08, 0.90);
+      transform-origin: left top;
+    }
+
+    #transform-target:hover {
+      background-color: #ffd166;
+      transform: translate(68px, 42px) rotate(-11deg) scale(0.96, 1.06);
+      transform-origin: 30% 70%;
+    }
+
+    #target-detail {
+      width: 390px;
+      height: 42px;
+      margin-top: 12px;
+      color: #482412;
+      font-size: 22px;
+    }
+  </style>
+</head>
+<body>
+  <div id="heading">Native affine transform + nested clip chain</div>
+  <div id="outer-clip">
+    <div id="inner-clip">
+      <button id="transform-target">
+        Transformed target
+        <div id="target-detail">Hover patches transform, bounds and spatial entry.</div>
+      </button>
+    </div>
+  </div>
+</body>
+</html>
