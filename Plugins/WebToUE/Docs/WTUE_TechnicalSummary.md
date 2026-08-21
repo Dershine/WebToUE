@@ -6,7 +6,7 @@
 >
 > 引擎/平台：Unreal Engine 5.8 / Win64
 >
-> 当前里程碑：M4——UE 原生表现与合成 1 / 9；M4.1 Unreal Texture/Brush Resource Contract 产品闭环已完成，下一条微观路线尚未开始
+> 当前里程碑：M4——UE 原生表现与合成 1 / 9；活跃微观路线为 M4.2 Relative/Generated Texture Source 闭环 0 / 8
 >
 > 当前交付 Profile：PersonalGame-ready 0.5——Win64 项目内生产使用；通用商业 1.0 延后
 >
@@ -58,8 +58,8 @@
 | 生命周期 | Compiled IR、Runtime State、持久 Yoga/Layout、Text/Resource Handle 与 View-owned Display List/空间索引已分离 | ✅ |
 | 功能成熟度 | 可覆盖固定 MainMenu/HUD/ScrollableSettings 原型，具备局部 Display patch、语义焦点/手柄导航、DPI/Safe Zone、重导入恢复和跨 DPI Golden；尚非完整生产 UI 框架 | 🟡 |
 | 性能成熟度 | 无默认 Tick；局部更新、K=1 工作量、Packaged Development/Shipping GT/RT/GPU/input、Batch/Vertex、冷启动、Development LLM 与第二 View 硬门已建立并通过 | ✅ |
-| 当前最大风险 | M2 风险已降至当前 Win64 项目内 0.5 可接受等级；M3 基础合同与 M4.1 Texture/Brush 产品接入已收口，后续最大架构风险转为 relative/generated 身份、Material/MID 所有权、Transform/真实 Portal 合成、Behavior/FieldNotify/Command Adapter 与 Stable Identity 接入、真实双 LocalPlayer/CommonUI Modal、Feedback Profile/音频后端和确定性工具链 | 🟡 |
-| 当前策略 | 保持 M2 出口门、M3 合同边界和 M4.1 Texture/Brush 闭环；下一条微观路线尚未开始，建议按依赖顺序进入 relative/generated source，再分别进入 Material/MID、Transform/Animation/Compositing；UI Feedback 保持独立纵向切片，完整 JS VM 与浏览器兼容继续延后 | ✅ |
+| 当前最大风险 | M2 风险已降至当前 Win64 项目内 0.5 可接受等级；M3 基础合同与 M4.1 Texture/Brush 产品接入已收口，当前最大架构风险是 M4.2 relative/generated 身份、重导入与 Cook freshness；其后仍有 Material/MID 所有权、Transform/真实 Portal 合成、Behavior/FieldNotify/Command Adapter 与 Stable Identity 接入、真实双 LocalPlayer/CommonUI Modal、Feedback Profile/音频后端和确定性工具链 | 🟡 |
+| 当前策略 | 保持 M2 出口门、M3 合同边界和 M4.1 Texture/Brush 闭环；只执行 M4.2 relative/generated source 的解析、稳定生成资产身份、intrinsic size、重导入和 Cook/Packaged 纵向闭环，不进入 Material/MID、Feedback、Transform、Animation 或 Compositing | ✅ |
 
 ### 2.2 验证快照
 
@@ -566,7 +566,22 @@ M0/M1/M2 已完成，详细验收项保存在 [Evidence Ledger](WTUE_EvidenceLed
 
 退出证据：90 / 90 `StartsWith:WebToUE`、0 failed/skipped（8.583 秒）；最终 Editor Development 5 / 5 actions；BuildCookRun `d5342bea9249450db4d531b7473bbae2` / `cf6395f42be04034bc7da68c793792c4` 均为 AutomationTool ExitCode 0。Development/Shipping Resource smoke 各证明 1 个 compiled Engine Texture、主 View 1 次 cache hit、第二 View 1 次 resident cache hit、0 async/sync load、0 failure/cancellation；两张 1920×1080 PNG SHA-256 均为 `C863BABAB3B42BD416F8921B7EC5D99DFC03156E717B4D3A0345D42E628DE2A9`，已目视确认真实 Texture/Slate Brush。该 K=1 fixture 不外推为大型资源页面首帧、内存或产品级性能结论。
 
-本路线完成后停止，不进入 relative/generated、Material/MID、Feedback、Transform、Animation 或 Compositing。
+本路线完成后已停止；以下 M4.2 是新的独立微观路线，不改变 M4.1 的历史验收边界。
+
+### M4.2——Relative/Generated Texture Source 闭环 🚧 0 / 8
+
+`P0.5-if-used` 裁决：冻结的 MainMenu/HUD/ScrollableSettings 没有图片，因此额外目标游戏图片种类、超大资源页和对应性能工作量继续为有证据的 `N/A`；但 relative source 诊断、稳定生成资产身份、intrinsic size、重导入与 Cook dependency 是无条件 `P0.5`，必须用受控图片 fixture 和真实 Packaged 路径验收。
+
+- [ ] 明确并测试三种作者引用：`/Game`/`/Engine` Unreal Asset、相对 UI Source 的本地图片，以及 `generated:` Unreal 对象引用；HTTP、机器绝对路径、越过项目边界、目录和不支持格式全部失败关闭，Runtime 不读取作者文件。
+- [ ] 相对图片按规范 logical source identity 生成确定性的 `/Game/WebToUEGenerated/Textures` 资产身份；内容变化原位更新同一对象路径，等价引用去重，机器路径和 content hash 不进入稳定 ResourceId。
+- [ ] `FWebToUECompiledResource` 序列化验证后的 intrinsic pixel size；未驻留图片也能参与首次 Measure，加载后的 Brush size 必须与密封尺寸一致，尺寸漂移失败关闭而非静默改变布局。
+- [ ] RelativeSource/Generated provenance、原始图片字节、生成输出与 package dependency 进入同一个 M3.9 dependency closure；Cook expected stamp 对 source、generated asset 或 Compiler drift 保持 exact-match `WTUE-RES-004` 门。
+- [ ] Document dependency/watch/reimport 覆盖相对图片；合法内容或尺寸变化更新同一 generated asset、Manifest 与 stamp，缺失/损坏/越界输入保留 last-good 但不能 Cook。
+- [ ] Runtime 继续只消费版本化 ResourceId→soft object→View-owned handle；K=1 首次 Measure、请求、命中、失败、取消、同步加载和已知所有权可复现，不新增 per-node UObject/UWidget/Slate Widget 或默认 Tick。
+- [ ] 修改前失败、修改后通过的 Import/asset/runtime/freshness 专项覆盖规范化、稳定身份、intrinsic size、重导入、last-good 和 stale Cook；冻结 Corpus 审计明确保持上述 `P0.5-if-used=N/A` 边界。
+- [ ] 候选冻结后通过 `git diff --check`、完整 WebToUE Automation、UE 5.8 Win64 Editor Development、tracked Development/Shipping BuildCookRun、真实 Packaged relative/generated texture smoke 和可见截图；分别报告 Editor、Cook 与 Packaged Runtime 的证据边界。
+
+本路线完成后停止，不进入 Material/MID、Feedback、Transform、Animation 或 Compositing。
 
 M2.0～M2.9 已完成可观测性、生命周期、类型化样式、共享 Style Template、统一身份、Paint-only Pseudo 与根字段 FieldNotify/Text 局部失效、持久 Yoga/异步 Resource Handle、Display/Hit/Packaged 真实渲染、核心生产宿主与 M2 0.5 Go/No-Go。宏观 `9 / 9` 的全部性能预算和 Win64 Packaged 证据已经收口；BuildPlugin 与第二平台仍属 P1.0。
 
