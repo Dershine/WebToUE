@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、UI Feedback、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-21，M4.3b MID Ownership And Typed Parameters 产品闭环。
+> 当前基线：2026-08-21，M4.4 Feedback Profile And UE Router 产品闭环。
 >
 > 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Native Component 作者声明/Compiler/Runtime 挂接仍未支持。
 >
@@ -26,7 +26,9 @@
 >
 > 2026-08-21 的 M4.3a 已让静态 Material 产品链消费同一合同：版本 11、Resource IR 1.2、saved-package 传递 closure/Cook freshness、共享 `UMaterialInterface`、`FSlateMaterialBrush` 与双配置 Packaged smoke 已闭环。
 >
-> 2026-08-21 的 M4.3b 已支持 C++ canonical typed Scalar/Vector Material Parameter submission：Binding/Behavior durable owner、M3 事务后提交、View/Node MID strong ownership、generation/GC/reset 和跨 View 隔离均有 Automation 与双配置 Packaged 证据。参数作者语法、Texture 参数、Animation/Transition/`Time` 保证、Route 作者声明、Feedback 资源和完整 Incremental/DDC/Lockfile 仍未支持。
+> 2026-08-21 的 M4.3b 已支持 C++ canonical typed Scalar/Vector Material Parameter submission：Binding/Behavior durable owner、M3 事务后提交、View/Node MID strong ownership、generation/GC/reset 和跨 View 隔离均有 Automation 与双配置 Packaged 证据。参数作者语法、Texture 参数、Animation/Transition/`Time` 保证、Route 作者声明和完整 Incremental/DDC/Lockfile 仍未支持。
+>
+> 2026-08-21 的 M4.4 已支持 C++/Host 注入的版本化 Feedback Profile 与 Session-scoped Router：SoundWave/SoundCue/MetaSound variant、Critical async residency/Cook freshness、LocalPlayer 用户设置、Correlation/Dedupe/Cooldown/Throttle、UE Concurrency、Screen 2D/World policy、默认 UE backend 和项目 backend 均有 Automation 与双配置 Packaged 证据。UI Source/Compiler/Behavior 尚不生成 Cue，语义默认/作者覆盖仍归 M5；没有实际扬声器出声、声学延迟或大型音频 Corpus 性能承诺。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -114,7 +116,7 @@ Flex：
 
 事件：Click 与 Pointer Capture Lost 使用不可变 root→target 事件路径快照；快照携带文档/Session Generation、Slate User/Pointer、Input Modality 与 Correlation，提交前逐段验证父子关系和身份。监听器按 capture→target→bubble 派发，支持 propagation/immediate stop；可取消 Click 支持 prevent default，Pointer Capture Lost 不可取消。`data-ue-on-click="EventName"` 仍广播 `EventName` 和 `ElementId`，但现作为 Session-owned 事务的 Post-Commit 默认动作执行；监听器状态写入先提交，失败/过期事务不广播。当前只有 C++ Listener API 和类型化事件种类，没有 UI Source 事件声明、类型化 payload schema 或 Behavior Event IR。
 
-UI Feedback 基础合同：Runtime 已提供 Feedback Request、`IWebToUEFeedbackRouter`、Null Router 和 Recording Router。Request 固定 Cue/Source/Correlation、Input Modality、Session/LocalPlayer/Viewport/Surface Scope 与 Session Generation；Router 由 UI Session 注入，失活 Session 或旧 Generation 请求明确拒绝。C++ 专项已证明 Feedback 可作为 Session-owned 事务的 Post-Commit Effect，观察全部已提交 Mutation，且失败事务不派发；Click 默认动作也已进入 Post-Commit，但 UI Source 没有 Feedback/Sound 声明，Compiler 不生成 Feedback Cue/Behavior Op，现有事件不会自动生成 Cue。版本化 Profile、UE Sound/SoundCue/MetaSound 资源清单、预取/Cook、限频/去重、用户设置和播放后端仍不存在，因此不能宣称已支持 UI 音效。
+UI Feedback 产品边界：Runtime 提供 Feedback Request、`IWebToUEFeedbackRouter`、Null/Recording Router、版本化 `UWebToUEFeedbackProfile` 与 Session-scoped Profile Router。Request 固定 Cue/Source/Correlation、Input Modality、Session/LocalPlayer/Viewport/Surface Scope 与 Session Generation；失活 Session 或旧 Generation 请求拒绝。Profile 使用 namespaced Cue ID 映射 SoundWave/SoundCue/MetaSound variant、音量/音高、UE Concurrency 与项目 Route ID，并密封 Resource identity/provenance/residency/dependency closure/freshness。Session 激活只异步预取 Critical 组，交互 gate 在 ready 前关闭；派发不调用同步加载，缺项、未驻留或失败只产生有界可观测降级。Router 消费 LocalPlayer-aware 静音/音量，按 scope 执行 correlation-aware 去重、Cooldown、Throttle、确定性 Variant 和并发传递；Screen 生成 2D 意图，World 仅按显式策略 Drop/2D/Host Owner 位置 3D。默认 UE backend 与项目注入 backend 共用类型化播放请求。Feedback 仍是 Session-owned Post-Commit Effect，失败事务不派发；UI Source 没有 Feedback/Sound 声明，Compiler 不生成 Cue/Behavior Op，现有事件不会自动生成 Cue，也未证明扬声器实际出声。
 
 更新事务 C++ 边界：每个 `FWebToUESession` 拥有一个 `FWebToUEUpdateCoordinator`。evaluation 在 Game Thread 只收集 State/Structural Mutation 和 Post-Commit Effect，成功后按 State→Structure→Effect 提交；evaluation 拒绝、遍历来源结构写入或预算超限时整笔不提交。非 Game Thread 只能向 MPSC 队列提交 evaluation，由 Game Thread drain；evaluation 重入属于同一原子事务，Commit/Post-Commit 重入进入后续事务。evaluation、Mutation、Effect、单次 drain 与保留 Trace 均有硬上限，Session 失活拒绝新工作并丢弃晚到队列。Click 监听、`data-ue-on-click` 默认动作、M3.4 Timer/Command terminal evaluation 及 M4.3b Material Parameter State Mutation/Post-Commit Presentation patch 已接入；现有 FieldNotify、Behavior IR 和动态结构尚未迁入。
 
@@ -122,7 +124,7 @@ Clock/异步 C++ 边界：`FWebToUEWorldClock` 明确区分 Game（随 pause 停
 
 C++ Data/Command Schema 边界：`FWebToUEInteropSchemaDescriptor` 是项目 C++ 单一事实源；`FWebToUEInteropSchemaPolicy` 在 Core 中验证闭合的 bool/int32/float/string/name/text/Enum/Record/Array/Optional 值代数、根 Data observability 与 Command request/response/result/cancellable 组合，并生成确定性排序的 Major/Minor snapshot。无效/重复/未知或递归类型/非法 Command shape/不兼容 Minor 演进通过 `WTUE-SCHEMA-001..004` 失败关闭。Editor-only `FWebToUESchemaTypeScriptEmitter` 从 snapshot 生成只读 Data、Enum/Record 与 Command metadata `.d.ts` 文本；声明不是 UHT/UBT 或 UI Compiler 事实源。当前无项目实际 Schema provider、Data/Command Context Adapter、Compiled Binding/Behavior 引用、payload dispatch、MVVM Adapter、磁盘生成或 freshness 接入，因此这是 M5/M6 的 C++ 前置合同，不是现有作者或 Runtime 产品能力。
 
-UI Session / Screen Host：Runtime 已提供 `FWebToUESession` 与代码化 `FWebToUEScreenHost`。Session 绑定 LocalPlayer、World、Screen Surface、Data/Command Context、Environment、显式多域 Clock 与 Generation；一个 Host 拥有一个 `UWebToUEView`，通过 `UGameViewportClient::AddViewportWidgetForPlayer` 附着到对应 LocalPlayer，默认继续使用 `SSafeZone`。显式 Shutdown、World cleanup 或 LocalPlayer removal 均先失活 Session/Async、清除 View 关联，再移除 Slate 内容；文档设置/换代会推进 Session Generation 并同步取消旧代次 Timer/Command。固定 MainMenu/HUD/ScrollableSettings Packaged Runner 已走该生产 Host。C++/Slate 专项已验证多 Slate User/Pointer 的状态隔离，但真实双 LocalPlayer/CommonUI Modal 敌意矩阵尚未执行；World Surface Host 经当前冻结 Corpus 自动审计为 `P0.5-if-used=N/A`，不是已实现能力。
+UI Session / Screen Host：Runtime 已提供 `FWebToUESession` 与代码化 `FWebToUEScreenHost`。Session 绑定 LocalPlayer、World、Screen Surface、Data/Command Context、Environment、显式多域 Clock 与 Generation；一个 Host 拥有一个 `UWebToUEView`，通过 `UGameViewportClient::AddViewportWidgetForPlayer` 附着到对应 LocalPlayer，默认继续使用 `SSafeZone`。Host 可显式注入 Router，或由 Feedback Profile + backend/settings/resource provider 创建默认 Profile Router；`Attach()` 在 Session Critical Feedback gate ready 前失败关闭。显式 Shutdown、World cleanup 或 LocalPlayer removal 均先失活 Session/Async/Feedback、清除 View 关联，再移除 Slate 内容；文档设置/换代会推进 Session Generation 并同步取消旧代次 Timer/Command 和 Router policy state。固定 MainMenu/HUD/ScrollableSettings Packaged Runner 已走该生产 Host。C++/Slate 专项已验证多 Slate User/Pointer 的状态隔离，但真实双 LocalPlayer/CommonUI Modal 敌意矩阵尚未执行；World Surface Host 经当前冻结 Corpus 自动审计为 `P0.5-if-used=N/A`，不是已实现能力。
 
 Native Component C++ 边界：Runtime 模块已提供实验性的 `FWebToUENativeComponentRegistry`。注册项必须使用命名空间类型名和非零合同版本，可声明 `UScriptStruct` Props/Event 类型、能力位和带预期 `UClass` 的命名 Resource Slot；Factory/Instance 接口覆盖显式 Slate Widget、Measure、Pointer/Key Input、Focus、Semantic projection、Resource binding 和 Attach/Suspend/Resume/Detach，注册由 Game Thread 上的 move-only RAII token 持有。当前 UI Source 没有 Native Component 声明，Compiler 不生成组件 IR，Runtime Tree/Host 也不会查表或创建实例，因此这只是后续互操作前置合同，不是作者或产品可用能力，且 1.0 外部 API 稳定性尚未承诺。
 
@@ -166,7 +168,7 @@ Runtime 绘制与命中：
 - 树投影的无效/跨代节点域（`WTUE-TREE-001`）、父链/注册顺序（`WTUE-TREE-002`）、Anchor Session/Surface/父投影（`WTUE-TREE-003`）、Portal 挂载/cycle/Modal（`WTUE-TREE-004`）与 Focus Restore token/候选链（`WTUE-TREE-005`）；当前主要由 C++ Policy/Automation 使用。
 - Stable Semantic Identity 的无效 Owner/Generation/Component/provenance/node/state domain（`WTUE-ID-001`）、同 Component 重复 Key（`WTUE-ID-002`）、Kind/State Contract 不兼容重置（`WTUE-ID-003`）和 unkeyed retention 请求（`WTUE-ID-004`）；当前只由 C++ Policy/Automation 使用。
 - Interop Schema 的无效 Schema/version/identifier（`WTUE-SCHEMA-001`）、UE 大小写语义重复/enum wire value 冲突（`WTUE-SCHEMA-002`）、未知/递归类型与非法 Command shape（`WTUE-SCHEMA-003`）、版本倒退/同版本漂移/Minor breaking evolution（`WTUE-SCHEMA-004`）；当前只由 C++/Editor Policy Automation 使用。
-- Resource Contract 的无效 logical ID/provenance/dependency（`WTUE-RES-001`）、residency/assignment（`WTUE-RES-002`）、层版本/IR compatibility（`WTUE-RES-003`）、Cook freshness（`WTUE-RES-004`）和重复/不一致 Manifest（`WTUE-RES-005`）；Unreal 与 relative/generated Texture、静态 Material 的 Importer/Hydration/View/Cook 已实际消费，动态 MID 复用相同 Material resource/residency，Route/Feedback 仍只到 Policy 或未接入边界。
+- Resource Contract 的无效 logical ID/provenance/dependency（`WTUE-RES-001`）、residency/assignment（`WTUE-RES-002`）、层版本/IR compatibility（`WTUE-RES-003`）、Cook freshness（`WTUE-RES-004`）和重复/不一致 Manifest（`WTUE-RES-005`）；Unreal 与 relative/generated Texture、静态 Material 的 Importer/Hydration/View/Cook 已实际消费，动态 MID 复用相同 Material resource/residency，Feedback Profile 已消费 SoundWave/SoundCue/MetaSound/Concurrency closure、Critical residency 与跨进程 Cook freshness；Document Route 分组加载仍未产品接入。
 
 第一次导入错误不会产生有效运行数据；已有资产重导入失败（包括 UI Source 缺失）保留上次成功运行数据并更新诊断。自动化覆盖 HTML/CSS 依赖、成功重导入的 Generation 推进和旧 Handle 失效、失败时 last-good 保留、随后恢复，以及恢复前后 FieldNotify 绑定连续性。
 
@@ -177,7 +179,7 @@ WTUE Document 使用自定义版本 GUID，当前版本 `StaticMaterialBrushes`�
 - 输入框、文本编辑、IME、表单语义。
 - 可见滚动条、基本拖拽、触摸滚动、惯性和虚拟列表。冻结的 MainMenu/HUD/ScrollableSettings 已由自动化审计确认未使用可见滚动条/拖拽/触摸/惯性/水平溢出，因此 M2.8 的对应 `P0.5-if-used` 为有证据的 `N/A`；ScrollableSettings 只使用既有纵向滚轮路径。
 - CommonUI 深度组件/Action Router 集成和无障碍适配器；当前只承诺宿主边界协作与内部语义引用接口。
-- UI Feedback Cue 的作者声明/语义默认、Compiled UI/Behavior Op、事件到 Cue 的自动映射、Profile、Sound/MetaSound 资源、预取/Cook、限频/去重、Inspector Trace 和真实播放证据；基础 Request、Router 注入、Screen Scope、Generation 拒绝与通用 C++ Post-Commit Effect 已支持。
+- UI Feedback Cue 的作者声明/语义默认、Compiled UI/Behavior Op、事件到 Cue 的自动映射、Inspector UI、扬声器实际出声与声学延迟证据；版本化 Profile、SoundWave/SoundCue/MetaSound/Concurrency 资源、Critical async 预取/Cook、限频/去重、用户设置、有界 Trace、Screen 2D/World policy、默认 UE backend 与项目 backend 已支持。
 - Material Parameter 的 HTML/CSS/TS 作者声明、Compiled Behavior/Animation Op、字符串/反射写入、Texture 参数、插值/Transition/Track、Material `Time` 的 WTUE Clock 保证，以及 PSO/Shader Compile、GPU 成本和大型资源页性能；当前只支持 C++ typed Scalar/Vector transaction submission 与 View-owned MID。
 - World Surface Host、WidgetComponent/RT、3D Feedback Scope、世界输入与独立性能门；当前冻结 Corpus 的裁决是有证据的 `N/A`，不是产品支持。
 - Native Component 的 UI Source 声明、Compiler lowering、Compiled IR、Runtime Tree/Host 实例化和真实专用组件；当前只有实验性 C++ Registry/Factory/Instance 合同。
