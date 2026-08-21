@@ -10,6 +10,7 @@
 
 #include "DynamicRHI.h"
 #include "Engine/Engine.h"
+#include "Engine/Texture2D.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
@@ -1069,6 +1070,31 @@ void FWebToUEBenchmarkRunner::Finish()
 		MeasurementWorkload = PerformanceCapture->GetSnapshot();
 	}
 	const bool bSecondViewEvidence = CaptureSecondViewEvidence();
+	const bool bResourceSmoke = Corpus == TEXT("ResourceTextureSmoke");
+	bool bResourceIdentityValid = !bResourceSmoke;
+	const FWebToUECompiledResource* SmokeResource = nullptr;
+	if (bResourceSmoke && BenchmarkDocument.IsValid() &&
+		BenchmarkDocument->GetResourceManifest().Num() == 1)
+	{
+		SmokeResource = &BenchmarkDocument->GetResourceManifest()[0];
+		const UTexture2D* Texture = Cast<UTexture2D>(
+			SmokeResource->Path.ResolveObject());
+		bResourceIdentityValid =
+			SmokeResource->Kind == EWebToUEResourceKind::Texture &&
+			SmokeResource->ResourceId.StartsWith(TEXT("resource/texture/")) &&
+			SmokeResource->Path.ToString().StartsWith(
+				TEXT("/Game/WebToUEGenerated/Textures/T_")) &&
+			SmokeResource->Provenance.Origin ==
+				EWebToUEResourceOrigin::RelativeSource &&
+			SmokeResource->Provenance.AuthorReference ==
+				TEXT("ResourceTextureSmoke.png") &&
+			SmokeResource->Provenance.ResolvedDependencyId.StartsWith(
+				TEXT("generated:textures/")) &&
+			SmokeResource->IntrinsicSize.X > 0.0f &&
+			SmokeResource->IntrinsicSize.Y > 0.0f && Texture &&
+			SmokeResource->IntrinsicSize == FVector2f(
+				Texture->GetImportedSize().X, Texture->GetImportedSize().Y);
+	}
 	const bool bHasWebToUERuntimeWork = Mode != TEXT("WebToUE") ||
 		(CompiledNodeCount > 0 &&
 			SetupWorkload.GetCounter(EWebToUEPerformanceCounter::HydratedNodes) ==
@@ -1076,7 +1102,6 @@ void FWebToUEBenchmarkRunner::Finish()
 			WarmupWorkload.GetCounter(EWebToUEPerformanceCounter::DisplayListBuilds) > 0 &&
 			MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::PaintDrawElements) > 0);
 	bool bHasTrajectoryEvidence = TrajectoryStep > 0;
-	const bool bResourceSmoke = Corpus == TEXT("ResourceTextureSmoke");
 	if (bResourceSmoke)
 	{
 		bHasTrajectoryEvidence = TrajectoryStep > 0;
@@ -1203,7 +1228,7 @@ void FWebToUEBenchmarkRunner::Finish()
 	const bool bSuccess = Samples.Num() == RequestedSamples && bScreenshotExists &&
 		bHasRendererEvidence && bHasInputToDisplay && bHasWebToUERuntimeWork &&
 		bHasTrajectoryEvidence && bSecondViewEvidence && bColdAttributionComplete &&
-		bProductPolicyPass;
+		bProductPolicyPass && bResourceIdentityValid;
 
 	FString Csv(TEXT("frame,gt_ms,rt_ms,gpu_ms,ui_draw_elements,window_slate_batches,"
 		"window_slate_vertices,window_slate_indices,ui_geometric_overdraw_ratio,"
@@ -1270,6 +1295,31 @@ void FWebToUEBenchmarkRunner::Finish()
 	DocumentContract->SetNumberField(TEXT("root_node_index"), CompiledRootNodeIndex);
 	DocumentContract->SetBoolField(TEXT("root_node_valid"), Mode != TEXT("WebToUE") ||
 		(CompiledRootNodeIndex >= 0 && CompiledRootNodeIndex < CompiledNodeCount));
+	if (bResourceSmoke)
+	{
+		TSharedRef<FJsonObject> TextureResource = MakeShared<FJsonObject>();
+		TextureResource->SetBoolField(TEXT("evaluated"), true);
+		TextureResource->SetBoolField(TEXT("passed"), bResourceIdentityValid);
+		if (SmokeResource)
+		{
+			TextureResource->SetStringField(TEXT("resource_id"),
+				SmokeResource->ResourceId);
+			TextureResource->SetStringField(TEXT("path"),
+				SmokeResource->Path.ToString());
+			TextureResource->SetStringField(TEXT("origin"),
+				StaticEnum<EWebToUEResourceOrigin>()->GetNameStringByValue(
+					static_cast<int64>(SmokeResource->Provenance.Origin)));
+			TextureResource->SetStringField(TEXT("author_reference"),
+				SmokeResource->Provenance.AuthorReference);
+			TextureResource->SetStringField(TEXT("resolved_dependency_id"),
+				SmokeResource->Provenance.ResolvedDependencyId);
+			TextureResource->SetNumberField(TEXT("intrinsic_width"),
+				SmokeResource->IntrinsicSize.X);
+			TextureResource->SetNumberField(TEXT("intrinsic_height"),
+				SmokeResource->IntrinsicSize.Y);
+		}
+		DocumentContract->SetObjectField(TEXT("texture_resource"), TextureResource);
+	}
 	Root->SetObjectField(TEXT("compiled_document"), DocumentContract);
 	Root->SetObjectField(TEXT("setup_workload"), WorkloadObject(SetupWorkload));
 	Root->SetObjectField(TEXT("warmup_workload"), WorkloadObject(WarmupWorkload));

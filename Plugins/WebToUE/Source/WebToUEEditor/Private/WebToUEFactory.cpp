@@ -112,6 +112,12 @@ namespace WebToUE::ResourceImport::Private
 		return IsCanonicalBlake3(OutStableHash);
 	}
 
+	static FVector2f GetTextureIntrinsicSize(const UTexture2D& Texture)
+	{
+		const FIntPoint ImportedSize = Texture.GetImportedSize();
+		return FVector2f(ImportedSize.X, ImportedSize.Y);
+	}
+
 	static bool IsSupportedRelativeTextureExtension(const FString& Filename)
 	{
 		static const TSet<FString> Supported = {
@@ -204,8 +210,7 @@ namespace WebToUE::ResourceImport::Private
 			OutResolved.ResourceId = TEXT("resource/texture/") + HashUtf8(OutIdentity);
 			OutResolved.Provenance = { EWebToUEResourceOrigin::UnrealAsset,
 				SourceUnit, Reference, MakeAssetDependencyId(OutResolved.Path) };
-			OutResolved.IntrinsicSize = FVector2f(
-				Texture->GetSizeX(), Texture->GetSizeY());
+			OutResolved.IntrinsicSize = GetTextureIntrinsicSize(*Texture);
 			return true;
 		}
 
@@ -226,8 +231,7 @@ namespace WebToUE::ResourceImport::Private
 			OutResolved.ResourceId = TEXT("resource/texture/") + HashUtf8(OutIdentity);
 			OutResolved.Provenance = { EWebToUEResourceOrigin::Generated,
 				SourceUnit, OutIdentity, OutIdentity };
-			OutResolved.IntrinsicSize = FVector2f(
-				Texture->GetSizeX(), Texture->GetSizeY());
+			OutResolved.IntrinsicSize = GetTextureIntrinsicSize(*Texture);
 			return true;
 		}
 
@@ -251,8 +255,7 @@ namespace WebToUE::ResourceImport::Private
 		OutResolved.ResourceId = TEXT("resource/texture/") + HashUtf8(GeneratedId);
 		OutResolved.Provenance = { EWebToUEResourceOrigin::RelativeSource,
 			SourceUnit, CanonicalReference, GeneratedId };
-		OutResolved.IntrinsicSize = FVector2f(
-			Texture->GetSizeX(), Texture->GetSizeY());
+		OutResolved.IntrinsicSize = GetTextureIntrinsicSize(*Texture);
 		return true;
 	}
 

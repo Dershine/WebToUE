@@ -378,8 +378,9 @@ bool FWebToUEResourceIntrinsicSizeTest::RunTest(const FString& Parameters)
 		LoadObject<UTexture2D>(nullptr, *ResidentPath.ToString());
 	TestNotNull(TEXT("The intrinsic-size resident fixture loads"), ResidentTexture);
 	if (!ResidentTexture) return false;
+	const FIntPoint ResidentImportedSize = ResidentTexture->GetImportedSize();
 	const FVector2f ResidentSize(
-		ResidentTexture->GetSizeX(), ResidentTexture->GetSizeY());
+		ResidentImportedSize.X, ResidentImportedSize.Y);
 	UWebToUEDocument* ResidentDocument = MakeImageDocument(ResidentPath,
 		ResidentSize, EWebToUEResidencyClass::Critical,
 		TEXT("document/intrinsic-resident"));

@@ -54,6 +54,20 @@ function Test-ResourceSmokeResult {
     if ([int]$result.compiled_document.compiled_resources -ne 1) {
         $failures.Add("Resource smoke does not contain exactly one compiled resource.")
     }
+    $texture = $result.compiled_document.texture_resource
+    if ($null -eq $texture -or -not [bool]$texture.evaluated -or
+        -not [bool]$texture.passed) {
+        $failures.Add("Packaged relative-texture identity contract failed.")
+    }
+    elseif ([string]$texture.origin -ne "RelativeSource" -or
+        [string]$texture.author_reference -ne "ResourceTextureSmoke.png" -or
+        -not ([string]$texture.resource_id).StartsWith("resource/texture/") -or
+        -not ([string]$texture.path).StartsWith("/Game/WebToUEGenerated/Textures/T_") -or
+        -not ([string]$texture.resolved_dependency_id).StartsWith("generated:textures/") -or
+        [double]$texture.intrinsic_width -le 0.0 -or
+        [double]$texture.intrinsic_height -le 0.0) {
+        $failures.Add("Packaged relative-texture metadata is incomplete or invalid.")
+    }
     if (-not [bool]$result.product_policy.evaluated -or
         -not [bool]$result.product_policy.passed) {
         $failures.Add("Embedded resource smoke policy failed.")
@@ -101,13 +115,20 @@ function Test-ResourceSmokeResult {
     }
 
     return [ordered]@{
-        schema_version = 1
+        schema_version = 2
         success = ($failures.Count -eq 0)
         configuration = $ExpectedConfiguration
         generated_utc = [DateTime]::UtcNow.ToString("o")
         result = $resultPath
         screenshot = [string]$result.screenshot
         compiled_resources = [int]$result.compiled_document.compiled_resources
+        texture_resource_id = [string]$texture.resource_id
+        texture_path = [string]$texture.path
+        texture_origin = [string]$texture.origin
+        texture_author_reference = [string]$texture.author_reference
+        texture_resolved_dependency_id = [string]$texture.resolved_dependency_id
+        texture_intrinsic_width = [double]$texture.intrinsic_width
+        texture_intrinsic_height = [double]$texture.intrinsic_height
         primary_resource_consumptions = $primaryConsumptions
         primary_async_requests =
             (Get-Counter $setup "resource_async_requests") +

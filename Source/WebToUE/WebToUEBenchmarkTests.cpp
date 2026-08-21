@@ -14,6 +14,8 @@
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
+#include "Engine/Texture2D.h"
+#include "Hash/Blake3.h"
 #include "Input/HittestGrid.h"
 #include "Misc/AutomationTest.h"
 #include "Rendering/DrawElements.h"
@@ -272,6 +274,19 @@ bool FWebToUEBenchmarkCorpusSlateOutputTest::RunTest(const FString& Parameters)
 
 bool FWebToUEResourceTextureSmokeContractTest::RunTest(const FString& Parameters)
 {
+	const auto HashUtf8 = [](const FString& Value)
+	{
+		const FTCHARToUTF8 Utf8(*Value);
+		return LexToString(FBlake3::HashBuffer(Utf8.Get(), Utf8.Length())).ToLower();
+	};
+	const FString StableHash =
+		HashUtf8(TEXT("source/WebUI/Examples/ResourceTextureSmoke.png"));
+	const FString GeneratedId = TEXT("generated:textures/") + StableHash;
+	const FString GeneratedObject = FString::Printf(
+		TEXT("/Game/WebToUEGenerated/Textures/T_%s.T_%s"),
+		*StableHash, *StableHash);
+	const FString ExpectedResourceId =
+		TEXT("resource/texture/") + HashUtf8(GeneratedId);
 	UWebToUEDocument* Document = LoadObject<UWebToUEDocument>(nullptr,
 		TEXT("/Game/WebToUEExamples/ResourceTextureSmoke.ResourceTextureSmoke"));
 	if (!TestNotNull(TEXT("The packaged resource smoke document loads"), Document))
@@ -287,13 +302,19 @@ bool FWebToUEResourceTextureSmokeContractTest::RunTest(const FString& Parameters
 	const FWebToUECompiledResource& Resource = Document->GetResourceManifest()[0];
 	TestEqual(TEXT("The fixture compiles an Unreal texture"), Resource.Kind,
 		EWebToUEResourceKind::Texture);
-	TestEqual(TEXT("The fixture retains its exact Engine asset path"),
-		Resource.Path.ToString(),
-		FString(TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture")));
-	TestTrue(TEXT("The fixture owns a deterministic ResourceId"),
-		!Resource.ResourceId.IsEmpty());
-	TestEqual(TEXT("The fixture records Unreal Asset provenance"),
-		Resource.Provenance.Origin, EWebToUEResourceOrigin::UnrealAsset);
+	TestEqual(TEXT("The fixture resolves to its stable generated asset path"),
+		Resource.Path.ToString(), GeneratedObject);
+	TestEqual(TEXT("The fixture owns a source-path-stable ResourceId"),
+		Resource.ResourceId, ExpectedResourceId);
+	TestEqual(TEXT("The fixture records RelativeSource provenance"),
+		Resource.Provenance.Origin, EWebToUEResourceOrigin::RelativeSource);
+	TestEqual(TEXT("The fixture preserves its canonical author reference"),
+		Resource.Provenance.AuthorReference,
+		FString(TEXT("ResourceTextureSmoke.png")));
+	TestEqual(TEXT("The fixture seals its generated dependency identity"),
+		Resource.Provenance.ResolvedDependencyId, GeneratedId);
+	TestTrue(TEXT("The fixture seals a positive intrinsic pixel size"),
+		Resource.IntrinsicSize.X > 0.0f && Resource.IntrinsicSize.Y > 0.0f);
 	TestEqual(TEXT("Default image residency is Visible"), Resource.Residency,
 		EWebToUEResidencyClass::Visible);
 	TArray<FWebToUEResourceContractDiagnostic> Diagnostics;
@@ -311,8 +332,19 @@ bool FWebToUEResourceTextureSmokeContractTest::RunTest(const FString& Parameters
 			ImageNode->ResourceId, Resource.ResourceId);
 	}
 
-	TestNotNull(TEXT("The test makes the Engine texture resident before View creation"),
-		LoadObject<UObject>(nullptr, *Resource.Path.ToString()));
+	UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Resource.Path.ToString());
+	TestNotNull(TEXT("The test makes the generated texture resident before View creation"),
+		Texture);
+	if (Texture)
+	{
+		const FIntPoint ImportedSize = Texture->GetImportedSize();
+		const FVector2f RuntimeSize(ImportedSize.X, ImportedSize.Y);
+		TestTrue(*FString::Printf(
+			TEXT("Generated imported dimensions match the sealed contract (imported %.0fx%.0f, sealed %.0fx%.0f)"),
+			RuntimeSize.X, RuntimeSize.Y,
+			Resource.IntrinsicSize.X, Resource.IntrinsicSize.Y),
+			RuntimeSize == Resource.IntrinsicSize);
+	}
 	FWebToUEPerformanceCapture Capture;
 	UWebToUEView* View = NewObject<UWebToUEView>(GetTransientPackage());
 	View->SetDocument(Document);
@@ -329,9 +361,9 @@ bool FWebToUEResourceTextureSmokeContractTest::RunTest(const FString& Parameters
 		FWidgetStyle(), true);
 	const FWebToUEPerformanceSnapshot Workload = Capture.GetSnapshot();
 	FWebToUENode* RuntimeImage =
-		View->FindRuntimeNodeByIdForTesting(TEXT("engine-texture"));
+		View->FindRuntimeNodeByIdForTesting(TEXT("relative-texture"));
 	TestNotNull(TEXT("The fixture hydrates its image node"), RuntimeImage);
-	TestEqual(TEXT("The View consumes one resident Engine texture"),
+	TestEqual(TEXT("The View consumes one resident generated texture"),
 		Workload.GetCounter(EWebToUEPerformanceCounter::ResourceCacheHits), uint64(1));
 	TestTrue(TEXT("The Visible texture materializes a Slate brush"),
 		Workload.GetCounter(EWebToUEPerformanceCounter::BrushBuilds) > 0);

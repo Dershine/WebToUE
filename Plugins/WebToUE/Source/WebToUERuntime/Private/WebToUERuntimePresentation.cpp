@@ -349,8 +349,8 @@ namespace WebToUE::Runtime::Presentation::Private
 			return true;
 		}
 		const UTexture2D* Texture = CastChecked<UTexture2D>(Object);
-		return Resource.IntrinsicSize == FVector2f(
-			Texture->GetSizeX(), Texture->GetSizeY());
+		const FIntPoint ImportedSize = Texture->GetImportedSize();
+		return Resource.IntrinsicSize == FVector2f(ImportedSize.X, ImportedSize.Y);
 	}
 }
 
@@ -1608,7 +1608,7 @@ void FWebToUERuntimePresentation::RebuildBrush(FWebToUENode& Node) const
 				Manifest[Handle].IntrinsicSize.X > 0.0f &&
 				Manifest[Handle].IntrinsicSize.Y > 0.0f
 				? Manifest[Handle].IntrinsicSize
-				: FVector2f(Texture->GetSizeX(), Texture->GetSizeY());
+				: FVector2f(Texture->GetImportedSize().X, Texture->GetImportedSize().Y);
 			Brushes.Add(NodeHandle, MoveTemp(Brush));
 		}
 	}
