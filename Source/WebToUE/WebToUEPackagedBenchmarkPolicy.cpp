@@ -130,5 +130,25 @@ bool FWebToUEPackagedBenchmarkPolicy::ValidateResourceSmokeEvidence(
 		Evidence.SecondViewResourceCancellations == 0,
 		TEXT("resource smoke second view did not retain a clean resource state"),
 		OutFailures);
+	if (Evidence.bDynamicMaterialParameterSmoke)
+	{
+		Require(Evidence.WarmupMaterialParameterLookups == 1 &&
+			Evidence.WarmupMaterialParameterEvaluations == 1 &&
+			Evidence.WarmupMaterialInstancesCreated == 1,
+			TEXT("dynamic Material smoke did not create exactly one primary MID"),
+			OutFailures);
+		Require(Evidence.MeasurementMaterialParameterLookups == 1 &&
+			Evidence.MeasurementMaterialParameterEvaluations == 1 &&
+			Evidence.MeasurementMaterialInstancesReused == 1,
+			TEXT("dynamic Material smoke did not perform one K=1 MID update"),
+			OutFailures);
+		Require(Evidence.MeasurementMaterialBrushPatches == 1 &&
+			Evidence.MeasurementDisplayCommandsPatched == 1,
+			TEXT("dynamic Material smoke did not patch only the affected brush/display command"),
+			OutFailures);
+		Require(Evidence.SecondViewMaterialInstancesCreated == 1,
+			TEXT("dynamic Material smoke second View did not create an isolated MID"),
+			OutFailures);
+	}
 	return OutFailures.IsEmpty();
 }

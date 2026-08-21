@@ -33,6 +33,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEStaticMaterialLifecycleTest,
 	"WebToUE.Runtime.StaticMaterialLifecycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEDynamicMaterialParameterLifecycleTest,
+	"WebToUE.Runtime.DynamicMaterialParameterLifecycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace WebToUE::ResourceLifecycle::Tests
 {
 	static void AddAttribute(FWebToUECompiledNode& Node, const TCHAR* Name, const TCHAR* Value)
@@ -404,6 +408,210 @@ bool FWebToUEStaticMaterialLifecycleTest::RunTest(const FString& Parameters)
 		MaterialCancellationSnapshot.GetCounter(
 			EWebToUEPerformanceCounter::ResourceCancellations),
 		uint64(1));
+	return true;
+}
+
+bool FWebToUEDynamicMaterialParameterLifecycleTest::RunTest(
+	const FString& Parameters)
+{
+	using namespace WebToUE::ResourceLifecycle::Tests;
+	const FSoftObjectPath MaterialPath(
+		TEXT("/Game/WebToUEExamples/Materials/M_WTUE_DynamicMaterialBrush.M_WTUE_DynamicMaterialBrush"));
+	UMaterialInterface* Material = LoadObject<UMaterialInterface>(
+		nullptr, *MaterialPath.ToString());
+	if (!TestNotNull(TEXT("The dynamic Material fixture is resident"), Material))
+	{
+		return false;
+	}
+
+	UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
+	FWebToUECompiledDocumentData CompiledDocument;
+	CompiledDocument.RootNodeIndex = 0;
+	FWebToUECompiledNode& Root = CompiledDocument.Nodes.AddDefaulted_GetRef();
+	Root.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	Root.Tag = TEXT("body");
+	FWebToUECompiledNode& Node = CompiledDocument.Nodes.AddDefaulted_GetRef();
+	Node.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	Node.Tag = TEXT("div");
+	Node.ParentIndex = 0;
+	AddAttribute(Node, TEXT("id"), TEXT("dynamic-material"));
+	AddAttribute(Node, TEXT("data-ue-material"), *MaterialPath.ToString());
+	AddInlineDeclaration(Node, TEXT("width"), TEXT("160px"));
+	AddInlineDeclaration(Node, TEXT("height"), TEXT("90px"));
+	FWebToUECompiledResource& Resource =
+		CompiledDocument.ResourceManifest.AddDefaulted_GetRef();
+	Resource.Kind = EWebToUEResourceKind::Material;
+	Resource.Path = MaterialPath;
+	Resource.Residency = EWebToUEResidencyClass::Critical;
+	Resource.BrushImageSize = FVector2f(1.0f, 1.0f);
+	WebToUE::Tests::SealResourceContractForTesting(
+		CompiledDocument, TEXT("document/dynamic-material"), 2);
+	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
+
+	const TSharedRef<SWebToUEView> View = SNew(SWebToUEView);
+	View->SetDocument(Document);
+	View->LayoutForTesting(FVector2f(640.0f, 360.0f));
+	PaintView(View);
+	FWebToUENode* RuntimeNode =
+		View->FindRuntimeNodeByIdForTesting(TEXT("dynamic-material"));
+	if (!TestNotNull(TEXT("The dynamic Material node hydrates"), RuntimeNode))
+	{
+		return false;
+	}
+	FWebToUEMaterialParameterSubmission Submission;
+	Submission.Target = View->GetInstanceHandleForTesting(*RuntimeNode);
+	Submission.Address = FWebToUEPropertyAddress::Material(
+		TEXT("Tint"), EWebToUEMaterialParameterType::Vector);
+	Submission.Value = FWebToUEMaterialParameterValue::MakeVector(
+		FLinearColor(1.0f, 0.05f, 0.1f, 1.0f));
+	TestEqual(TEXT("A static node creates no MID before a parameter diverges"),
+		View->GetDynamicMaterialCountForTesting(), 0);
+	FWebToUEPerformanceSnapshot FirstParameterSnapshot;
+	FWebToUEMaterialParameterSubmitOutcome Outcome;
+	{
+		FWebToUEPerformanceCapture Capture;
+		Outcome = View->SubmitMaterialParameter(Submission);
+		FirstParameterSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("A canonical Vector parameter commits"), Outcome.Result,
+		EWebToUEMaterialParameterSubmitResult::Committed);
+	TestEqual(TEXT("The first divergent node creates exactly one View-owned MID"),
+		View->GetDynamicMaterialCountForTesting(), 1);
+	UMaterialInstanceDynamic* FirstMid =
+		View->GetDynamicMaterialForTesting(Submission.Target);
+	TestNotNull(TEXT("The divergent node resolves its MID"), FirstMid);
+	if (!FirstMid)
+	{
+		return false;
+	}
+	TestEqual(TEXT("The MID receives the typed Vector value"),
+		FirstMid->K2_GetVectorParameterValue(TEXT("Tint")), Submission.Value.Vector);
+	TestEqual(TEXT("K=1 validates one typed parameter"),
+		FirstParameterSnapshot.GetCounter(
+			EWebToUEPerformanceCounter::MaterialParameterLookups), uint64(1));
+	TestEqual(TEXT("K=1 evaluates one typed parameter"),
+		FirstParameterSnapshot.GetCounter(
+			EWebToUEPerformanceCounter::MaterialParameterEvaluations), uint64(1));
+	TestEqual(TEXT("K=1 creates one MID"),
+		FirstParameterSnapshot.GetCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesCreated), uint64(1));
+	TestEqual(TEXT("K=1 patches one Material brush"),
+		FirstParameterSnapshot.GetCounter(
+			EWebToUEPerformanceCounter::MaterialBrushPatches), uint64(1));
+	TestEqual(TEXT("K=1 patches only the affected Display command"),
+		FirstParameterSnapshot.GetCounter(
+			EWebToUEPerformanceCounter::DisplayCommandsPatched), uint64(1));
+	TestEqual(TEXT("A parameter write performs no synchronous resource load"),
+		FirstParameterSnapshot.GetCounter(
+			EWebToUEPerformanceCounter::ResourceLoadAttempts), uint64(0));
+	TestEqual(TEXT("A parameter write performs no asynchronous resource request"),
+		FirstParameterSnapshot.GetCounter(
+			EWebToUEPerformanceCounter::ResourceAsyncRequests), uint64(0));
+
+	FWebToUEPerformanceSnapshot UnchangedSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		Outcome = View->SubmitMaterialParameter(Submission);
+		UnchangedSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("An identical typed value is unchanged"), Outcome.Result,
+		EWebToUEMaterialParameterSubmitResult::Unchanged);
+	TestEqual(TEXT("An unchanged value creates no MID"),
+		UnchangedSnapshot.GetCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesCreated), uint64(0));
+	TestEqual(TEXT("An unchanged value patches no brush"),
+		UnchangedSnapshot.GetCounter(
+			EWebToUEPerformanceCounter::MaterialBrushPatches), uint64(0));
+
+	FWebToUEMaterialParameterSubmission ScalarSubmission;
+	ScalarSubmission.Target = Submission.Target;
+	ScalarSubmission.Address = FWebToUEPropertyAddress::Material(
+		TEXT("Strength"), EWebToUEMaterialParameterType::Scalar);
+	ScalarSubmission.Value = FWebToUEMaterialParameterValue::MakeScalar(0.5f);
+	FWebToUEPerformanceSnapshot ReuseSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		Outcome = View->SubmitMaterialParameter(ScalarSubmission);
+		ReuseSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("A second typed address commits"), Outcome.Result,
+		EWebToUEMaterialParameterSubmitResult::Committed);
+	TestEqual(TEXT("The second address reuses the node MID"),
+		View->GetDynamicMaterialForTesting(Submission.Target), FirstMid);
+	TestEqual(TEXT("The second address records one MID reuse"),
+		ReuseSnapshot.GetCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesReused), uint64(1));
+	TestEqual(TEXT("The MID receives the typed Scalar value"),
+		FirstMid->K2_GetScalarParameterValue(TEXT("Strength")), 0.5f);
+
+	FWebToUEMaterialParameterSubmission InvalidSubmission = ScalarSubmission;
+	InvalidSubmission.Address = FWebToUEPropertyAddress::Material(
+		TEXT("Missing"), EWebToUEMaterialParameterType::Scalar);
+	Outcome = View->SubmitMaterialParameter(InvalidSubmission);
+	TestEqual(TEXT("Unknown parameters fail closed"), Outcome.Result,
+		EWebToUEMaterialParameterSubmitResult::RejectedParameter);
+	InvalidSubmission.Address = FWebToUEPropertyAddress::Material(
+		TEXT("Tint"), EWebToUEMaterialParameterType::Texture);
+	InvalidSubmission.Value.Type = EWebToUEMaterialParameterType::Texture;
+	Outcome = View->SubmitMaterialParameter(InvalidSubmission);
+	TestEqual(TEXT("Texture parameter writes are outside the M4.3b contract"),
+		Outcome.Result,
+		EWebToUEMaterialParameterSubmitResult::RejectedInvalidAddress);
+
+	FWebToUEMaterialParameterSubmission ConflictSubmission = Submission;
+	ConflictSubmission.DurableOwner = EWebToUEPropertyWriter::Behavior;
+	ConflictSubmission.Value = FWebToUEMaterialParameterValue::MakeVector(
+		FLinearColor(0.1f, 1.0f, 0.1f, 1.0f));
+	Outcome = View->SubmitMaterialParameter(ConflictSubmission);
+	TestEqual(TEXT("Binding and Behavior cannot claim the same durable address"),
+		Outcome.Result, EWebToUEMaterialParameterSubmitResult::RejectedOwnership);
+
+	const TSharedRef<SWebToUEView> SecondView = SNew(SWebToUEView);
+	SecondView->SetDocument(Document);
+	SecondView->LayoutForTesting(FVector2f(640.0f, 360.0f));
+	FWebToUENode* SecondNode =
+		SecondView->FindRuntimeNodeByIdForTesting(TEXT("dynamic-material"));
+	TestNotNull(TEXT("The second View hydrates an isolated node"), SecondNode);
+	if (!SecondNode)
+	{
+		return false;
+	}
+	FWebToUEMaterialParameterSubmission SecondSubmission = Submission;
+	SecondSubmission.Target = SecondView->GetInstanceHandleForTesting(*SecondNode);
+	SecondSubmission.Value = FWebToUEMaterialParameterValue::MakeVector(
+		FLinearColor(0.05f, 1.0f, 0.2f, 1.0f));
+	Outcome = SecondView->SubmitMaterialParameter(SecondSubmission);
+	TestEqual(TEXT("The second View commits its own parameter state"), Outcome.Result,
+		EWebToUEMaterialParameterSubmitResult::Committed);
+	TestNotEqual(TEXT("Views never share a MID"),
+		SecondView->GetDynamicMaterialForTesting(SecondSubmission.Target), FirstMid);
+	const int32 FirstResourceHandle = View->FindPresentationResourceHandleForTesting(
+		EWebToUEResourceKind::Material, MaterialPath);
+	const int32 SecondResourceHandle = SecondView->FindPresentationResourceHandleForTesting(
+		EWebToUEResourceKind::Material, MaterialPath);
+	TestEqual(TEXT("Views still share the sealed parent Material resource"),
+		SecondView->GetPresentationResourceObjectForTesting(SecondResourceHandle),
+		View->GetPresentationResourceObjectForTesting(FirstResourceHandle));
+
+	TWeakObjectPtr<UMaterialInstanceDynamic> WeakFirstMid(FirstMid);
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	TestTrue(TEXT("The View strongly owns its MID across GC"), WeakFirstMid.IsValid());
+	FWebToUEPerformanceSnapshot ResetSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		View->SetDocument(nullptr);
+		ResetSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("View reset releases one MID ownership slot"),
+		ResetSnapshot.GetCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesReleased), uint64(1));
+	TestEqual(TEXT("View reset removes every MID slot"),
+		View->GetDynamicMaterialCountForTesting(), 0);
+	Outcome = View->SubmitMaterialParameter(Submission);
+	TestEqual(TEXT("The old-generation handle is rejected after reset"), Outcome.Result,
+		EWebToUEMaterialParameterSubmitResult::RejectedInvalidTarget);
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	TestFalse(TEXT("The released MID becomes collectible"), WeakFirstMid.IsValid());
 	return true;
 }
 

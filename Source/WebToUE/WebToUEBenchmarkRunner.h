@@ -90,6 +90,9 @@ private:
 	int32 MeasurementTrajectorySteps = 0;
 	bool bUmgTrajectoryEffectObserved = false;
 	bool bSecondViewCreated = false;
+	bool bDynamicMaterialWarmupApplied = false;
+	bool bDynamicMaterialMeasurementApplied = false;
+	bool bDynamicMaterialSecondViewApplied = false;
 	int32 ScreenshotWaitFrames = 0;
 	EPhase Phase = EPhase::WaitingForViewport;
 	uint64 UiSetupCycles = 0;

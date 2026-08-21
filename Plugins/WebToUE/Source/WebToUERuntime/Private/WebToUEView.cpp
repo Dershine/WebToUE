@@ -92,6 +92,22 @@ bool UWebToUEView::RequestLazyResource(const FString& ResourceId)
 	return SlateView && SlateView->RequestLazyResource(ResourceId);
 }
 
+FWebToUEMaterialParameterSubmitOutcome UWebToUEView::SubmitMaterialParameter(
+	const FWebToUEMaterialParameterSubmission& Submission)
+{
+	if (!SlateView)
+	{
+		return { EWebToUEMaterialParameterSubmitResult::RejectedInactive,
+			TEXT("WTUE-MAT-004: the Runtime View is inactive.") };
+	}
+	return SlateView->SubmitMaterialParameter(Submission);
+}
+
+FWebToUEInstanceHandle UWebToUEView::FindElementById(const FString& Id) const
+{
+	return SlateView ? SlateView->FindElementById(Id) : FWebToUEInstanceHandle{};
+}
+
 void UWebToUEView::RefreshBindings()
 {
 	if (SlateView) SlateView->RefreshBindings(DataContext);

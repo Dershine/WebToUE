@@ -44,7 +44,17 @@ struct WEBTOUECORE_API FWebToUEPropertyAddress
 
 	bool IsValid() const;
 	FString ToString() const;
+
+	friend bool operator==(const FWebToUEPropertyAddress& A,
+		const FWebToUEPropertyAddress& B)
+	{
+		return A.Kind == B.Kind && A.CssProperty == B.CssProperty &&
+			A.MaterialParameter == B.MaterialParameter &&
+			A.MaterialParameterType == B.MaterialParameterType;
+	}
 };
+
+WEBTOUECORE_API uint32 GetTypeHash(const FWebToUEPropertyAddress& Address);
 
 /** Writer domains, not individual writes or animation tracks. */
 enum class EWebToUEPropertyWriter : uint8

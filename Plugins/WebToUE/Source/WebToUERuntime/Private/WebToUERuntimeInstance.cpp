@@ -142,6 +142,13 @@ uint64 FWebToUERuntimeInstance::GetKnownOwnedBytesForTesting() const
 	Bytes += RuntimeDocument->RuntimeNodesBySlot.GetAllocatedSize();
 	Bytes += RuntimeDocument->PseudoInvalidationDependencies.GetAllocatedSize();
 	Bytes += ResourceManifest.GetAllocatedSize();
+	Bytes += MaterialParameterStates.GetAllocatedSize();
+	for (const TPair<FWebToUEInstanceHandle,
+		TMap<FWebToUEPropertyAddress, FWebToUEMaterialParameterRuntimeState>>& Pair :
+		MaterialParameterStates)
+	{
+		Bytes += Pair.Value.GetAllocatedSize();
+	}
 	Bytes += GetSelectorIndexOwnedBytes(RuntimeDocument->SelectorIndex);
 	Bytes += GetSelectorTargetIndexOwnedBytes(RuntimeDocument->RuntimeSelectorTargets);
 
@@ -279,6 +286,41 @@ void FWebToUERuntimeInstance::Reset()
 	RuntimeDocument.Reset();
 	BindingOpsByField.Reset();
 	ResourceManifest.Reset();
+	MaterialParameterStates.Reset();
+}
+
+const FWebToUEMaterialParameterRuntimeState*
+FWebToUERuntimeInstance::FindMaterialParameterState(
+	FWebToUEInstanceHandle Target,
+	const FWebToUEPropertyAddress& Address) const
+{
+	const TMap<FWebToUEPropertyAddress, FWebToUEMaterialParameterRuntimeState>* States =
+		MaterialParameterStates.Find(Target);
+	return States ? States->Find(Address) : nullptr;
+}
+
+const TMap<FWebToUEPropertyAddress, FWebToUEMaterialParameterRuntimeState>*
+FWebToUERuntimeInstance::FindMaterialParameterStates(
+	FWebToUEInstanceHandle Target) const
+{
+	return MaterialParameterStates.Find(Target);
+}
+
+bool FWebToUERuntimeInstance::CommitMaterialParameterState(
+	FWebToUEInstanceHandle Target,
+	const FWebToUEPropertyAddress& Address,
+	const FWebToUEMaterialParameterValue& Value,
+	EWebToUEPropertyWriter DurableOwner)
+{
+	if (!ResolveNode(Target))
+	{
+		return false;
+	}
+	FWebToUEMaterialParameterRuntimeState& State =
+		MaterialParameterStates.FindOrAdd(Target).FindOrAdd(Address);
+	State.Value = Value;
+	State.DurableOwner = DurableOwner;
+	return true;
 }
 
 bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)

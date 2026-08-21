@@ -4,6 +4,7 @@
 #include "Components/Widget.h"
 #include "INotifyFieldValueChanged.h"
 #include "WebToUEIdentity.h"
+#include "WebToUEMaterialParameters.h"
 #include "WebToUESemantics.h"
 #include "WebToUEView.generated.h"
 
@@ -69,6 +70,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="WebToUE")
 	void SetRespectSafeZone(bool bInRespectSafeZone);
+
+	FWebToUEMaterialParameterSubmitOutcome SubmitMaterialParameter(
+		const FWebToUEMaterialParameterSubmission& Submission);
+	FWebToUEInstanceHandle FindElementById(const FString& Id) const;
 
 	void SetSession(TSharedPtr<FWebToUESession> InSession);
 	void ClearSession();

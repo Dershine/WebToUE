@@ -481,7 +481,8 @@ bool FWebToUEBenchmarkRunner::Tick(float DeltaSeconds)
 bool FWebToUEBenchmarkRunner::SetupUi()
 {
 	const bool bResourceSmoke = Corpus == TEXT("ResourceTextureSmoke") ||
-		Corpus == TEXT("ResourceMaterialSmoke");
+		Corpus == TEXT("ResourceMaterialSmoke") ||
+		Corpus == TEXT("ResourceMaterialParameterSmoke");
 	if ((Mode != TEXT("WebToUE") && Mode != TEXT("UMG")) ||
 		(Corpus != TEXT("MainMenu") && Corpus != TEXT("HUD") &&
 			Corpus != TEXT("ScrollableSettings") && !bResourceSmoke) ||
@@ -727,6 +728,26 @@ bool FWebToUEBenchmarkRunner::CaptureSecondViewEvidence()
 		SecondUiObject.Reset(View);
 		SecondDataContextObject.Reset(ViewModel);
 		SecondTargetWidget = SecondScreenHost->GetContentWidget();
+		if (Corpus == TEXT("ResourceMaterialParameterSmoke"))
+		{
+			FWebToUEMaterialParameterSubmission Submission;
+			Submission.Target = View->FindElementById(TEXT("dynamic-material"));
+			Submission.Address = FWebToUEPropertyAddress::Material(
+				TEXT("Tint"), EWebToUEMaterialParameterType::Vector);
+			Submission.Value = FWebToUEMaterialParameterValue::MakeVector(
+				FLinearColor(0.05f, 0.9f, 0.2f, 1.0f));
+			const FWebToUEMaterialParameterSubmitOutcome Outcome =
+				View->SubmitMaterialParameter(Submission);
+			bDynamicMaterialSecondViewApplied =
+				Outcome.Result == EWebToUEMaterialParameterSubmitResult::Committed;
+			if (!bDynamicMaterialSecondViewApplied)
+			{
+				UE_LOG(LogTemp, Error,
+					TEXT("WTUE_BENCHMARK_SECOND_VIEW dynamic Material submission failed: %s"),
+					*Outcome.Diagnostic);
+				return false;
+			}
+		}
 	}
 	else
 	{
@@ -749,7 +770,8 @@ bool FWebToUEBenchmarkRunner::CaptureSecondViewEvidence()
 	SecondTargetWidget->SlatePrepass(1.0f);
 	if (Mode == TEXT("WebToUE") &&
 		(Corpus == TEXT("ResourceTextureSmoke") ||
-		 Corpus == TEXT("ResourceMaterialSmoke")))
+		 Corpus == TEXT("ResourceMaterialSmoke") ||
+		 Corpus == TEXT("ResourceMaterialParameterSmoke")))
 	{
 		FHittestGrid HittestGrid;
 		FSlateWindowElementList DrawElements(nullptr);
@@ -843,6 +865,37 @@ void FWebToUEBenchmarkRunner::ApplyTrajectory()
 	PendingInputCycles = FPlatformTime::Cycles64();
 	PendingBackBufferInputCycles.Store(PendingInputCycles);
 	UEngine::SetInputSampleLatencyMarker(GFrameCounter);
+	if (Corpus == TEXT("ResourceMaterialParameterSmoke"))
+	{
+		bool& bApplied = Phase == EPhase::Measuring
+			? bDynamicMaterialMeasurementApplied
+			: bDynamicMaterialWarmupApplied;
+		if (!bApplied)
+		{
+			if (UWebToUEView* View = Cast<UWebToUEView>(PrimaryUiObject.Get()))
+			{
+				FWebToUEMaterialParameterSubmission Submission;
+				Submission.Target = View->FindElementById(TEXT("dynamic-material"));
+				Submission.Address = FWebToUEPropertyAddress::Material(
+					TEXT("Tint"), EWebToUEMaterialParameterType::Vector);
+				Submission.Value = FWebToUEMaterialParameterValue::MakeVector(
+					Phase == EPhase::Measuring
+						? FLinearColor(1.0f, 0.08f, 0.18f, 1.0f)
+						: FLinearColor(0.08f, 0.28f, 1.0f, 1.0f));
+				const FWebToUEMaterialParameterSubmitOutcome Outcome =
+					View->SubmitMaterialParameter(Submission);
+				bApplied = Outcome.Result ==
+					EWebToUEMaterialParameterSubmitResult::Committed;
+				if (!bApplied)
+				{
+					UE_LOG(LogTemp, Error,
+						TEXT("WTUE_BENCHMARK_TRAJECTORY dynamic Material submission failed: %s"),
+						*Outcome.Diagnostic);
+				}
+			}
+		}
+		return;
+	}
 	if (Corpus == TEXT("HUD"))
 	{
 		if (Mode == TEXT("WebToUE"))
@@ -1083,7 +1136,10 @@ void FWebToUEBenchmarkRunner::Finish()
 	}
 	const bool bSecondViewEvidence = CaptureSecondViewEvidence();
 	const bool bTextureResourceSmoke = Corpus == TEXT("ResourceTextureSmoke");
-	const bool bMaterialResourceSmoke = Corpus == TEXT("ResourceMaterialSmoke");
+	const bool bDynamicMaterialParameterSmoke =
+		Corpus == TEXT("ResourceMaterialParameterSmoke");
+	const bool bMaterialResourceSmoke = Corpus == TEXT("ResourceMaterialSmoke") ||
+		bDynamicMaterialParameterSmoke;
 	const bool bResourceSmoke = bTextureResourceSmoke || bMaterialResourceSmoke;
 	bool bResourceIdentityValid = !bResourceSmoke;
 	const FWebToUECompiledResource* SmokeResource = nullptr;
@@ -1113,8 +1169,12 @@ void FWebToUEBenchmarkRunner::Finish()
 		}
 		else
 		{
-			const FString ExpectedPath =
-				TEXT("/Game/WebToUEExamples/Materials/MI_WTUE_StaticMaterialBrush.MI_WTUE_StaticMaterialBrush");
+			const FString ExpectedPath = bDynamicMaterialParameterSmoke
+				? TEXT("/Game/WebToUEExamples/Materials/M_WTUE_DynamicMaterialBrush.M_WTUE_DynamicMaterialBrush")
+				: TEXT("/Game/WebToUEExamples/Materials/MI_WTUE_StaticMaterialBrush.MI_WTUE_StaticMaterialBrush");
+			const FString ExpectedDependency = bDynamicMaterialParameterSmoke
+				? TEXT("asset/Game/WebToUEExamples/Materials/M_WTUE_DynamicMaterialBrush")
+				: TEXT("asset/Game/WebToUEExamples/Materials/MI_WTUE_StaticMaterialBrush");
 			const UMaterialInterface* Material = Cast<UMaterialInterface>(
 				SmokeResource->Path.ResolveObject());
 			bResourceIdentityValid =
@@ -1126,7 +1186,7 @@ void FWebToUEBenchmarkRunner::Finish()
 					EWebToUEResourceOrigin::UnrealAsset &&
 				SmokeResource->Provenance.AuthorReference == ExpectedPath &&
 				SmokeResource->Provenance.ResolvedDependencyId ==
-					TEXT("asset/Game/WebToUEExamples/Materials/MI_WTUE_StaticMaterialBrush") &&
+					ExpectedDependency &&
 				SmokeResource->Residency == EWebToUEResidencyClass::Critical &&
 				SmokeResource->BrushImageSize.X > 0.0f &&
 				SmokeResource->BrushImageSize.Y > 0.0f && Material &&
@@ -1140,7 +1200,13 @@ void FWebToUEBenchmarkRunner::Finish()
 			WarmupWorkload.GetCounter(EWebToUEPerformanceCounter::DisplayListBuilds) > 0 &&
 			MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::PaintDrawElements) > 0);
 	bool bHasTrajectoryEvidence = TrajectoryStep > 0;
-	if (bResourceSmoke)
+	if (bDynamicMaterialParameterSmoke)
+	{
+		bHasTrajectoryEvidence = bDynamicMaterialWarmupApplied &&
+			bDynamicMaterialMeasurementApplied &&
+			bDynamicMaterialSecondViewApplied;
+	}
+	else if (bResourceSmoke)
 	{
 		bHasTrajectoryEvidence = TrajectoryStep > 0;
 	}
@@ -1237,6 +1303,26 @@ void FWebToUEBenchmarkRunner::Finish()
 			EWebToUEPerformanceCounter::ResourceFailures);
 		Evidence.SecondViewResourceCancellations = SecondViewWorkload.GetCounter(
 			EWebToUEPerformanceCounter::ResourceCancellations);
+		Evidence.bDynamicMaterialParameterSmoke = bDynamicMaterialParameterSmoke;
+		Evidence.WarmupMaterialParameterLookups = WarmupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::MaterialParameterLookups);
+		Evidence.WarmupMaterialParameterEvaluations = WarmupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::MaterialParameterEvaluations);
+		Evidence.WarmupMaterialInstancesCreated = WarmupWorkload.GetCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesCreated);
+		Evidence.MeasurementMaterialParameterLookups = MeasurementWorkload.GetCounter(
+			EWebToUEPerformanceCounter::MaterialParameterLookups);
+		Evidence.MeasurementMaterialParameterEvaluations =
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::MaterialParameterEvaluations);
+		Evidence.MeasurementMaterialInstancesReused = MeasurementWorkload.GetCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesReused);
+		Evidence.MeasurementMaterialBrushPatches = MeasurementWorkload.GetCounter(
+			EWebToUEPerformanceCounter::MaterialBrushPatches);
+		Evidence.MeasurementDisplayCommandsPatched = MeasurementWorkload.GetCounter(
+			EWebToUEPerformanceCounter::DisplayCommandsPatched);
+		Evidence.SecondViewMaterialInstancesCreated = SecondViewWorkload.GetCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesCreated);
 		Evidence.SecondViewRssDeltaMiB = AfterSecondViewMemory.RssMiB -
 			BeforeSecondViewMemory.RssMiB;
 		Evidence.SecondViewLlmDeltaMiB = AfterSecondViewMemory.LlmMiB -
@@ -1301,6 +1387,8 @@ void FWebToUEBenchmarkRunner::Finish()
 	Root->SetStringField(TEXT("trajectory"), Corpus == TEXT("HUD")
 		? TEXT("health FieldNotify/manual text toggle")
 		: Corpus == TEXT("MainMenu") ? TEXT("pointer hover plus periodic click")
+		: bDynamicMaterialParameterSmoke
+			? TEXT("one typed Vector parameter update after MID warmup")
 		: bResourceSmoke ? TEXT("packaged visible-resource observation")
 		: TEXT("pointer hover plus bidirectional wheel scroll"));
 	TSharedRef<FJsonObject> TrajectoryEvidence = MakeShared<FJsonObject>();
@@ -1310,6 +1398,8 @@ void FWebToUEBenchmarkRunner::Finish()
 	TrajectoryEvidence->SetBoolField(TEXT("ui_effect_observed"), bHasTrajectoryEvidence);
 	TrajectoryEvidence->SetStringField(TEXT("contract"), Mode == TEXT("UMG")
 		? TEXT("UMG counterpart reports the resulting hover, scroll-offset, or HUD text/visibility state change.")
+		: bDynamicMaterialParameterSmoke
+			? TEXT("Warmup creates one View-owned MID; measurement commits one typed Vector update and patches only its Material brush/display command; the second View creates an isolated MID.")
 		: Corpus == TEXT("HUD")
 			? TEXT("Measurement window records binding field reads, executed ops, and updated nodes.")
 			: Corpus == TEXT("MainMenu")
@@ -1380,6 +1470,27 @@ void FWebToUEBenchmarkRunner::Finish()
 			ResourceEvidence);
 	}
 	Root->SetObjectField(TEXT("compiled_document"), DocumentContract);
+	if (bDynamicMaterialParameterSmoke)
+	{
+		TSharedRef<FJsonObject> ParameterEvidence = MakeShared<FJsonObject>();
+		ParameterEvidence->SetBoolField(TEXT("evaluated"), true);
+		ParameterEvidence->SetBoolField(TEXT("passed"), bHasTrajectoryEvidence);
+		ParameterEvidence->SetStringField(TEXT("address"), TEXT("material.vector.Tint"));
+		ParameterEvidence->SetStringField(TEXT("durable_owner"), TEXT("Binding"));
+		ParameterEvidence->SetBoolField(TEXT("warmup_committed"),
+			bDynamicMaterialWarmupApplied);
+		ParameterEvidence->SetBoolField(TEXT("measurement_committed"),
+			bDynamicMaterialMeasurementApplied);
+		ParameterEvidence->SetBoolField(TEXT("second_view_committed"),
+			bDynamicMaterialSecondViewApplied);
+		ParameterEvidence->SetStringField(TEXT("warmup_value"),
+			TEXT("(0.08,0.28,1.0,1.0)"));
+		ParameterEvidence->SetStringField(TEXT("measurement_value"),
+			TEXT("(1.0,0.08,0.18,1.0)"));
+		ParameterEvidence->SetStringField(TEXT("second_view_value"),
+			TEXT("(0.05,0.9,0.2,1.0)"));
+		Root->SetObjectField(TEXT("material_parameter"), ParameterEvidence);
+	}
 	Root->SetObjectField(TEXT("setup_workload"), WorkloadObject(SetupWorkload));
 	Root->SetObjectField(TEXT("warmup_workload"), WorkloadObject(WarmupWorkload));
 	Root->SetObjectField(TEXT("measurement_workload"), WorkloadObject(MeasurementWorkload));

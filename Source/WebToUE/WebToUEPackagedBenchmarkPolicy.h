@@ -34,6 +34,16 @@ struct FWebToUEPackagedBenchmarkEvidence
 	uint64 SecondViewResourceCacheHits = 0;
 	uint64 SecondViewResourceFailures = 0;
 	uint64 SecondViewResourceCancellations = 0;
+	bool bDynamicMaterialParameterSmoke = false;
+	uint64 WarmupMaterialParameterLookups = 0;
+	uint64 WarmupMaterialParameterEvaluations = 0;
+	uint64 WarmupMaterialInstancesCreated = 0;
+	uint64 MeasurementMaterialParameterLookups = 0;
+	uint64 MeasurementMaterialParameterEvaluations = 0;
+	uint64 MeasurementMaterialInstancesReused = 0;
+	uint64 MeasurementMaterialBrushPatches = 0;
+	uint64 MeasurementDisplayCommandsPatched = 0;
+	uint64 SecondViewMaterialInstancesCreated = 0;
 	double SecondViewRssDeltaMiB = 0.0;
 	double SecondViewLlmDeltaMiB = 0.0;
 	bool bLlmAvailable = false;

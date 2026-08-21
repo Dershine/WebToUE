@@ -44,6 +44,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceMaterialSmokeContractTest,
 	"WebToUE.Benchmark.ResourceMaterialSmokeContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceMaterialParameterSmokeContractTest,
+	"WebToUE.Benchmark.ResourceMaterialParameterSmokeContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 bool FWebToUEBenchmarkCorpusContractTest::RunTest(const FString& Parameters)
 {
 	const FName Corpora[] = {
@@ -466,6 +470,90 @@ bool FWebToUEResourceMaterialSmokeContractTest::RunTest(const FString& Parameter
 		Workload.GetCounter(EWebToUEPerformanceCounter::BrushBuilds) > 0);
 	TestTrue(TEXT("The Material-backed node contributes a paint element"),
 		Workload.GetCounter(EWebToUEPerformanceCounter::PaintDrawElements) > 0);
+	return true;
+}
+
+bool FWebToUEResourceMaterialParameterSmokeContractTest::RunTest(
+	const FString& Parameters)
+{
+	const FString MaterialPath =
+		TEXT("/Game/WebToUEExamples/Materials/M_WTUE_DynamicMaterialBrush.M_WTUE_DynamicMaterialBrush");
+	UWebToUEDocument* Document = LoadObject<UWebToUEDocument>(nullptr,
+		TEXT("/Game/WebToUEExamples/ResourceMaterialParameterSmoke.ResourceMaterialParameterSmoke"));
+	if (!TestNotNull(TEXT("The packaged dynamic Material document loads"), Document))
+	{
+		return false;
+	}
+	TestFalse(TEXT("The dynamic Material document is persisted at the current version"),
+		Document->NeedsRecompile());
+	TestEqual(TEXT("The fixture seals exactly one compiled resource"),
+		Document->GetResourceManifest().Num(), 1);
+	if (Document->GetResourceManifest().Num() != 1)
+	{
+		return false;
+	}
+	const FWebToUECompiledResource& Resource = Document->GetResourceManifest()[0];
+	TestEqual(TEXT("The fixture compiles a Material resource"), Resource.Kind,
+		EWebToUEResourceKind::Material);
+	TestEqual(TEXT("The fixture preserves the shared parent Material path"),
+		Resource.Path.ToString(), MaterialPath);
+	TestEqual(TEXT("The fixture makes the parent Material Critical"), Resource.Residency,
+		EWebToUEResidencyClass::Critical);
+	TestTrue(TEXT("The fixture keeps a positive Material brush size"),
+		Resource.BrushImageSize.X > 0.0f && Resource.BrushImageSize.Y > 0.0f);
+	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
+	TestNotNull(TEXT("The shared parent Material is resident"), Material);
+	TestFalse(TEXT("The persisted resource is never a MID"),
+		Material && Material->IsA<UMaterialInstanceDynamic>());
+
+	UWebToUEView* View = NewObject<UWebToUEView>(GetTransientPackage());
+	View->SetDocument(Document);
+	const TSharedRef<SWidget> Widget = View->TakeWidget();
+	Widget->SlatePrepass(1.0f);
+	FHittestGrid HittestGrid;
+	FSlateWindowElementList DrawElements(nullptr);
+	const FGeometry Geometry = FGeometry::MakeRoot(
+		FVector2D(1920.0, 1080.0), FSlateLayoutTransform());
+	const FPaintArgs PaintArgs(
+		nullptr, HittestGrid, FVector2D::ZeroVector, 0.0, 0.0f);
+	Widget->Paint(PaintArgs, Geometry,
+		FSlateRect(0.0f, 0.0f, 1920.0f, 1080.0f), DrawElements, 0,
+		FWidgetStyle(), true);
+	FWebToUEMaterialParameterSubmission Submission;
+	Submission.Target = View->FindElementById(TEXT("dynamic-material"));
+	Submission.Address = FWebToUEPropertyAddress::Material(
+		TEXT("Tint"), EWebToUEMaterialParameterType::Vector);
+	Submission.Value = FWebToUEMaterialParameterValue::MakeVector(
+		FLinearColor(1.0f, 0.08f, 0.18f, 1.0f));
+	TestTrue(TEXT("The fixture resolves a stable runtime Instance Handle"),
+		Submission.Target.IsValid());
+	FWebToUEMaterialParameterSubmitOutcome Outcome;
+	FWebToUEPerformanceSnapshot Workload;
+	{
+		FWebToUEPerformanceCapture Capture;
+		Outcome = View->SubmitMaterialParameter(Submission);
+		Workload = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("The typed Vector parameter commits through the View transaction"),
+		Outcome.Result, EWebToUEMaterialParameterSubmitResult::Committed);
+	TestEqual(TEXT("K=1 performs one parameter lookup"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::MaterialParameterLookups),
+		uint64(1));
+	TestEqual(TEXT("K=1 performs one parameter evaluation"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::MaterialParameterEvaluations),
+		uint64(1));
+	TestEqual(TEXT("The first divergent state creates one MID"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::MaterialInstancesCreated),
+		uint64(1));
+	TestEqual(TEXT("Only the affected Material brush is patched"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::MaterialBrushPatches),
+		uint64(1));
+	TestEqual(TEXT("Only the affected Display command is patched"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::DisplayCommandsPatched),
+		uint64(1));
+	TestEqual(TEXT("The typed update performs no resource load"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::ResourceLoadAttempts),
+		uint64(0));
 	return true;
 }
 

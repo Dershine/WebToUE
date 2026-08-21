@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "WebToUEEvents.h"
+#include "WebToUEMaterialParameters.h"
 #include "WebToUERuntimeInstance.h"
 #include "WebToUESemantics.h"
 #include "WebToUEStyleProperties.h"
@@ -9,6 +10,7 @@
 
 class UWebToUEDocument;
 class UWebToUEView;
+class UMaterialInstanceDynamic;
 class FWebToUERuntimePresentation;
 struct FWebToUEPaintCommand;
 struct FWebToUEDisplayCommandRange;
@@ -28,6 +30,9 @@ public:
 	void Construct(const FArguments& InArgs);
 	void SetDocument(UWebToUEDocument* InDocument);
 	bool RequestLazyResource(const FString& ResourceId);
+	FWebToUEMaterialParameterSubmitOutcome SubmitMaterialParameter(
+		const FWebToUEMaterialParameterSubmission& Submission);
+	FWebToUEInstanceHandle FindElementById(const FString& Id) const;
 	void RefreshBindings(UObject* DataContext, FName ChangedField = NAME_None);
 	TSet<FName> GetBoundFields() const;
 	void GetSemanticNodes(TArray<FWebToUESemanticNode>& OutNodes) const;
@@ -123,6 +128,9 @@ public:
 	int32 FindPresentationResourceHandleByIdForTesting(const FString& ResourceId) const;
 	bool ArePresentationCriticalResourcesReadyForTesting() const;
 	const UObject* GetPresentationResourceObjectForTesting(int32 Handle) const;
+	UMaterialInstanceDynamic* GetDynamicMaterialForTesting(
+		FWebToUEInstanceHandle Target) const;
+	int32 GetDynamicMaterialCountForTesting() const;
 	bool FinalizePresentationResourcesForTesting() const;
 	const void* GetPresentationTextCacheIdentityForTesting(const FWebToUENode& Node) const;
 	bool IsPresentationLayoutDirtyForTesting() const;

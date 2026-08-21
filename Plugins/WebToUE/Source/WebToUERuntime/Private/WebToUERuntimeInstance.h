@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "WebToUEDocument.h"
+#include "WebToUEMaterialParameters.h"
 
 class FWebToUELayoutEngine;
 
@@ -10,6 +11,12 @@ struct FWebToUERuntimeBindingOp
 	EWebToUEBindingKind Kind = EWebToUEBindingKind::Text;
 	FWebToUEInstanceHandle Target;
 	bool bRichText = false;
+};
+
+struct FWebToUEMaterialParameterRuntimeState
+{
+	FWebToUEMaterialParameterValue Value;
+	EWebToUEPropertyWriter DurableOwner = EWebToUEPropertyWriter::Binding;
 };
 
 class FWebToUERuntimeInstance
@@ -41,6 +48,16 @@ public:
 	{
 		return ResourceManifest;
 	}
+	const FWebToUEMaterialParameterRuntimeState* FindMaterialParameterState(
+		FWebToUEInstanceHandle Target,
+		const FWebToUEPropertyAddress& Address) const;
+	const TMap<FWebToUEPropertyAddress, FWebToUEMaterialParameterRuntimeState>*
+		FindMaterialParameterStates(FWebToUEInstanceHandle Target) const;
+	bool CommitMaterialParameterState(
+		FWebToUEInstanceHandle Target,
+		const FWebToUEPropertyAddress& Address,
+		const FWebToUEMaterialParameterValue& Value,
+		EWebToUEPropertyWriter DurableOwner);
 	FWebToUELayoutEngine& GetLayoutEngine() { return *LayoutEngine; }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -57,5 +74,8 @@ private:
 	uint32 Generation = 0;
 	TMap<FName, TArray<FWebToUERuntimeBindingOp>> BindingOpsByField;
 	TArray<FWebToUECompiledResource> ResourceManifest;
+	TMap<FWebToUEInstanceHandle,
+		TMap<FWebToUEPropertyAddress, FWebToUEMaterialParameterRuntimeState>>
+		MaterialParameterStates;
 	TUniquePtr<FWebToUELayoutEngine> LayoutEngine;
 };

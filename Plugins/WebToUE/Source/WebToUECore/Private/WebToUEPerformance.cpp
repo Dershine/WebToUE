@@ -80,7 +80,13 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.hit_test_candidates"),
 		TEXT("workload.hit_test_commands_visited"),
 		TEXT("workload.paint_batch_runs"),
-		TEXT("workload.paint_commands_layer_merged")
+		TEXT("workload.paint_commands_layer_merged"),
+		TEXT("workload.material_parameter_lookups"),
+		TEXT("workload.material_parameter_evaluations"),
+		TEXT("workload.material_instances_created"),
+		TEXT("workload.material_instances_reused"),
+		TEXT("workload.material_instances_released"),
+		TEXT("workload.material_brush_patches")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -309,6 +315,12 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::HitTestCommandsVisited: return TEXT("hit_test_commands_visited");
 	case EWebToUEPerformanceCounter::PaintBatchRuns: return TEXT("paint_batch_runs");
 	case EWebToUEPerformanceCounter::PaintCommandsLayerMerged: return TEXT("paint_commands_layer_merged");
+	case EWebToUEPerformanceCounter::MaterialParameterLookups: return TEXT("material_parameter_lookups");
+	case EWebToUEPerformanceCounter::MaterialParameterEvaluations: return TEXT("material_parameter_evaluations");
+	case EWebToUEPerformanceCounter::MaterialInstancesCreated: return TEXT("material_instances_created");
+	case EWebToUEPerformanceCounter::MaterialInstancesReused: return TEXT("material_instances_reused");
+	case EWebToUEPerformanceCounter::MaterialInstancesReleased: return TEXT("material_instances_released");
+	case EWebToUEPerformanceCounter::MaterialBrushPatches: return TEXT("material_brush_patches");
 	default: return TEXT("unknown");
 	}
 }

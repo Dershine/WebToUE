@@ -85,6 +85,12 @@ enum class EWebToUEPerformanceCounter : uint8
 	// Final Slate batches can be lower or higher and are measured at the renderer boundary.
 	PaintBatchRuns,
 	PaintCommandsLayerMerged,
+	MaterialParameterLookups,
+	MaterialParameterEvaluations,
+	MaterialInstancesCreated,
+	MaterialInstancesReused,
+	MaterialInstancesReleased,
+	MaterialBrushPatches,
 	Count
 };
 
@@ -100,7 +106,7 @@ struct WEBTOUECORE_API FWebToUEPerformanceSnapshot
 {
 	static constexpr int32 PhaseCount = static_cast<int32>(EWebToUEPerformancePhase::Count);
 	static constexpr int32 CounterCount = static_cast<int32>(EWebToUEPerformanceCounter::Count);
-	static constexpr int32 TelemetrySchemaVersion = 12;
+	static constexpr int32 TelemetrySchemaVersion = 13;
 	static constexpr int32 TelemetryMeasurementCount = (PhaseCount * 2) + CounterCount;
 	TStaticArray<FWebToUEPerformanceMetric, PhaseCount> Metrics;
 	TStaticArray<uint64, CounterCount> Counters{};

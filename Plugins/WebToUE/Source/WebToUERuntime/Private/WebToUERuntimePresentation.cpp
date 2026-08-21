@@ -19,7 +19,9 @@
 #include "Internationalization/Culture.h"
 #include "Internationalization/Internationalization.h"
 #include "Internationalization/StringTable.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialParameters.h"
 #include "HAL/IConsoleManager.h"
 #include "Layout/Clipping.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
@@ -165,6 +167,7 @@ FWebToUERuntimePresentation::FWebToUERuntimePresentation(SWebToUEView& InOwnerWi
 FWebToUERuntimePresentation::~FWebToUERuntimePresentation()
 {
 	CancelResourceRequests();
+	ResetDynamicMaterials();
 }
 
 FWebToUEDocument* FWebToUERuntimePresentation::GetDocument()
@@ -223,6 +226,7 @@ void FWebToUERuntimePresentation::Reset()
 	LastViewportSize = FVector2f(-1.0f, -1.0f);
 	bLayoutDirty = true;
 	Brushes.Reset();
+	ResetDynamicMaterials();
 	TextLayouts.Reset();
 	MeasureDirtyNodes.Reset();
 	LayoutDirtyNodes.Reset();
@@ -263,7 +267,8 @@ uint64 FWebToUERuntimePresentation::GetKnownOwnedBytesForTesting() const
 		DisplayCommandIndices.GetAllocatedSize() + DisplayCommandRanges.GetAllocatedSize() +
 		DisplaySpatialCells.GetAllocatedSize() + LargeDisplayCommands.GetAllocatedSize() +
 		DisplayQueryMarks.GetAllocatedSize() + DisplayQueryScratch.GetAllocatedSize() +
-		DirtyRects.GetAllocatedSize() + DirtyCommandIndices.GetAllocatedSize();
+		DirtyRects.GetAllocatedSize() + DirtyCommandIndices.GetAllocatedSize() +
+		DynamicMaterials.GetAllocatedSize();
 	for (const TPair<uint64, TArray<int32>>& Pair : DisplaySpatialCells)
 	{
 		Bytes += Pair.Value.GetAllocatedSize();
@@ -285,6 +290,17 @@ uint64 FWebToUERuntimePresentation::GetKnownOwnedBytesForTesting() const
 	return Bytes;
 }
 #endif
+
+void FWebToUERuntimePresentation::ResetDynamicMaterials() const
+{
+	if (!DynamicMaterials.IsEmpty())
+	{
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesReleased,
+			DynamicMaterials.Num());
+	}
+	DynamicMaterials.Reset();
+}
 
 void FWebToUERuntimePresentation::RebuildCaches(bool bReloadResources)
 {
@@ -635,6 +651,144 @@ bool FWebToUERuntimePresentation::RequestLazyResource(
 		bDisplayListDirty = true;
 	}
 	return bRequested;
+}
+
+bool FWebToUERuntimePresentation::ValidateMaterialParameter(
+	FWebToUEInstanceHandle Target,
+	const FWebToUEPropertyAddress& Address,
+	FString& OutDiagnostic) const
+{
+	OutDiagnostic.Reset();
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::MaterialParameterLookups);
+	const FWebToUENode* Node = RuntimeInstance.ResolveNode(Target);
+	if (!Node || Node->ResourceId.IsEmpty())
+	{
+		OutDiagnostic = TEXT("WTUE-MID-002: target is stale or has no Material resource.");
+		return false;
+	}
+	const int32 ResourceHandle = FindResourceHandleById(Node->ResourceId);
+	const TConstArrayView<FWebToUECompiledResource> Manifest =
+		RuntimeInstance.GetResourceManifest();
+	if (!Manifest.IsValidIndex(ResourceHandle) ||
+		Manifest[ResourceHandle].Kind != EWebToUEResourceKind::Material)
+	{
+		OutDiagnostic = TEXT("WTUE-MID-002: target does not resolve to a Material resource.");
+		return false;
+	}
+	UMaterialInterface* Material = Cast<UMaterialInterface>(
+		GetResolvedResourceById(Node->ResourceId));
+	if (!Material)
+	{
+		OutDiagnostic = TEXT("WTUE-MID-002: Material resource is not resident.");
+		return false;
+	}
+
+	TArray<FMaterialParameterInfo> Infos;
+	TArray<FGuid> Ids;
+	if (Address.MaterialParameterType == EWebToUEMaterialParameterType::Scalar)
+	{
+		Material->GetAllScalarParameterInfo(Infos, Ids);
+	}
+	else if (Address.MaterialParameterType == EWebToUEMaterialParameterType::Vector)
+	{
+		Material->GetAllVectorParameterInfo(Infos, Ids);
+	}
+	else
+	{
+		OutDiagnostic = TEXT("WTUE-MID-001: only typed Scalar and Vector parameters are supported.");
+		return false;
+	}
+	const bool bFound = Infos.ContainsByPredicate([&Address](
+		const FMaterialParameterInfo& Info)
+	{
+		return Info.Name == Address.MaterialParameter &&
+			Info.Association == EMaterialParameterAssociation::GlobalParameter;
+	});
+	if (!bFound)
+	{
+		OutDiagnostic = FString::Printf(
+			TEXT("WTUE-MID-003: Material has no global %s parameter '%s'."),
+			Address.MaterialParameterType == EWebToUEMaterialParameterType::Scalar
+				? TEXT("Scalar") : TEXT("Vector"),
+			*Address.MaterialParameter.ToString());
+	}
+	return bFound;
+}
+
+bool FWebToUERuntimePresentation::ApplyMaterialParameterChange(
+	FWebToUEInstanceHandle Target,
+	const FWebToUEPropertyAddress& Address) const
+{
+	(void)Address;
+	FWebToUENode* Node = RuntimeInstance.ResolveNode(Target);
+	if (!Node)
+	{
+		return false;
+	}
+	UMaterialInterface* BaseMaterial = Cast<UMaterialInterface>(
+		GetResolvedResourceById(Node->ResourceId));
+	const TMap<FWebToUEPropertyAddress, FWebToUEMaterialParameterRuntimeState>* States =
+		RuntimeInstance.FindMaterialParameterStates(Target);
+	if (!BaseMaterial || !States || States->IsEmpty())
+	{
+		return false;
+	}
+
+	UMaterialInstanceDynamic* DynamicMaterial = nullptr;
+	if (TStrongObjectPtr<UMaterialInstanceDynamic>* Existing =
+		DynamicMaterials.Find(Target))
+	{
+		DynamicMaterial = Existing->Get();
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesReused);
+	}
+	else
+	{
+		DynamicMaterial = UMaterialInstanceDynamic::Create(
+			BaseMaterial, GetTransientPackage());
+		if (!DynamicMaterial)
+		{
+			return false;
+		}
+		DynamicMaterials.Emplace(Target,
+			TStrongObjectPtr<UMaterialInstanceDynamic>(DynamicMaterial));
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesCreated);
+	}
+
+	for (const TPair<FWebToUEPropertyAddress,
+		FWebToUEMaterialParameterRuntimeState>& Pair : *States)
+	{
+		if (Pair.Key.MaterialParameterType == EWebToUEMaterialParameterType::Scalar)
+		{
+			DynamicMaterial->SetScalarParameterValue(
+				Pair.Key.MaterialParameter, Pair.Value.Value.Scalar);
+		}
+		else if (Pair.Key.MaterialParameterType == EWebToUEMaterialParameterType::Vector)
+		{
+			DynamicMaterial->SetVectorParameterValue(
+				Pair.Key.MaterialParameter, Pair.Value.Value.Vector);
+		}
+	}
+
+	RebuildBrush(*Node);
+	if (!bDisplayListDirty)
+	{
+		const int32 PatchedCommandCount = PatchDisplaySubtree(*Node, false);
+		if (PatchedCommandCount > 0)
+		{
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::DisplayCommandsPatched,
+				PatchedCommandCount);
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::DisplayCommandsReused,
+				FMath::Max(0, DisplayCommands.Num() - PatchedCommandCount));
+		}
+	}
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::MaterialBrushPatches);
+	return true;
 }
 
 UObject* FWebToUERuntimePresentation::GetResolvedFont(const FString& Family) const
@@ -1635,8 +1789,17 @@ void FWebToUERuntimePresentation::RebuildBrush(FWebToUENode& Node) const
 		}
 		if (Resource.Kind == EWebToUEResourceKind::Material)
 		{
-			UMaterialInterface* Material = Cast<UMaterialInterface>(
-				GetResolvedResourceById(Node.ResourceId));
+			UMaterialInterface* Material = nullptr;
+			if (const TStrongObjectPtr<UMaterialInstanceDynamic>* Dynamic =
+				DynamicMaterials.Find(NodeHandle))
+			{
+				Material = Dynamic->Get();
+			}
+			if (!Material)
+			{
+				Material = Cast<UMaterialInterface>(
+					GetResolvedResourceById(Node.ResourceId));
+			}
 			if (!Material || Resource.BrushImageSize.X <= 0.0f ||
 				Resource.BrushImageSize.Y <= 0.0f)
 			{
@@ -1665,6 +1828,15 @@ const void* FWebToUERuntimePresentation::GetBrushIdentityForTesting(
 {
 	const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(RuntimeInstance.GetHandle(&Node));
 	return Brush ? Brush->Get() : nullptr;
+}
+
+UMaterialInstanceDynamic*
+FWebToUERuntimePresentation::GetDynamicMaterialForTesting(
+	FWebToUEInstanceHandle Target) const
+{
+	const TStrongObjectPtr<UMaterialInstanceDynamic>* Dynamic =
+		DynamicMaterials.Find(Target);
+	return Dynamic ? Dynamic->Get() : nullptr;
 }
 
 int32 FWebToUERuntimePresentation::FindResourceHandleForTesting(

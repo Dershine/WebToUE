@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "WebToUECompiler.h"
 #include "WebToUEDocument.h"
+#include "WebToUEPropertyOwnership.h"
 
 #include "Layout/SlateRect.h"
 #include "UObject/StrongObjectPtr.h"
@@ -12,6 +13,7 @@ class FSlateStyleSet;
 class FSlateTextBlockLayout;
 class FSlateWindowElementList;
 struct FStreamableHandle;
+class UMaterialInstanceDynamic;
 class FWidgetStyle;
 class SWebToUEView;
 struct FSlateBrush;
@@ -147,6 +149,13 @@ public:
 	FText GetDisplayText(const FWebToUENode& Node) const;
 	bool RequestLazyResource(const FString& ResourceId) const;
 	bool AreCriticalResourcesReady() const;
+	bool ValidateMaterialParameter(
+		FWebToUEInstanceHandle Target,
+		const FWebToUEPropertyAddress& Address,
+		FString& OutDiagnostic) const;
+	bool ApplyMaterialParameterChange(
+		FWebToUEInstanceHandle Target,
+		const FWebToUEPropertyAddress& Address) const;
 
 #if WITH_DEV_AUTOMATION_TESTS
 	FVector2f MeasureTextForTesting(const FString& Text, float Width, bool bWrap) const;
@@ -162,6 +171,12 @@ public:
 		const FSoftObjectPath& Path) const;
 	int32 FindResourceHandleByIdForTesting(const FString& ResourceId) const;
 	const UObject* GetResourceObjectForTesting(int32 Handle) const;
+	UMaterialInstanceDynamic* GetDynamicMaterialForTesting(
+		FWebToUEInstanceHandle Target) const;
+	int32 GetDynamicMaterialCountForTesting() const
+	{
+		return DynamicMaterials.Num();
+	}
 	bool FinalizeResourcesForTesting() const { return FinalizeResourcePreload(); }
 	const void* GetTextLayoutCacheIdentityForTesting(const FWebToUENode& Node) const;
 	bool IsLayoutDirtyForTesting() const { return bLayoutDirty; }
@@ -199,6 +214,8 @@ private:
 	mutable TSet<FWebToUEInstanceHandle> MeasureDirtyNodes;
 	mutable TSet<FWebToUEInstanceHandle> LayoutDirtyNodes;
 	mutable TArray<TStrongObjectPtr<UObject>> ResolvedResources;
+	mutable TMap<FWebToUEInstanceHandle,
+		TStrongObjectPtr<UMaterialInstanceDynamic>> DynamicMaterials;
 	enum class EResourceLoadState : uint8
 	{
 		NotRequested,
@@ -288,5 +305,6 @@ private:
 		bool bParentEnabled) const;
 	void RebuildBrushes(bool bReloadResources) const;
 	void RebuildBrush(FWebToUENode& Node) const;
+	void ResetDynamicMaterials() const;
 	void RebuildPaintOrderCache();
 };

@@ -113,6 +113,181 @@ bool SWebToUEView::RequestLazyResource(const FString& ResourceId)
 	return bRequested;
 }
 
+FWebToUEMaterialParameterSubmitOutcome SWebToUEView::SubmitMaterialParameter(
+	const FWebToUEMaterialParameterSubmission& Submission)
+{
+	if (!IsInGameThread())
+	{
+		return { EWebToUEMaterialParameterSubmitResult::RejectedInactive,
+			TEXT("WTUE-MID-004: Material parameter submission is Game Thread-only.") };
+	}
+	if (Submission.Address.Kind != EWebToUEPropertyTargetKind::MaterialParameter ||
+		!Submission.Address.IsValid() || !Submission.Value.IsFinite() ||
+		Submission.Address.MaterialParameterType != Submission.Value.Type ||
+		(Submission.Value.Type != EWebToUEMaterialParameterType::Scalar &&
+		 Submission.Value.Type != EWebToUEMaterialParameterType::Vector))
+	{
+		return { EWebToUEMaterialParameterSubmitResult::RejectedInvalidAddress,
+			TEXT("WTUE-MID-001: parameter address and finite typed value must match.") };
+	}
+	if (Submission.DurableOwner != EWebToUEPropertyWriter::Binding &&
+		Submission.DurableOwner != EWebToUEPropertyWriter::Behavior)
+	{
+		return { EWebToUEMaterialParameterSubmitResult::RejectedOwnership,
+			TEXT("WTUE-MID-003: only Binding or Behavior may durably own a Material parameter.") };
+	}
+	if (!RuntimeInstance->ResolveNode(Submission.Target))
+	{
+		return { EWebToUEMaterialParameterSubmitResult::RejectedInvalidTarget,
+			TEXT("WTUE-MID-004: target Instance Handle is stale or belongs to another View.") };
+	}
+
+	TSharedPtr<FWebToUEUpdateCoordinator, ESPMode::ThreadSafe> Coordinator =
+		StandaloneUpdateCoordinator;
+	if (const TWeakObjectPtr<UWebToUEView> OwnerView = Owner;
+		OwnerView.IsValid())
+	{
+		if (const TSharedPtr<FWebToUESession> Session = OwnerView->GetSession();
+			Session && Session->IsActive())
+		{
+			Coordinator = Session->GetUpdateCoordinator();
+		}
+	}
+	if (!Coordinator || !Coordinator->IsActive())
+	{
+		return { EWebToUEMaterialParameterSubmitResult::RejectedInactive,
+			TEXT("WTUE-MID-004: owning update coordinator is inactive.") };
+	}
+
+	const TSharedRef<FWebToUEMaterialParameterSubmitOutcome, ESPMode::ThreadSafe> Outcome =
+		MakeShared<FWebToUEMaterialParameterSubmitOutcome, ESPMode::ThreadSafe>();
+	TWeakPtr<SWebToUEView> WeakThis =
+		StaticCastSharedRef<SWebToUEView>(AsShared());
+	FWebToUEMaterialParameterSubmission Captured = Submission;
+	const EWebToUEUpdateSubmitResult SubmitResult = Coordinator->Submit(
+		[WeakThis, Captured, Outcome](FWebToUEUpdateTransaction& Transaction)
+		{
+			const TSharedPtr<SWebToUEView> View = WeakThis.Pin();
+			if (!View || !View->RuntimeInstance->ResolveNode(Captured.Target))
+			{
+				Outcome->Result = EWebToUEMaterialParameterSubmitResult::RejectedInvalidTarget;
+				Outcome->Diagnostic = TEXT("WTUE-MID-004: target expired before evaluation.");
+				Transaction.Reject(Outcome->Diagnostic);
+				return;
+			}
+			FString ValidationDiagnostic;
+			if (!View->Presentation->ValidateMaterialParameter(
+				Captured.Target, Captured.Address, ValidationDiagnostic))
+			{
+				Outcome->Result = ValidationDiagnostic.Contains(TEXT("WTUE-MID-003"))
+					? EWebToUEMaterialParameterSubmitResult::RejectedParameter
+					: EWebToUEMaterialParameterSubmitResult::RejectedResource;
+				Outcome->Diagnostic = MoveTemp(ValidationDiagnostic);
+				Transaction.Reject(Outcome->Diagnostic);
+				return;
+			}
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::MaterialParameterEvaluations);
+			TArray<FWebToUEPropertyOwnershipClaim> Claims;
+			Claims.Add({ EWebToUEPropertyWriter::Source, TEXT("Material default") });
+			if (const FWebToUEMaterialParameterRuntimeState* Existing =
+				View->RuntimeInstance->FindMaterialParameterState(
+					Captured.Target, Captured.Address))
+			{
+				Claims.Add({ Existing->DurableOwner, TEXT("Runtime durable owner") });
+				if (Existing->DurableOwner != Captured.DurableOwner)
+				{
+					Claims.Add({ Captured.DurableOwner, TEXT("Submitted durable owner") });
+				}
+				if (Existing->DurableOwner == Captured.DurableOwner &&
+					Existing->Value == Captured.Value)
+				{
+					Outcome->Result = EWebToUEMaterialParameterSubmitResult::Unchanged;
+					return;
+				}
+			}
+			else
+			{
+				Claims.Add({ Captured.DurableOwner, TEXT("Submitted durable owner") });
+			}
+			const FWebToUEPropertyOwnershipDecision Decision =
+				FWebToUEPropertyOwnershipPolicy::Resolve(Captured.Address, Claims);
+			if (!Decision.bAccepted || !Decision.bHasDurableOwner ||
+				Decision.DurableOwner != Captured.DurableOwner)
+			{
+				Outcome->Result = EWebToUEMaterialParameterSubmitResult::RejectedOwnership;
+				Outcome->Diagnostic = Decision.Diagnostics.IsEmpty()
+					? TEXT("WTUE-MID-003: Material parameter durable owner was rejected.")
+					: FString::Printf(TEXT("WTUE-MID-003: %s"),
+						*Decision.Diagnostics[0].Message);
+				Transaction.Reject(Outcome->Diagnostic);
+				return;
+			}
+
+			if (!Transaction.AddStateMutation(
+				[WeakThis, Captured]()
+				{
+					if (const TSharedPtr<SWebToUEView> CommitView = WeakThis.Pin())
+					{
+						CommitView->RuntimeInstance->CommitMaterialParameterState(
+							Captured.Target, Captured.Address, Captured.Value,
+							Captured.DurableOwner);
+					}
+				}))
+			{
+				Outcome->Result = EWebToUEMaterialParameterSubmitResult::RejectedTransaction;
+				Outcome->Diagnostic = TEXT("WTUE-MID-004: state mutation budget rejected the submission.");
+				return;
+			}
+			if (!Transaction.AddPostCommitEffect(
+				[WeakThis, Captured]()
+				{
+					if (const TSharedPtr<SWebToUEView> CommitView = WeakThis.Pin();
+						CommitView && CommitView->Presentation->ApplyMaterialParameterChange(
+							Captured.Target, Captured.Address))
+					{
+						CommitView->Invalidate(EInvalidateWidgetReason::Paint);
+					}
+				}))
+			{
+				Outcome->Result = EWebToUEMaterialParameterSubmitResult::RejectedTransaction;
+				Outcome->Diagnostic = TEXT("WTUE-MID-004: post-commit budget rejected the submission.");
+				return;
+			}
+			Outcome->Result = EWebToUEMaterialParameterSubmitResult::Committed;
+		});
+
+	if (SubmitResult == EWebToUEUpdateSubmitResult::Executed)
+	{
+		return *Outcome;
+	}
+	if (SubmitResult == EWebToUEUpdateSubmitResult::RejectedInactive)
+	{
+		return { EWebToUEMaterialParameterSubmitResult::RejectedInactive,
+			TEXT("WTUE-MID-004: owning update coordinator rejected the submission.") };
+	}
+	return { EWebToUEMaterialParameterSubmitResult::Queued,
+		TEXT("Material parameter submission queued for Game Thread evaluation.") };
+}
+
+FWebToUEInstanceHandle SWebToUEView::FindElementById(const FString& Id) const
+{
+	if (Id.IsEmpty())
+	{
+		return {};
+	}
+	const FWebToUEDocument* RuntimeDocument = GetRuntimeDocument();
+	if (!RuntimeDocument)
+	{
+		return {};
+	}
+	const TArray<FWebToUEInstanceHandle>* Targets =
+		RuntimeDocument->RuntimeSelectorTargets.IdTargets.Find(Id.ToLower());
+	return Targets && Targets->Num() == 1 && RuntimeInstance->ResolveNode((*Targets)[0])
+		? (*Targets)[0]
+		: FWebToUEInstanceHandle{};
+}
+
 FVector2D SWebToUEView::ComputeDesiredSize(float LayoutScaleMultiplier) const
 {
 	return FVector2D(320.0, 180.0);
@@ -414,6 +589,17 @@ bool SWebToUEView::ArePresentationCriticalResourcesReadyForTesting() const
 const UObject* SWebToUEView::GetPresentationResourceObjectForTesting(int32 Handle) const
 {
 	return Presentation->GetResourceObjectForTesting(Handle);
+}
+
+UMaterialInstanceDynamic* SWebToUEView::GetDynamicMaterialForTesting(
+	FWebToUEInstanceHandle Target) const
+{
+	return Presentation->GetDynamicMaterialForTesting(Target);
+}
+
+int32 SWebToUEView::GetDynamicMaterialCountForTesting() const
+{
+	return Presentation->GetDynamicMaterialCountForTesting();
 }
 
 bool SWebToUEView::FinalizePresentationResourcesForTesting() const

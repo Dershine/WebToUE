@@ -150,9 +150,26 @@ FString FWebToUEPropertyAddress::ToString() const
 			WebToUE::Private::LexToString(CssProperty));
 	case EWebToUEPropertyTargetKind::VisualTransform: return TEXT("style.transform");
 	case EWebToUEPropertyTargetKind::MaterialParameter:
-		return FString::Printf(TEXT("material.%s"), *MaterialParameter.ToString());
+	{
+		const TCHAR* TypeName = MaterialParameterType ==
+			EWebToUEMaterialParameterType::Scalar ? TEXT("scalar") :
+			MaterialParameterType == EWebToUEMaterialParameterType::Vector ?
+				TEXT("vector") :
+			MaterialParameterType == EWebToUEMaterialParameterType::Texture ?
+				TEXT("texture") : TEXT("invalid");
+		return FString::Printf(TEXT("material.%s.%s"), TypeName,
+			*MaterialParameter.ToString());
+	}
 	default: return TEXT("invalid");
 	}
+}
+
+uint32 GetTypeHash(const FWebToUEPropertyAddress& Address)
+{
+	return HashCombineFast(GetTypeHash(static_cast<uint8>(Address.Kind)),
+		HashCombineFast(GetTypeHash(static_cast<uint8>(Address.CssProperty)),
+			HashCombineFast(GetTypeHash(Address.MaterialParameter),
+				GetTypeHash(static_cast<uint8>(Address.MaterialParameterType)))));
 }
 
 FString FWebToUEPropertyOwnershipDecision::DescribePrecedence() const
