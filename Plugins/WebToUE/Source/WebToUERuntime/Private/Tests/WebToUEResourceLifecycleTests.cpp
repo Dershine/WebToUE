@@ -23,6 +23,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceResidencyTest,
 	"WebToUE.Runtime.ResourceResidency",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceIntrinsicSizeTest,
+	"WebToUE.Runtime.ResourceIntrinsicSize",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace WebToUE::ResourceLifecycle::Tests
 {
 	static void AddAttribute(FWebToUECompiledNode& Node, const TCHAR* Name, const TCHAR* Value)
@@ -309,6 +313,103 @@ bool FWebToUEResourceResidencyTest::RunTest(const FString& Parameters)
 		View->RequestLazyResource(TEXT("resource/texture/residency-2")));
 	TestFalse(TEXT("Unknown ResourceIds fail without path fallback"),
 		View->RequestLazyResource(TEXT("resource/texture/unknown")));
+	return true;
+}
+
+bool FWebToUEResourceIntrinsicSizeTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::ResourceLifecycle::Tests;
+	const auto MakeImageDocument = [](const FSoftObjectPath& Path,
+		const FVector2f IntrinsicSize, EWebToUEResidencyClass Residency,
+		const FString& DocumentId)
+	{
+		UWebToUEDocument* Document =
+			NewObject<UWebToUEDocument>(GetTransientPackage());
+		FWebToUECompiledDocumentData CompiledDocument;
+		CompiledDocument.RootNodeIndex = 0;
+		FWebToUECompiledNode& Root =
+			CompiledDocument.Nodes.AddDefaulted_GetRef();
+		Root.Type = static_cast<uint8>(EWebToUENodeType::Element);
+		Root.Tag = TEXT("body");
+		FWebToUECompiledNode& Image =
+			CompiledDocument.Nodes.AddDefaulted_GetRef();
+		Image.Type = static_cast<uint8>(EWebToUENodeType::Element);
+		Image.Tag = TEXT("img");
+		Image.ParentIndex = 0;
+		AddAttribute(Image, TEXT("id"), TEXT("intrinsic-image"));
+		AddAttribute(Image, TEXT("src"), *Path.ToString());
+		FWebToUECompiledResource& Resource =
+			CompiledDocument.ResourceManifest.AddDefaulted_GetRef();
+		Resource.Kind = EWebToUEResourceKind::Texture;
+		Resource.Path = Path;
+		Resource.Residency = Residency;
+		Resource.IntrinsicSize = IntrinsicSize;
+		WebToUE::Tests::SealResourceContractForTesting(
+			CompiledDocument, DocumentId, 1);
+		Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
+		return Document;
+	};
+
+	const FVector2f SealedLazySize(37.0f, 19.0f);
+	const FSoftObjectPath MissingPath(
+		TEXT("/Game/WebToUEAutomation/T_UnresidentIntrinsic.T_UnresidentIntrinsic"));
+	UWebToUEDocument* LazyDocument = MakeImageDocument(MissingPath,
+		SealedLazySize, EWebToUEResidencyClass::Lazy,
+		TEXT("document/intrinsic-lazy"));
+	const TSharedRef<SWebToUEView> LazyView = SNew(SWebToUEView);
+	LazyView->SetDocument(LazyDocument);
+	LazyView->LayoutForTesting(FVector2f(640.0f, 360.0f));
+	FWebToUENode* LazyImage =
+		LazyView->FindRuntimeNodeByIdForTesting(TEXT("intrinsic-image"));
+	TestNotNull(TEXT("The unresident intrinsic image hydrates"), LazyImage);
+	if (LazyImage)
+	{
+		TestEqual(TEXT("First measure uses sealed intrinsic pixels"),
+			LazyView->MeasurePresentationNodeForTesting(*LazyImage), SealedLazySize);
+		TestNull(TEXT("First measure does not require a resident texture"),
+			LazyView->GetPresentationBrushIdentityForTesting(*LazyImage));
+	}
+	TestEqual(TEXT("Lazy first measure performs no async request"),
+		LazyView->GetPresentationResourceAsyncRequestsForTesting(), uint64(0));
+
+	const FSoftObjectPath ResidentPath(
+		TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
+	UTexture2D* ResidentTexture =
+		LoadObject<UTexture2D>(nullptr, *ResidentPath.ToString());
+	TestNotNull(TEXT("The intrinsic-size resident fixture loads"), ResidentTexture);
+	if (!ResidentTexture) return false;
+	const FVector2f ResidentSize(
+		ResidentTexture->GetSizeX(), ResidentTexture->GetSizeY());
+	UWebToUEDocument* ResidentDocument = MakeImageDocument(ResidentPath,
+		ResidentSize, EWebToUEResidencyClass::Critical,
+		TEXT("document/intrinsic-resident"));
+	const TSharedRef<SWebToUEView> ResidentView = SNew(SWebToUEView);
+	ResidentView->SetDocument(ResidentDocument);
+	ResidentView->LayoutForTesting(FVector2f(640.0f, 360.0f));
+	FWebToUENode* ResidentImage =
+		ResidentView->FindRuntimeNodeByIdForTesting(TEXT("intrinsic-image"));
+	TestNotNull(TEXT("The resident intrinsic image hydrates"), ResidentImage);
+	if (ResidentImage)
+	{
+		TestNotNull(TEXT("Matching sealed dimensions build one image brush"),
+			ResidentView->GetPresentationBrushIdentityForTesting(*ResidentImage));
+		TestEqual(TEXT("Resident brush measures at the sealed pixel size"),
+			ResidentView->MeasurePresentationNodeForTesting(*ResidentImage), ResidentSize);
+	}
+
+	UWebToUEDocument* DriftDocument = MakeImageDocument(ResidentPath,
+		ResidentSize + FVector2f(1.0f, 1.0f), EWebToUEResidencyClass::Critical,
+		TEXT("document/intrinsic-drift"));
+	const TSharedRef<SWebToUEView> DriftView = SNew(SWebToUEView);
+	DriftView->SetDocument(DriftDocument);
+	FWebToUENode* DriftImage =
+		DriftView->FindRuntimeNodeByIdForTesting(TEXT("intrinsic-image"));
+	TestEqual(TEXT("Runtime dimension drift fails the Resource contract once"),
+		DriftView->GetPresentationResourceFailuresForTesting(), uint64(1));
+	TestNull(TEXT("A dimension-mismatched texture is not retained"),
+		DriftView->GetPresentationResourceObjectForTesting(0));
+	TestNull(TEXT("A dimension-mismatched texture exposes no brush"),
+		DriftImage ? DriftView->GetPresentationBrushIdentityForTesting(*DriftImage) : nullptr);
 	return true;
 }
 

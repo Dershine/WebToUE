@@ -102,6 +102,7 @@ public:
 	bool ApplyBoundTextChangeForTesting(FWebToUENode& Node, const FText& Text, bool bRichText);
 	FVector2f PrepareTextLayoutForTesting(const FWebToUENode& Node,
 		const FWebToUEComputedStyle& Style, float WrapWidth) const;
+	FVector2f MeasurePresentationNodeForTesting(const FWebToUENode& Node) const;
 	bool IsPresentationMeasureDirtyForTesting(const FWebToUENode& Node) const;
 	bool IsPresentationLayoutPathDirtyForTesting(const FWebToUENode& Node) const;
 	FString GetPresentationTextCacheCultureForTesting(const FWebToUENode& Node) const;

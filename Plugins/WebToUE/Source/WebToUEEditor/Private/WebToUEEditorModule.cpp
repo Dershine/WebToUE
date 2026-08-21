@@ -66,6 +66,16 @@ private:
 	TMap<FString, double> PendingFiles;
 	TSet<TWeakObjectPtr<UWebToUEDocument>> PendingVersionReimports;
 
+	static bool IsWatchedSourceExtension(const FString& Extension)
+	{
+		static const TSet<FString> Extensions = {
+			TEXT("html"), TEXT("css"), TEXT("bmp"), TEXT("png"),
+			TEXT("jpg"), TEXT("jpeg"), TEXT("tga"), TEXT("psd"),
+			TEXT("dds"), TEXT("exr"), TEXT("hdr")
+		};
+		return Extensions.Contains(Extension);
+	}
+
 	static bool IsPersistentDocument(const UWebToUEDocument* Document)
 	{
 		return Document && !Document->HasAnyFlags(RF_ClassDefaultObject | RF_Transient) &&
@@ -86,7 +96,7 @@ private:
 		for (const FFileChangeData& Change : Changes)
 		{
 			const FString Extension = FPaths::GetExtension(Change.Filename).ToLower();
-			if (Extension == TEXT("html") || Extension == TEXT("css"))
+			if (IsWatchedSourceExtension(Extension))
 			{
 				FString Normalized = FPaths::ConvertRelativePathToFull(Change.Filename);
 				FPaths::NormalizeFilename(Normalized);

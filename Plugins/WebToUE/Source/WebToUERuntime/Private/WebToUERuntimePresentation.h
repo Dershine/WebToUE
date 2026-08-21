@@ -169,6 +169,10 @@ public:
 	bool IsLayoutPathDirtyForTesting(const FWebToUENode& Node) const;
 	FVector2f PrepareTextLayoutForTesting(const FWebToUENode& Node,
 		const FWebToUEComputedStyle& Style, float WrapWidth) const;
+	FVector2f MeasureNodeForTesting(const FWebToUENode& Node) const
+	{
+		return MeasureNode(Node, {});
+	}
 	FString GetTextCacheCultureForTesting(const FWebToUENode& Node) const;
 	uint64 GetKnownOwnedBytesForTesting() const;
 	int32 GetDisplayCommandCountForTesting() const { return DisplayCommands.Num(); }

@@ -6,14 +6,15 @@ namespace WebToUE::Tests
 {
 	inline void SealResourceContractForTesting(
 		FWebToUECompiledDocumentData& Document,
-		const FString& DocumentId = TEXT("document/runtime-test"))
+		const FString& DocumentId = TEXT("document/runtime-test"),
+		uint16 ResourceIrMinor = 0)
 	{
 		FWebToUEResourceContractDescriptor Descriptor;
 		Descriptor.ContractVersion = { 1, 0 };
 		Descriptor.DocumentId = DocumentId;
 		Descriptor.CompilerFingerprintBlake3 = FString::ChrN(64, TEXT('d'));
 		Descriptor.ArtifactVersions.UiIr = { 1, 0 };
-		Descriptor.ArtifactVersions.ResourceIr = { 1, 0 };
+		Descriptor.ArtifactVersions.ResourceIr = { 1, ResourceIrMinor };
 
 		FString SourceUnit = TEXT("source/runtime-test.html");
 		for (const FWebToUECompiledResource& Resource : Document.ResourceManifest)

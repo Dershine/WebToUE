@@ -7,7 +7,10 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/AssetData.h"
+#include "AssetImportTask.h"
+#include "AssetToolsModule.h"
 #include "EditorFramework/AssetImportData.h"
+#include "Factories/TextureFactory.h"
 #include "Internationalization/StringTable.h"
 #include "Engine/Texture2D.h"
 #include "HAL/FileManager.h"
@@ -22,6 +25,18 @@ DEFINE_LOG_CATEGORY_STATIC(LogWebToUEImport, Log, All);
 
 namespace WebToUE::ResourceImport::Private
 {
+	static constexpr const TCHAR* GeneratedTextureRoot =
+		TEXT("/Game/WebToUEGenerated/Textures");
+
+	struct FResolvedTextureReference
+	{
+		FSoftObjectPath Path;
+		FString ResourceId;
+		FWebToUEResourceProvenance Provenance;
+		FString SourceFilename;
+		FVector2f IntrinsicSize = FVector2f::ZeroVector;
+	};
+
 	static FString HashBuffer(const void* Data, uint64 Size)
 	{
 		return LexToString(FBlake3::HashBuffer(Data, Size)).ToLower();
@@ -54,6 +69,191 @@ namespace WebToUE::ResourceImport::Private
 		return PackageName.StartsWith(TEXT("/"))
 			? TEXT("asset/") + PackageName.RightChop(1)
 			: TEXT("asset/") + PackageName;
+	}
+
+	static bool IsCanonicalBlake3(const FString& Value)
+	{
+		if (Value.Len() != 64)
+		{
+			return false;
+		}
+		for (const TCHAR Character : Value)
+		{
+			if (!((Character >= TEXT('0') && Character <= TEXT('9')) ||
+				(Character >= TEXT('a') && Character <= TEXT('f'))))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	static FString MakeGeneratedTextureId(const FString& StableHash)
+	{
+		return TEXT("generated:textures/") + StableHash;
+	}
+
+	static FSoftObjectPath MakeGeneratedTexturePath(const FString& StableHash)
+	{
+		const FString Name = TEXT("T_") + StableHash;
+		return FSoftObjectPath(FString::Printf(TEXT("%s/%s.%s"),
+			GeneratedTextureRoot, *Name, *Name));
+	}
+
+	static bool ParseGeneratedTextureReference(const FString& Reference,
+		FString& OutStableHash)
+	{
+		const FString Prefix = TEXT("generated:textures/");
+		if (!Reference.StartsWith(Prefix))
+		{
+			return false;
+		}
+		OutStableHash = Reference.RightChop(Prefix.Len());
+		return IsCanonicalBlake3(OutStableHash);
+	}
+
+	static bool IsSupportedRelativeTextureExtension(const FString& Filename)
+	{
+		static const TSet<FString> Supported = {
+			TEXT("bmp"), TEXT("png"), TEXT("jpg"), TEXT("jpeg"),
+			TEXT("tga"), TEXT("psd"), TEXT("dds"), TEXT("exr"), TEXT("hdr")
+		};
+		return Supported.Contains(FPaths::GetExtension(Filename).ToLower());
+	}
+
+	static bool ResolveRelativeTexturePath(const FString& DocumentFilename,
+		const FString& Reference, FString& OutFilename,
+		FString& OutCanonicalReference, FString& OutLogicalSourceId)
+	{
+		if (Reference.IsEmpty() || Reference.TrimStartAndEnd() != Reference ||
+			Reference.Contains(TEXT("\\")) || Reference.Contains(TEXT("://")) ||
+			!FPaths::IsRelative(Reference))
+		{
+			return false;
+		}
+		OutFilename = FPaths::ConvertRelativePathToFull(
+			FPaths::GetPath(DocumentFilename), Reference);
+		FPaths::NormalizeFilename(OutFilename);
+		FString ProjectRelative = OutFilename;
+		if (!FPaths::MakePathRelativeTo(ProjectRelative, *FPaths::ProjectDir()) ||
+			ProjectRelative.StartsWith(TEXT("../")) ||
+			!IFileManager::Get().FileExists(*OutFilename) ||
+			!IsSupportedRelativeTextureExtension(OutFilename) ||
+			!MakeLogicalSourceId(OutFilename, OutLogicalSourceId))
+		{
+			return false;
+		}
+		OutCanonicalReference = OutFilename;
+		const FString DocumentDirectory =
+			FPaths::GetPath(DocumentFilename) + TEXT("/");
+		if (!FPaths::MakePathRelativeTo(OutCanonicalReference,
+			*DocumentDirectory))
+		{
+			return false;
+		}
+		FPaths::NormalizeFilename(OutCanonicalReference);
+		while (OutCanonicalReference.StartsWith(TEXT("./")))
+		{
+			OutCanonicalReference.RightChopInline(2);
+		}
+		return !OutCanonicalReference.IsEmpty() &&
+			!OutCanonicalReference.StartsWith(TEXT("../"));
+	}
+
+	static UTexture2D* ImportGeneratedTexture(const FString& SourceFilename,
+		const FString& StableHash)
+	{
+		UAssetImportTask* Task = NewObject<UAssetImportTask>();
+		Task->Filename = SourceFilename;
+		Task->DestinationPath = GeneratedTextureRoot;
+		Task->DestinationName = TEXT("T_") + StableHash;
+		Task->bReplaceExisting = true;
+		Task->bReplaceExistingSettings = false;
+		Task->bAutomated = true;
+		Task->bSave = true;
+		Task->bAsync = false;
+		Task->Factory = NewObject<UTextureFactory>();
+		TArray<UAssetImportTask*> Tasks = { Task };
+		FAssetToolsModule::GetModule().Get().ImportAssetTasks(Tasks);
+		const FSoftObjectPath ExpectedPath = MakeGeneratedTexturePath(StableHash);
+		for (UObject* Object : Task->GetObjects())
+		{
+			if (UTexture2D* Texture = Cast<UTexture2D>(Object);
+				Texture && FSoftObjectPath(Texture) == ExpectedPath)
+			{
+				return Texture;
+			}
+		}
+		return Cast<UTexture2D>(ExpectedPath.ResolveObject());
+	}
+
+	static bool ResolveTextureReference(const FString& DocumentFilename,
+		const FString& SourceUnit, const FString& Reference,
+		FString& OutIdentity, FResolvedTextureReference& OutResolved)
+	{
+		if (Reference.StartsWith(TEXT("/Game/")) ||
+			Reference.StartsWith(TEXT("/Engine/")))
+		{
+			OutResolved.Path = FSoftObjectPath(Reference);
+			UTexture2D* Texture = Cast<UTexture2D>(OutResolved.Path.TryLoad());
+			if (!OutResolved.Path.IsValid() || !Texture)
+			{
+				return false;
+			}
+			OutIdentity = Reference;
+			OutResolved.ResourceId = TEXT("resource/texture/") + HashUtf8(OutIdentity);
+			OutResolved.Provenance = { EWebToUEResourceOrigin::UnrealAsset,
+				SourceUnit, Reference, MakeAssetDependencyId(OutResolved.Path) };
+			OutResolved.IntrinsicSize = FVector2f(
+				Texture->GetSizeX(), Texture->GetSizeY());
+			return true;
+		}
+
+		FString StableHash;
+		if (Reference.StartsWith(TEXT("generated:")))
+		{
+			if (!ParseGeneratedTextureReference(Reference, StableHash))
+			{
+				return false;
+			}
+			OutIdentity = MakeGeneratedTextureId(StableHash);
+			OutResolved.Path = MakeGeneratedTexturePath(StableHash);
+			UTexture2D* Texture = Cast<UTexture2D>(OutResolved.Path.TryLoad());
+			if (!Texture)
+			{
+				return false;
+			}
+			OutResolved.ResourceId = TEXT("resource/texture/") + HashUtf8(OutIdentity);
+			OutResolved.Provenance = { EWebToUEResourceOrigin::Generated,
+				SourceUnit, OutIdentity, OutIdentity };
+			OutResolved.IntrinsicSize = FVector2f(
+				Texture->GetSizeX(), Texture->GetSizeY());
+			return true;
+		}
+
+		FString CanonicalReference;
+		FString LogicalSourceId;
+		if (!ResolveRelativeTexturePath(DocumentFilename, Reference,
+			OutResolved.SourceFilename, CanonicalReference, LogicalSourceId))
+		{
+			return false;
+		}
+		StableHash = HashUtf8(LogicalSourceId);
+		OutIdentity = LogicalSourceId;
+		const FString GeneratedId = MakeGeneratedTextureId(StableHash);
+		UTexture2D* Texture = ImportGeneratedTexture(
+			OutResolved.SourceFilename, StableHash);
+		if (!Texture || FSoftObjectPath(Texture) != MakeGeneratedTexturePath(StableHash))
+		{
+			return false;
+		}
+		OutResolved.Path = FSoftObjectPath(Texture);
+		OutResolved.ResourceId = TEXT("resource/texture/") + HashUtf8(GeneratedId);
+		OutResolved.Provenance = { EWebToUEResourceOrigin::RelativeSource,
+			SourceUnit, CanonicalReference, GeneratedId };
+		OutResolved.IntrinsicSize = FVector2f(
+			Texture->GetSizeX(), Texture->GetSizeY());
+		return true;
 	}
 
 	static int32 ResidencyRank(EWebToUEResidencyClass Residency)
@@ -102,11 +302,19 @@ namespace WebToUE::ResourceImport::Private
 		{
 			return false;
 		}
-		const IAssetRegistry& AssetRegistry =
+		IAssetRegistry& AssetRegistry =
 			FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		const FString PackageFilename = FPackageName::LongPackageNameToFilename(
+			PackageNameString, FPackageName::GetAssetPackageExtension());
+		AssetRegistry.ScanFilesSynchronous({ PackageFilename }, true);
 		FAssetPackageData PackageData;
-		if (AssetRegistry.TryGetAssetPackageData(FName(*PackageNameString), PackageData) !=
-			UE::AssetRegistry::EExists::Exists)
+		auto ReadPackageData = [&AssetRegistry, &PackageNameString, &PackageData]()
+		{
+			return AssetRegistry.TryGetAssetPackageData(
+				FName(*PackageNameString), PackageData) ==
+				UE::AssetRegistry::EExists::Exists;
+		};
+		if (!ReadPackageData())
 		{
 			return false;
 		}
@@ -123,13 +331,77 @@ namespace WebToUE::ResourceImport::Private
 	{
 		FWebToUEArtifactVersionSet Versions;
 		Versions.UiIr = { 1, 0 };
-		Versions.ResourceIr = { 1, 0 };
+		Versions.ResourceIr = { 1, 1 };
 		return Versions;
 	}
 
 	static FString CompilerFingerprint()
 	{
-		return HashUtf8(TEXT("WebToUE.Editor.ResourceImporter/1;UI-IR/1.0;Resource-IR/1.0"));
+		return HashUtf8(TEXT("WebToUE.Editor.ResourceImporter/2;UI-IR/1.0;Resource-IR/1.1"));
+	}
+
+	static bool ResolveDocumentTextures(const FWebToUEDocument& Source,
+		const FString& DocumentFilename, const FString& SourceUnit,
+		TMap<FString, FResolvedTextureReference>& OutResolvedByIdentity,
+		TMap<FString, FString>& OutIdentityByAuthorReference,
+		TArray<FString>& InOutDependencies,
+		TArray<FWebToUEResourceContractDiagnostic>& OutDiagnostics)
+	{
+		bool bValid = true;
+		Source.ForEachNode([&](FWebToUENode& Node)
+		{
+			if (Node.Tag != TEXT("img"))
+			{
+				return;
+			}
+			const FString Reference = Node.GetAttribute(TEXT("src"));
+			if (Reference.IsEmpty() || OutIdentityByAuthorReference.Contains(Reference))
+			{
+				return;
+			}
+
+			FString Identity;
+			FString RelativeFilename;
+			FString CanonicalReference;
+			if (!Reference.StartsWith(TEXT("/Game/")) &&
+				!Reference.StartsWith(TEXT("/Engine/")) &&
+				!Reference.StartsWith(TEXT("generated:")))
+			{
+				if (!ResolveRelativeTexturePath(DocumentFilename, Reference,
+					RelativeFilename, CanonicalReference, Identity))
+				{
+					OutDiagnostics.Add({ TEXT("WTUE-RES-001"), TEXT("resources.texture"),
+						FString::Printf(TEXT("Relative texture is missing, outside the project, or unsupported: %s"),
+							*Reference) });
+					bValid = false;
+					return;
+				}
+				InOutDependencies.AddUnique(RelativeFilename);
+				if (OutResolvedByIdentity.Contains(Identity))
+				{
+					OutIdentityByAuthorReference.Add(Reference, Identity);
+					return;
+				}
+			}
+
+			FResolvedTextureReference Resolved;
+			if (!ResolveTextureReference(DocumentFilename, SourceUnit,
+				Reference, Identity, Resolved))
+			{
+				OutDiagnostics.Add({ TEXT("WTUE-RES-001"), TEXT("resources.texture"),
+					FString::Printf(TEXT("Texture reference is invalid, missing, or not a supported Texture2D: %s"),
+						*Reference) });
+				bValid = false;
+				return;
+			}
+			if (!Resolved.SourceFilename.IsEmpty())
+			{
+				InOutDependencies.AddUnique(Resolved.SourceFilename);
+			}
+			OutIdentityByAuthorReference.Add(Reference, Identity);
+			OutResolvedByIdentity.Add(Identity, MoveTemp(Resolved));
+		});
+		return bValid;
 	}
 }
 
@@ -160,7 +432,10 @@ static FWebToUEAssetDiagnostic ConvertDiagnostic(const FWebToUEDiagnostic& Sourc
 }
 
 static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument& Source,
-	const UWebToUEDocument& Target, const FString& SourceUnit)
+	const UWebToUEDocument& Target, const FString& SourceUnit,
+	const TMap<FString, WebToUE::ResourceImport::Private::FResolvedTextureReference>&
+		ResolvedTextures,
+	const TMap<FString, FString>& TextureIdentities)
 {
 	FWebToUECompiledDocumentData Result;
 	TMap<FString, FString> PreviousAutoKeys;
@@ -176,6 +451,13 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 	{
 		Result.LocalizationNamespace = TEXT("WebToUE_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	}
+	const auto FindResolvedTexture = [&ResolvedTextures, &TextureIdentities](
+		const FString& AuthorReference)
+		-> const WebToUE::ResourceImport::Private::FResolvedTextureReference*
+	{
+		const FString* Identity = TextureIdentities.Find(AuthorReference);
+		return Identity ? ResolvedTextures.Find(*Identity) : nullptr;
+	};
 
 	TFunction<int32(const TSharedPtr<FWebToUENode>&, int32, const FString&, int32)> AddNode =
 		[&](const TSharedPtr<FWebToUENode>& Node, int32 ParentIndex, const FString& ParentIdentity, int32 SiblingOrdinal)
@@ -183,13 +465,15 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 		FWebToUECompiledNode Serialized;
 		Serialized.Type = static_cast<uint8>(Node->Type);
 		Serialized.Tag = Node->Tag;
+		const WebToUE::ResourceImport::Private::FResolvedTextureReference*
+			ResolvedTexture = nullptr;
 		if (Node->Tag == TEXT("img"))
 		{
 			const FString AuthorReference = Node->GetAttribute(TEXT("src"));
-			if (!AuthorReference.IsEmpty())
+			ResolvedTexture = FindResolvedTexture(AuthorReference);
+			if (ResolvedTexture)
 			{
-				Serialized.ResourceId = TEXT("resource/texture/") +
-					WebToUE::ResourceImport::Private::HashUtf8(AuthorReference);
+				Serialized.ResourceId = ResolvedTexture->ResourceId;
 			}
 		}
 		Serialized.Text = Node->Text;
@@ -204,7 +488,8 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 		{
 			FWebToUECompiledAttribute& OutAttribute = Serialized.Attributes.AddDefaulted_GetRef();
 			OutAttribute.Name = Attribute.Key;
-			OutAttribute.Value = Attribute.Value;
+			OutAttribute.Value = ResolvedTexture && Attribute.Key == TEXT("src")
+				? ResolvedTexture->Provenance.AuthorReference : Attribute.Value;
 		}
 		for (const FWebToUEStyleDeclaration& Declaration : Node->InlineStyleDeclarations)
 		{
@@ -293,44 +578,57 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 		}
 	}
 
-	const auto AddResource = [&Result, &SourceUnit](EWebToUEResourceKind Kind,
+	const auto AddResource = [&Result, &FindResolvedTexture](EWebToUEResourceKind Kind,
 		const FString& AuthorReference, EWebToUEResidencyClass Residency)
 	{
+		if (Kind == EWebToUEResourceKind::Texture)
+		{
+			const WebToUE::ResourceImport::Private::FResolvedTextureReference*
+				Resolved = FindResolvedTexture(AuthorReference);
+			if (!Resolved)
+			{
+				return;
+			}
+			if (FWebToUECompiledResource* Existing =
+				Result.ResourceManifest.FindByPredicate(
+					[Resolved](const FWebToUECompiledResource& Resource)
+					{
+						return Resource.Kind == EWebToUEResourceKind::Texture &&
+							Resource.ResourceId == Resolved->ResourceId;
+					}))
+			{
+				if (WebToUE::ResourceImport::Private::ResidencyRank(Residency) <
+					WebToUE::ResourceImport::Private::ResidencyRank(Existing->Residency))
+				{
+					Existing->Residency = Residency;
+				}
+				return;
+			}
+			FWebToUECompiledResource Resource;
+			Resource.Kind = Kind;
+			Resource.Path = Resolved->Path;
+			Resource.ResourceId = Resolved->ResourceId;
+			Resource.Provenance = Resolved->Provenance;
+			Resource.GroupId = TEXT("document/images");
+			Resource.Residency = Residency;
+			Resource.IntrinsicSize = Resolved->IntrinsicSize;
+			Result.ResourceManifest.Add(MoveTemp(Resource));
+			return;
+		}
+
 		const FSoftObjectPath Path(AuthorReference);
-		if (!Path.IsValid() && Kind != EWebToUEResourceKind::Texture) return;
+		if (!Path.IsValid()) return;
 		if (FWebToUECompiledResource* Existing = Result.ResourceManifest.FindByPredicate(
 			[Kind, &Path](const FWebToUECompiledResource& Resource)
 			{
 				return Resource.Kind == Kind && Resource.Path == Path;
 			}))
 		{
-			if (Kind == EWebToUEResourceKind::Texture &&
-				WebToUE::ResourceImport::Private::ResidencyRank(Residency) <
-				WebToUE::ResourceImport::Private::ResidencyRank(Existing->Residency))
-			{
-				Existing->Residency = Residency;
-			}
 			return;
 		}
 		FWebToUECompiledResource Resource;
 		Resource.Kind = Kind;
 		Resource.Path = Path;
-		if (Kind == EWebToUEResourceKind::Texture)
-		{
-			Resource.ResourceId =
-				TEXT("resource/texture/") +
-				WebToUE::ResourceImport::Private::HashUtf8(AuthorReference);
-			Resource.Provenance.Origin = EWebToUEResourceOrigin::UnrealAsset;
-			Resource.Provenance.SourceUnit = SourceUnit;
-			Resource.Provenance.AuthorReference = AuthorReference;
-			if (Path.IsValid())
-			{
-				Resource.Provenance.ResolvedDependencyId =
-					WebToUE::ResourceImport::Private::MakeAssetDependencyId(Path);
-			}
-			Resource.GroupId = TEXT("document/images");
-			Resource.Residency = Residency;
-		}
 		Result.ResourceManifest.Add(MoveTemp(Resource));
 	};
 	const UWebToUESettings* Settings = GetDefault<UWebToUESettings>();
@@ -383,9 +681,13 @@ static bool BuildResourceContract(const TArray<FString>& DependencyFiles,
 		{
 			Descriptor.DocumentId = TEXT("document/") + HashUtf8(LogicalId);
 		}
-		Descriptor.Dependencies.Add({ MoveTemp(LogicalId),
-			Index == 0 ? EWebToUEResourceDependencyKind::UiSource :
-				EWebToUEResourceDependencyKind::StyleSource,
+		const EWebToUEResourceDependencyKind Kind = Index == 0
+			? EWebToUEResourceDependencyKind::UiSource
+			: FPaths::GetExtension(DependencyFiles[Index]).Equals(
+				TEXT("css"), ESearchCase::IgnoreCase)
+				? EWebToUEResourceDependencyKind::StyleSource
+				: EWebToUEResourceDependencyKind::Resource;
+		Descriptor.Dependencies.Add({ MoveTemp(LogicalId), Kind,
 			MoveTemp(ContentHash) });
 	}
 
@@ -403,14 +705,22 @@ static bool BuildResourceContract(const TArray<FString>& DependencyFiles,
 				FString::Printf(TEXT("Unreal texture package is missing or has no saved content fingerprint: %s"),
 					*Resource.Path.ToString()) });
 		}
-		else if (!Descriptor.Dependencies.ContainsByPredicate(
-			[&Resource](const FWebToUEResourceDependency& Dependency)
+		const FString PackageDependencyId =
+			Resource.Provenance.Origin == EWebToUEResourceOrigin::UnrealAsset
+				? MakeAssetDependencyId(Resource.Path)
+				: Resource.Provenance.ResolvedDependencyId;
+		const EWebToUEResourceDependencyKind PackageDependencyKind =
+			Resource.Provenance.Origin == EWebToUEResourceOrigin::UnrealAsset
+				? EWebToUEResourceDependencyKind::Resource
+				: EWebToUEResourceDependencyKind::GeneratedInput;
+		if (!AssetHash.IsEmpty() && !Descriptor.Dependencies.ContainsByPredicate(
+			[&PackageDependencyId](const FWebToUEResourceDependency& Dependency)
 			{
-				return Dependency.LogicalId == Resource.Provenance.ResolvedDependencyId;
+				return Dependency.LogicalId == PackageDependencyId;
 			}))
 		{
-			Descriptor.Dependencies.Add({ Resource.Provenance.ResolvedDependencyId,
-				EWebToUEResourceDependencyKind::Resource, MoveTemp(AssetHash) });
+			Descriptor.Dependencies.Add({ PackageDependencyId,
+				PackageDependencyKind, MoveTemp(AssetHash) });
 		}
 		Descriptor.Resources.Add({ Resource.ResourceId, Resource.Provenance });
 		Descriptor.ResidencyAssignments.Add({ Resource.ResourceId, FString(),
@@ -447,6 +757,8 @@ bool UWebToUEFactory::ValidateCookFreshness(const UWebToUEDocument& Document,
 	if (!BuildResourceContract(
 		Document.DependencyFiles, ExpectedDocument, OutDiagnostics))
 	{
+		OutDiagnostics.Add({ TEXT("WTUE-RES-004"), TEXT("cook-validator"),
+			TEXT("Cook cannot prove Resource freshness because the current dependency closure cannot be rebuilt.") });
 		return false;
 	}
 	TArray<FWebToUEResourceContractDiagnostic> FreshnessDiagnostics;
@@ -544,9 +856,21 @@ bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FStri
 	{
 		FString SourceUnit;
 		WebToUE::ResourceImport::Private::MakeLogicalSourceId(Filename, SourceUnit);
-		CompiledDocument = BuildCompiledDocument(*Compiled, Document, SourceUnit);
 		TArray<FWebToUEResourceContractDiagnostic> ResourceDiagnostics;
-		if (!BuildResourceContract(Dependencies, CompiledDocument, ResourceDiagnostics))
+		TMap<FString, WebToUE::ResourceImport::Private::FResolvedTextureReference>
+			ResolvedTextures;
+		TMap<FString, FString> TextureIdentities;
+		const bool bTexturesResolved =
+			WebToUE::ResourceImport::Private::ResolveDocumentTextures(
+				*Compiled, Filename, SourceUnit, ResolvedTextures,
+				TextureIdentities, Dependencies, ResourceDiagnostics);
+		if (bTexturesResolved)
+		{
+			CompiledDocument = BuildCompiledDocument(*Compiled, Document, SourceUnit,
+				ResolvedTextures, TextureIdentities);
+		}
+		if (!bTexturesResolved || !BuildResourceContract(
+			Dependencies, CompiledDocument, ResourceDiagnostics))
 		{
 			bHasErrors = true;
 		}
@@ -583,7 +907,10 @@ bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FStri
 #if WITH_EDITORONLY_DATA
 	if (!Document.AssetImportData) Document.AssetImportData = NewObject<UAssetImportData>(&Document, TEXT("AssetImportData"));
 	Document.AssetImportData->Update(Filename);
-	Document.DependencyFiles = MoveTemp(Dependencies);
+	if (!bHasErrors || !bPreserveLastGood || Document.GetCompiledNodes().IsEmpty())
+	{
+		Document.DependencyFiles = MoveTemp(Dependencies);
+	}
 #endif
 	Document.MarkPackageDirty();
 	Document.NotifyDocumentChanged();

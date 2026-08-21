@@ -335,6 +335,23 @@ namespace WebToUE::Runtime::Presentation::Private
 			return false;
 		}
 	}
+
+	static bool DoesResourceMatchContract(
+		const FWebToUECompiledResource& Resource, UObject* Object)
+	{
+		if (!IsExpectedResourceType(Resource.Kind, Object))
+		{
+			return false;
+		}
+		if (Resource.Kind != EWebToUEResourceKind::Texture ||
+			Resource.IntrinsicSize.X <= 0.0f || Resource.IntrinsicSize.Y <= 0.0f)
+		{
+			return true;
+		}
+		const UTexture2D* Texture = CastChecked<UTexture2D>(Object);
+		return Resource.IntrinsicSize == FVector2f(
+			Texture->GetSizeX(), Texture->GetSizeY());
+	}
 }
 
 void FWebToUERuntimePresentation::CancelResourceRequests() const
@@ -402,7 +419,7 @@ bool FWebToUERuntimePresentation::RequestResource(int32 Handle) const
 	const FWebToUECompiledResource& Resource = Manifest[Handle];
 	if (UObject* Object = Resource.Path.ResolveObject())
 	{
-		if (IsExpectedResourceType(Resource.Kind, Object))
+		if (DoesResourceMatchContract(Resource, Object))
 		{
 			ResolvedResources[Handle].Reset(Object);
 			ResourceLoadStates[Handle] = EResourceLoadState::Resolved;
@@ -494,7 +511,7 @@ bool FWebToUERuntimePresentation::FinalizeResourcePreload() const
 			continue;
 		}
 		UObject* Object = Manifest[Index].Path.ResolveObject();
-		if (IsExpectedResourceType(Manifest[Index].Kind, Object))
+		if (DoesResourceMatchContract(Manifest[Index], Object))
 		{
 			ResolvedResources[Index].Reset(Object);
 			ResourceLoadStates[Index] = EResourceLoadState::Resolved;
@@ -852,6 +869,13 @@ FVector2f FWebToUERuntimePresentation::MeasureNodeWithStyle(const FWebToUENode& 
 		if (const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(RuntimeInstance.GetHandle(&Node)))
 		{
 			return (*Brush)->ImageSize;
+		}
+		const int32 Handle = FindResourceHandleById(Node.ResourceId);
+		const TConstArrayView<FWebToUECompiledResource> Manifest =
+			RuntimeInstance.GetResourceManifest();
+		if (Manifest.IsValidIndex(Handle))
+		{
+			return Manifest[Handle].IntrinsicSize;
 		}
 	}
 	return FVector2f::ZeroVector;
@@ -1571,13 +1595,20 @@ void FWebToUERuntimePresentation::RebuildBrush(FWebToUENode& Node) const
 			GetResolvedResourceById(Node.ResourceId));
 		if (Texture)
 		{
+			const int32 Handle = FindResourceHandleById(Node.ResourceId);
+			const TConstArrayView<FWebToUECompiledResource> Manifest =
+				RuntimeInstance.GetResourceManifest();
 			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
 			FWebToUEPerformanceCapture::RecordCounter(
 				EWebToUEPerformanceCounter::TrackedAllocations);
 			TSharedPtr<FSlateBrush> Brush = MakeShared<FSlateBrush>();
 			Brush->DrawAs = ESlateBrushDrawType::Image;
 			Brush->SetResourceObject(Texture);
-			Brush->ImageSize = FVector2f(Texture->GetSizeX(), Texture->GetSizeY());
+			Brush->ImageSize = Manifest.IsValidIndex(Handle) &&
+				Manifest[Handle].IntrinsicSize.X > 0.0f &&
+				Manifest[Handle].IntrinsicSize.Y > 0.0f
+				? Manifest[Handle].IntrinsicSize
+				: FVector2f(Texture->GetSizeX(), Texture->GetSizeY());
 			Brushes.Add(NodeHandle, MoveTemp(Brush));
 		}
 	}

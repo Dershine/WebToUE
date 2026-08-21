@@ -320,6 +320,12 @@ FVector2f SWebToUEView::PrepareTextLayoutForTesting(const FWebToUENode& Node,
 	return Presentation->PrepareTextLayoutForTesting(Node, Style, WrapWidth);
 }
 
+FVector2f SWebToUEView::MeasurePresentationNodeForTesting(
+	const FWebToUENode& Node) const
+{
+	return Presentation->MeasureNodeForTesting(Node);
+}
+
 bool SWebToUEView::IsPresentationMeasureDirtyForTesting(const FWebToUENode& Node) const
 {
 	return Presentation->IsMeasureDirtyForTesting(Node);

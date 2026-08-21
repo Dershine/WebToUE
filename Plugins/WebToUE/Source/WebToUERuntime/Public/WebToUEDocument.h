@@ -30,6 +30,7 @@ struct WEBTOUERUNTIME_API FWebToUECompiledResource
 	UPROPERTY() FWebToUEResourceProvenance Provenance;
 	UPROPERTY() FString GroupId;
 	UPROPERTY() EWebToUEResidencyClass Residency = EWebToUEResidencyClass::Invalid;
+	UPROPERTY() FVector2f IntrinsicSize = FVector2f::ZeroVector;
 
 	bool operator==(const FWebToUECompiledResource& Other) const
 	{

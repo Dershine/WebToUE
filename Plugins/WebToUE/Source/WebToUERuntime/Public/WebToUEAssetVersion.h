@@ -16,8 +16,9 @@ struct WEBTOUERUNTIME_API FWebToUEAssetVersion
 		CssSrgbColors = 7,
 		ResourceContractManifest = 8,
 		ResourceConsumerContract = 9,
+		RelativeTextureSources = 10,
 
-		LatestVersion = ResourceConsumerContract
+		LatestVersion = RelativeTextureSources
 	};
 
 	static const FGuid GUID;

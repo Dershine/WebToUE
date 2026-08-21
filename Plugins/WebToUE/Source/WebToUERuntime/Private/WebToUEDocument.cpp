@@ -116,6 +116,14 @@ bool UWebToUEDocument::ValidateResourceContract(
 		{
 			ResourcesById.Add(Resource.ResourceId, &Resource);
 		}
+		if (ResourceFreshness.ArtifactVersions.ResourceIr.Major == 1 &&
+			ResourceFreshness.ArtifactVersions.ResourceIr.Minor >= 1 &&
+			(Resource.IntrinsicSize.X <= 0.0f || Resource.IntrinsicSize.Y <= 0.0f))
+		{
+			OutDiagnostics.Add({ TEXT("WTUE-RES-003"),
+				TEXT("manifest/") + Resource.ResourceId + TEXT("/intrinsic-size"),
+				TEXT("Resource IR 1.1 texture entries require a positive sealed intrinsic size.") });
+		}
 	}
 
 	for (int32 NodeIndex = 0; NodeIndex < CompiledNodes.Num(); ++NodeIndex)
@@ -132,9 +140,13 @@ bool UWebToUEDocument::ValidateResourceContract(
 			{
 				return Attribute.Name == TEXT("src");
 			});
+		const bool bLegacyUnrealBinding =
+			ResourceFreshness.ArtifactVersions.ResourceIr.Major == 1 &&
+			ResourceFreshness.ArtifactVersions.ResourceIr.Minor == 0;
 		if (!Resource || !SourceAttribute ||
 			(*Resource)->Provenance.AuthorReference != SourceAttribute->Value ||
-			(*Resource)->Path != FSoftObjectPath(SourceAttribute->Value))
+			(bLegacyUnrealBinding &&
+				(*Resource)->Path != FSoftObjectPath(SourceAttribute->Value)))
 		{
 			OutDiagnostics.Add({ TEXT("WTUE-RES-003"),
 				FString::Printf(TEXT("nodes/%d/resource-id"), NodeIndex),
@@ -153,7 +165,7 @@ bool UWebToUEDocument::ValidateResourceContract(
 	{
 		FWebToUEArtifactVersionSet SupportedVersions;
 		SupportedVersions.UiIr = { 1, 0 };
-		SupportedVersions.ResourceIr = { 1, 0 };
+		SupportedVersions.ResourceIr = { 1, 1 };
 		TArray<FWebToUEResourceContractDiagnostic> CompatibilityDiagnostics;
 		FWebToUEResourceContractPolicy::IsRuntimeCompatible(
 			Snapshot.Freshness.ArtifactVersions, SupportedVersions,
