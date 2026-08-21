@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、UI Feedback、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-21，M4.3a Static Material Brush Resource Contract 产品闭环。
+> 当前基线：2026-08-21，M4.3b MID Ownership And Typed Parameters 产品闭环。
 >
 > 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Native Component 作者声明/Compiler/Runtime 挂接仍未支持。
 >
@@ -14,7 +14,7 @@
 >
 > 2026-08-20 的 M3.4 已实现 Game/Unscaled/Real/Test Clock、Virtual Clock、无默认 Tick 的一次性 Timer、异步 Command Result/Timeout/Cancel、worker MPSC、Generation/View/World cleanup 与有界 Trace；这只是 C++ Runtime 前置，不等于类型化 Command Schema、Behavior 或 Animation 已支持。
 >
-> 2026-08-20 的 M3.5 已实现 Core Property Ownership Policy：canonical Node/CSS/Transform/typed Material Parameter 地址、CSS/Pseudo baseline、唯一 Binding/Behavior durable owner、active-only Animation overlay、visibility/enabled restrictive gate 与稳定 `WTUE-OWN-001..003` 诊断。现有 Binding/CSS/Pseudo 集成已验证；静态 Material Brush 已支持，但 Behavior、Animation Track、MID typed parameters 与其作者语法仍未支持。
+> 2026-08-20 的 M3.5 已实现 Core Property Ownership Policy：canonical Node/CSS/Transform/typed Material Parameter 地址、CSS/Pseudo baseline、唯一 Binding/Behavior durable owner、active-only Animation overlay、visibility/enabled restrictive gate 与稳定 `WTUE-OWN-001..003` 诊断。M4.3b 已让 C++ Scalar/Vector Material Parameter submission、MID 与事务路径消费同一合同；Behavior、Animation Track 和参数作者语法仍未支持。
 >
 > 2026-08-20 的 M3.6 已实现 Runtime Tree Projection Policy：Component/Logical durable ownership、Layout/Paint/Semantic projection、同 Session/Surface Overlay Anchor、Portal cycle/order/Modal scope 与同代 Focus Restore，并提供 `WTUE-TREE-001..005` 诊断。UI Source/Compiler/现有 `SWebToUEView` 尚未创建真实 Portal，不能据此宣称 Overlay/Modal 产品能力已支持。
 >
@@ -24,7 +24,9 @@
 >
 > 2026-08-21 的 M4.2 已让 relative/generated Texture Source 产品链消费 M3.9 合同：Importer、版本 10 intrinsic size、稳定 generated asset、watch/reimport、跨进程 Cook freshness、Development/Shipping Packaged smoke 与可见截图均闭环。
 >
-> 2026-08-21 的 M4.3a 已让静态 Material 产品链消费同一合同：版本 11、Resource IR 1.2、saved-package 传递 closure/Cook freshness、共享 `UMaterialInterface`、`FSlateMaterialBrush` 与双配置 Packaged smoke 已闭环。Route 作者声明、MID typed parameters、Feedback 资源和完整 Incremental/DDC/Lockfile 仍未支持。
+> 2026-08-21 的 M4.3a 已让静态 Material 产品链消费同一合同：版本 11、Resource IR 1.2、saved-package 传递 closure/Cook freshness、共享 `UMaterialInterface`、`FSlateMaterialBrush` 与双配置 Packaged smoke 已闭环。
+>
+> 2026-08-21 的 M4.3b 已支持 C++ canonical typed Scalar/Vector Material Parameter submission：Binding/Behavior durable owner、M3 事务后提交、View/Node MID strong ownership、generation/GC/reset 和跨 View 隔离均有 Automation 与双配置 Packaged 证据。参数作者语法、Texture 参数、Animation/Transition/`Time` 保证、Route 作者声明、Feedback 资源和完整 Incremental/DDC/Lockfile 仍未支持。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -108,13 +110,13 @@ Flex：
 - Binding 与未来 Behavior 是互斥 durable owner。二者同时 claim 以 `WTUE-OWN-003` 错误拒绝；诊断包含 canonical target 和排序后的 source location，不依赖 claim 遍历顺序。
 - 分层属性采用 `Animation(active) > durable owner > CSS/Source`，但 visibility/enabled 采用全部 gate 必须允许的 restrictive composition。Animation 释放时必须显露最新 underlying value，不能写回旧快照。
 - 当前只把 Color、BackgroundColor、BorderColor、Opacity、Visual Transform 与 Scalar/Vector Material Parameter 归类为可动画目标；Layout、Text、Visibility、Enabled 和 Texture Parameter 拒绝 Animation writer。Material Parameter 不会由 CSS 名称或任意字符串隐式别名。
-- 当前产品路径只有 Binding text/visible/enabled 是已实现 durable owner；`PropertyOwnershipIntegration` 证明 Source text 覆盖、Pseudo visibility gate、Binding visibility gate、Enabled/Pseudo 恢复与上述合同一致。静态 Material Brush 不含参数 writer；Policy 是 M4.3b/M5 的前置，不等于 Behavior、Animation 或 MID typed parameters 已支持。
+- 当前产品路径的 Binding text/visible/enabled 与 C++ Material Scalar/Vector submission 是已实现 durable owner 消费者。`PropertyOwnershipIntegration` 证明 Source/Pseudo/Binding 路径；`DynamicMaterialParameterLifecycle` 证明 Material 的 Binding/Behavior 互斥 claim、同 owner/value 幂等和 typed address。Behavior IR、Animation Track 与作者参数语法仍未支持。
 
 事件：Click 与 Pointer Capture Lost 使用不可变 root→target 事件路径快照；快照携带文档/Session Generation、Slate User/Pointer、Input Modality 与 Correlation，提交前逐段验证父子关系和身份。监听器按 capture→target→bubble 派发，支持 propagation/immediate stop；可取消 Click 支持 prevent default，Pointer Capture Lost 不可取消。`data-ue-on-click="EventName"` 仍广播 `EventName` 和 `ElementId`，但现作为 Session-owned 事务的 Post-Commit 默认动作执行；监听器状态写入先提交，失败/过期事务不广播。当前只有 C++ Listener API 和类型化事件种类，没有 UI Source 事件声明、类型化 payload schema 或 Behavior Event IR。
 
 UI Feedback 基础合同：Runtime 已提供 Feedback Request、`IWebToUEFeedbackRouter`、Null Router 和 Recording Router。Request 固定 Cue/Source/Correlation、Input Modality、Session/LocalPlayer/Viewport/Surface Scope 与 Session Generation；Router 由 UI Session 注入，失活 Session 或旧 Generation 请求明确拒绝。C++ 专项已证明 Feedback 可作为 Session-owned 事务的 Post-Commit Effect，观察全部已提交 Mutation，且失败事务不派发；Click 默认动作也已进入 Post-Commit，但 UI Source 没有 Feedback/Sound 声明，Compiler 不生成 Feedback Cue/Behavior Op，现有事件不会自动生成 Cue。版本化 Profile、UE Sound/SoundCue/MetaSound 资源清单、预取/Cook、限频/去重、用户设置和播放后端仍不存在，因此不能宣称已支持 UI 音效。
 
-更新事务 C++ 边界：每个 `FWebToUESession` 拥有一个 `FWebToUEUpdateCoordinator`。evaluation 在 Game Thread 只收集 State/Structural Mutation 和 Post-Commit Effect，成功后按 State→Structure→Effect 提交；evaluation 拒绝、遍历来源结构写入或预算超限时整笔不提交。非 Game Thread 只能向 MPSC 队列提交 evaluation，由 Game Thread drain；evaluation 重入属于同一原子事务，Commit/Post-Commit 重入进入后续事务。evaluation、Mutation、Effect、单次 drain 与保留 Trace 均有硬上限，Session 失活拒绝新工作并丢弃晚到队列。Click 监听、`data-ue-on-click` 默认动作及 M3.4 Timer/Command terminal evaluation 已接入；该接口仍只是后续 Typed Mutation/Behavior/Command 的基础，现有 FieldNotify 和动态结构尚未迁入。
+更新事务 C++ 边界：每个 `FWebToUESession` 拥有一个 `FWebToUEUpdateCoordinator`。evaluation 在 Game Thread 只收集 State/Structural Mutation 和 Post-Commit Effect，成功后按 State→Structure→Effect 提交；evaluation 拒绝、遍历来源结构写入或预算超限时整笔不提交。非 Game Thread 只能向 MPSC 队列提交 evaluation，由 Game Thread drain；evaluation 重入属于同一原子事务，Commit/Post-Commit 重入进入后续事务。evaluation、Mutation、Effect、单次 drain 与保留 Trace 均有硬上限，Session 失活拒绝新工作并丢弃晚到队列。Click 监听、`data-ue-on-click` 默认动作、M3.4 Timer/Command terminal evaluation 及 M4.3b Material Parameter State Mutation/Post-Commit Presentation patch 已接入；现有 FieldNotify、Behavior IR 和动态结构尚未迁入。
 
 Clock/异步 C++ 边界：`FWebToUEWorldClock` 明确区分 Game（随 pause 停止、受 dilation）、Unscaled（随 pause 停止、不受 dilation）和 Real（不随 pause 停止、不受 dilation），不提供 Test；`FWebToUEVirtualClock` 为测试/工具独立单调推进四个域。Session-owned `FWebToUEAsyncCoordinator` 提供一次性 Timer 与异步 Command token；Timer 只在显式 `Pump()` 观察 deadline，不注册默认 Tick。worker completion 只入 MPSC，result/timeout exactly-once 并进入更新事务；显式 Cancel、重复/晚到 result、旧 Generation 和失活 Session 均不执行 Mutation。Pending、单次 Pump 与 Trace 有界；文档换代、Host Shutdown、World cleanup 和既有 LocalPlayer removal 路径会取消对应工作。当前虽有类型化 Schema Policy，但异步协调器尚无 Command ID/payload Adapter，Behavior Op、重复 Timer、Animation Track 和 Runtime Inspector 也不存在，因此这些基础合同不应被表述为作者可用的异步行为系统。
 
@@ -135,6 +137,8 @@ Resource Contract：`FWebToUEResourceContractPolicy` 对单个逻辑 Document �
 图片：`src` 支持 `/Game`/`/Engine` Unreal 软对象路径、相对当前 UI Source 的 `png/jpg/jpeg/bmp/tga/psd/dds/exr/hdr`，以及规范 `generated:textures/<64-hex-blake3>` 引用。相对 Source 以项目相对 logical source identity 在 `/Game/WebToUEGenerated/Textures/T_<stable-hash>` 原位生成/更新 Texture；等价引用共享同一 ResourceId，机器绝对路径和图片内容 hash 不进入稳定身份，HTTP、越界、目录和不支持格式失败关闭且不进入 Runtime。自版本 10 起 Manifest 序列化 RelativeSource/Generated provenance 与正 intrinsic imported pixel size；首次未驻留 Measure 和 Brush 使用 sealed size，加载对象的 imported size 漂移会失败关闭。Document watcher 覆盖图片依赖，成功变化保持对象路径/ResourceId，失败保留 last-good 但 `WTUE-RES-004` 阻止 Cook。`img` 默认 `Visible`，`data-ue-residency="critical|visible|lazy"` 可选 Document 时机；当前没有 Route 作者入口。每个 View 按 ResourceId 持有独立状态、异步 request handle 和 strong UObject，生产 Runtime 不读作者文件、不调用 `LoadObject`/`LoadSynchronous`，热路径只查 O(1) Handle。Development/Shipping Packaged relative fixture 各证明 1 个 1254×1254 RelativeSource、主 View 1 次 async request、第二 View 1 次 cache hit、0 同步加载/失败并可见绘制真实 generated Texture Brush；该 K=1 证据不代表大型资源页、Route/释放、Material/PSO/Glyph 或产品级内存/首帧结论。
 
 静态 Material：`data-ue-material` 只接受 `/Game`/`/Engine` 下可加载为 `UMaterialInterface` 的完整对象路径；错误类、缺失对象、HTTP、机器绝对/相对路径与 `generated:` Material 以 `WTUE-RES-001` 失败关闭。Importer 生成 `Material` kind、`resource/material/<BLAKE3(path)>`、UnrealAsset provenance、Critical residency、正 Brush Image Size，并将直接 Material/MI package 与递归 MI parent、Material Function、Texture package bytes 密封进规范 dependency closure。Runtime 只经 ResourceId、soft object、View-owned async handle 和 strong `UMaterialInterface` 构建 `FSlateMaterialBrush`；跨节点/View 可共享静态对象，不创建 MID、默认 Tick、同步热加载或 per-node UObject/UWidget/Slate Widget，失败为确定性无 Brush fallback。Development/Shipping Packaged fixture 各证明 1 次 async request、第二 View 1 次 cache hit、0 sync/failure、`is_dynamic_instance=false` 和真实可见绘制；这是 K=1 正确性/工作量证据，不证明 PSO/Shader Compile、GPU Material 成本、大型页或产品级性能。
+
+动态 Material 参数：`UWebToUEView::SubmitMaterialParameter` 是当前唯一产品入口，目标由 generation-safe Instance Handle 与 canonical `MaterialScalar`/`MaterialVector` 地址标识，值类型必须精确匹配。调用仅允许 Game Thread 上的 Binding 或 Behavior durable owner，经 Session-owned 或 standalone M3 coordinator 原子提交 Runtime State，成功后才由 Presentation 检查共享 parent 上的真实全局参数、按 View/Node slot 首次创建或后续复用 strong MID、重建该节点局部 Brush 并 patch Display subtree；相同 owner/value 幂等返回且不 patch。未知/Texture/类型不匹配/stale handle/重复 ID/owner conflict 失败关闭。Reset/destructor 释放 View slots，旧 generation 与删除节点不解析，MID strong ref 保证 GC 存活且不同 View 在同 parent 上隔离。受控 Development/Shipping fixture 各证明 warmup 1 create、measurement 1 reuse/1 Brush patch/1 Display patch、第二 View 1 create、1 次资源消费、0 sync load/failure；静态/unchanged/no-track 没有额外 MID、Tick 或插值。该 API 不等于作者语法、Animation/Transition、Material `Time` 确定性、Texture 参数、PSO/GPU 或大型资源页支持。
 
 Runtime 绘制与命中：
 
@@ -165,7 +169,7 @@ Runtime 绘制与命中：
 
 第一次导入错误不会产生有效运行数据；已有资产重导入失败（包括 UI Source 缺失）保留上次成功运行数据并更新诊断。自动化覆盖 HTML/CSS 依赖、成功重导入的 Generation 推进和旧 Handle 失效、失败时 last-good 保留、随后恢复，以及恢复前后 FieldNotify 绑定连续性。
 
-WTUE Document 使用自定义版本 GUID，当前版本 `StaticMaterialBrushes`（11）在 `RelativeTextureSources`（10）的 Texture intrinsic size 上增加静态 Material Kind/Brush metadata，并把 Resource IR 提升到 1.2。Hex CSS 颜色在编译时由 sRGB 字节转换为 Slate 使用的线性色；低于当前版本的已加载资产请求源文件重编译。版本 3 声明在无法立刻重编译时可于 Hydration 一次性解析兼容 payload，当前 writer 不再写入旧 Name/Value 字符串。项目内 MainMenu/HUD/ScrollableSettings 已持久化为版本 11，并继续保持 0 resources；ResourceTextureSmoke 为版本 11、1 个 RelativeSource generated Texture；ResourceMaterialSmoke 为版本 11、1 个 UnrealAsset static Material。全局未加载资产扫描和完整多层字段迁移仍属于 M6。
+WTUE Document 使用自定义版本 GUID，当前版本 `StaticMaterialBrushes`（11）在 `RelativeTextureSources`（10）的 Texture intrinsic size 上增加静态 Material Kind/Brush metadata，并把 Resource IR 提升到 1.2。Hex CSS 颜色在编译时由 sRGB 字节转换为 Slate 使用的线性色；低于当前版本的已加载资产请求源文件重编译。版本 3 声明在无法立刻重编译时可于 Hydration 一次性解析兼容 payload，当前 writer 不再写入旧 Name/Value 字符串。项目内 MainMenu/HUD/ScrollableSettings 已持久化为版本 11，并继续保持 0 resources；ResourceTextureSmoke 为版本 11、1 个 RelativeSource generated Texture；ResourceMaterialSmoke 与 ResourceMaterialParameterSmoke 各为版本 11、1 个 UnrealAsset Material。动态参数状态属于 Runtime/Presentation，不写回 Compiled Asset。全局未加载资产扫描和完整多层字段迁移仍属于 M6。
 
 ## 5. 明确尚未支持
 
@@ -173,6 +177,7 @@ WTUE Document 使用自定义版本 GUID，当前版本 `StaticMaterialBrushes`�
 - 可见滚动条、基本拖拽、触摸滚动、惯性和虚拟列表。冻结的 MainMenu/HUD/ScrollableSettings 已由自动化审计确认未使用可见滚动条/拖拽/触摸/惯性/水平溢出，因此 M2.8 的对应 `P0.5-if-used` 为有证据的 `N/A`；ScrollableSettings 只使用既有纵向滚轮路径。
 - CommonUI 深度组件/Action Router 集成和无障碍适配器；当前只承诺宿主边界协作与内部语义引用接口。
 - UI Feedback Cue 的作者声明/语义默认、Compiled UI/Behavior Op、事件到 Cue 的自动映射、Profile、Sound/MetaSound 资源、预取/Cook、限频/去重、Inspector Trace 和真实播放证据；基础 Request、Router 注入、Screen Scope、Generation 拒绝与通用 C++ Post-Commit Effect 已支持。
+- Material Parameter 的 HTML/CSS/TS 作者声明、Compiled Behavior/Animation Op、字符串/反射写入、Texture 参数、插值/Transition/Track、Material `Time` 的 WTUE Clock 保证，以及 PSO/Shader Compile、GPU 成本和大型资源页性能；当前只支持 C++ typed Scalar/Vector transaction submission 与 View-owned MID。
 - World Surface Host、WidgetComponent/RT、3D Feedback Scope、世界输入与独立性能门；当前冻结 Corpus 的裁决是有证据的 `N/A`，不是产品支持。
 - Native Component 的 UI Source 声明、Compiler lowering、Compiled IR、Runtime Tree/Host 实例化和真实专用组件；当前只有实验性 C++ Registry/Factory/Instance 合同。
 - Portal/Overlay/Anchor 的 UI Source 声明、Compiler lowering、Compiled IR、现有 Runtime Tree/Yoga/Display List/Semantic Focus 挂载、真实 Anchor geometry/Clip/Transform/Hit、视觉/输入/性能与 Packaged 证据；当前只有多树投影与 Focus Restore C++ Policy。
