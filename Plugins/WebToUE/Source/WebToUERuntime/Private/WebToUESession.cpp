@@ -118,7 +118,14 @@ TSharedPtr<FWebToUESession> FWebToUESession::Create(
 	{
 		Resolved.FeedbackRouter = MakeShared<FWebToUENullFeedbackRouter>();
 	}
-	return TSharedPtr<FWebToUESession>(new FWebToUESession(Resolved));
+	TSharedPtr<FWebToUESession> Session(new FWebToUESession(Resolved));
+	if (!Session->FeedbackRouter->ActivateSession(
+		Session->MakeFeedbackRoutingContext(), OutError))
+	{
+		Session->Invalidate();
+		return nullptr;
+	}
+	return Session;
 }
 
 FWebToUESession::FWebToUESession(const FWebToUESessionCreateParams& Params)
@@ -170,6 +177,7 @@ FWebToUESessionHandle FWebToUESession::AdvanceGeneration()
 		++Generation;
 	}
 	AsyncCoordinator->AdvanceGeneration(GetHandle());
+	FeedbackRouter->OnSessionGenerationAdvanced(MakeFeedbackRoutingContext());
 	return GetHandle();
 }
 
@@ -182,6 +190,7 @@ void FWebToUESession::Invalidate()
 	}
 	AsyncCoordinator->Shutdown();
 	UpdateCoordinator->Shutdown();
+	FeedbackRouter->DeactivateSession(GetHandle());
 	bActive = false;
 	++Generation;
 	if (Generation == 0)
@@ -192,6 +201,11 @@ void FWebToUESession::Invalidate()
 	CommandContext.Reset();
 	LocalPlayer.Reset();
 	World.Reset();
+}
+
+bool FWebToUESession::IsReadyForInteraction() const
+{
+	return IsActive() && FeedbackRouter->IsReadyForInteraction(GetHandle());
 }
 
 FWebToUEFeedbackRequest FWebToUESession::MakeFeedbackRequest(
@@ -208,7 +222,21 @@ FWebToUEFeedbackRequest FWebToUESession::MakeFeedbackRequest(
 	Result.EventCorrelationId = EventCorrelationId;
 	Result.InputModality = InputModality;
 	Result.Scope = Scope;
+	FeedbackRouter->ObserveRequestedFeedback(Result);
 	return Result;
+}
+
+FWebToUEFeedbackRoutingContext FWebToUESession::MakeFeedbackRoutingContext() const
+{
+	FWebToUEFeedbackRoutingContext Context;
+	Context.Session = GetHandle();
+	Context.LocalPlayer = LocalPlayer;
+	Context.World = World;
+	Context.Surface = Surface;
+	Context.Environment = Environment;
+	Context.RealTimeSeconds = Clock
+		? Clock->GetTimeSeconds(EWebToUEClockDomain::Real) : 0.0;
+	return Context;
 }
 
 EWebToUEFeedbackDispatchResult FWebToUESession::DispatchCommittedFeedback(
@@ -233,12 +261,7 @@ EWebToUEFeedbackDispatchResult FWebToUESession::DispatchCommittedFeedback(
 		return EWebToUEFeedbackDispatchResult::DroppedStaleGeneration;
 	}
 
-	FWebToUEFeedbackRoutingContext Context;
-	Context.Session = GetHandle();
-	Context.LocalPlayer = LocalPlayer;
-	Context.World = World;
-	Context.Surface = Surface;
-	Context.Environment = Environment;
+	const FWebToUEFeedbackRoutingContext Context = MakeFeedbackRoutingContext();
 	return FeedbackRouter->RouteCommittedFeedback(Request, Context)
 		? EWebToUEFeedbackDispatchResult::Routed
 		: EWebToUEFeedbackDispatchResult::DroppedByRouter;

@@ -51,6 +51,9 @@ struct WEBTOUERUNTIME_API FWebToUESurfaceContext
 	EWebToUESurfaceKind Kind = EWebToUESurfaceKind::Screen;
 	FName SurfaceId;
 	TWeakObjectPtr<UObject> Owner;
+	/** Host-resolved audio anchor. Behavior and Cue requests never submit raw world coordinates. */
+	bool bHasFeedbackWorldLocation = false;
+	FVector FeedbackWorldLocation = FVector::ZeroVector;
 };
 
 /** Session environment snapshot supplied by the Host. */
@@ -100,6 +103,7 @@ struct WEBTOUERUNTIME_API FWebToUEFeedbackRoutingContext
 	TWeakObjectPtr<UWorld> World;
 	FWebToUESurfaceContext Surface;
 	FWebToUEEnvironmentContext Environment;
+	double RealTimeSeconds = 0.0;
 };
 
 /** Project-injected feedback boundary. Actual Sound/Profile policy belongs to M4. */
@@ -107,6 +111,20 @@ class WEBTOUERUNTIME_API IWebToUEFeedbackRouter
 {
 public:
 	virtual ~IWebToUEFeedbackRouter() = default;
+	virtual bool ActivateSession(
+		const FWebToUEFeedbackRoutingContext& Context, FString& OutError)
+	{
+		OutError.Reset();
+		return true;
+	}
+	virtual void ObserveRequestedFeedback(const FWebToUEFeedbackRequest& Request) {}
+	virtual void OnSessionGenerationAdvanced(
+		const FWebToUEFeedbackRoutingContext& Context) {}
+	virtual void DeactivateSession(const FWebToUESessionHandle& Session) {}
+	virtual bool IsReadyForInteraction(const FWebToUESessionHandle& Session) const
+	{
+		return true;
+	}
 	virtual bool RouteCommittedFeedback(
 		const FWebToUEFeedbackRequest& Request,
 		const FWebToUEFeedbackRoutingContext& Context) = 0;
@@ -179,6 +197,7 @@ public:
 	FWebToUESessionHandle GetHandle() const;
 	FWebToUESessionHandle AdvanceGeneration();
 	void Invalidate();
+	bool IsReadyForInteraction() const;
 
 	FWebToUEFeedbackRequest MakeFeedbackRequest(
 		FName CueId,
@@ -207,6 +226,7 @@ public:
 
 private:
 	explicit FWebToUESession(const FWebToUESessionCreateParams& Params);
+	FWebToUEFeedbackRoutingContext MakeFeedbackRoutingContext() const;
 
 	uint64 SessionId = 0;
 	uint32 Generation = 1;
