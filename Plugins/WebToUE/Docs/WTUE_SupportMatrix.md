@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、UI Feedback、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-21，M4.4 Feedback Profile And UE Router 产品闭环。
+> 当前基线：2026-08-21，M4.5 Visual Transform And Clip 产品闭环。
 >
 > 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Native Component 作者声明/Compiler/Runtime 挂接仍未支持。
 >
@@ -29,6 +29,8 @@
 > 2026-08-21 的 M4.3b 已支持 C++ canonical typed Scalar/Vector Material Parameter submission：Binding/Behavior durable owner、M3 事务后提交、View/Node MID strong ownership、generation/GC/reset 和跨 View 隔离均有 Automation 与双配置 Packaged 证据。参数作者语法、Texture 参数、Animation/Transition/`Time` 保证、Route 作者声明和完整 Incremental/DDC/Lockfile 仍未支持。
 >
 > 2026-08-21 的 M4.4 已支持 C++/Host 注入的版本化 Feedback Profile 与 Session-scoped Router：SoundWave/SoundCue/MetaSound variant、Critical async residency/Cook freshness、LocalPlayer 用户设置、Correlation/Dedupe/Cooldown/Throttle、UE Concurrency、Screen 2D/World policy、默认 UE backend 和项目 backend 均有 Automation 与双配置 Packaged 证据。UI Source/Compiler/Behavior 尚不生成 Cue，语义默认/作者覆盖仍归 M5；没有实际扬声器出声、声学延迟或大型音频 Corpus 性能承诺。
+>
+> 2026-08-21 的 M4.5 已支持受控 CSS Visual Transform/Origin 与变换 Clip Chain：typed asset version 12、Slate affine render transform/arbitrary quad stencil clip、完整与可见 bounds 分层、精确 clip + inverse hit、Semantic/空间索引局部更新均有 Automation 与双配置 Packaged 可见证据。Transition、Animation、3D transform、skew、matrix 作者值、Portal 合成与离屏 Compositing 仍未支持。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -85,12 +87,15 @@ Flex：
 - `opacity`、`z-index`
 - `font-family/size/weight`、`text-align`、`white-space`
 - `object-fit: fill/contain/cover`
+- `transform`、`transform-origin`
 
-值：`px`、百分比、零、部分 `auto`；Hex 颜色和少量命名色。尚无 `rgb()`、变量、`calc()`、渐变和完整颜色集合。
+值：`px`、百分比、零、部分 `auto`；Hex 颜色和少量命名色。Visual Transform 支持 `none`、`translate/translateX/translateY` 的 px/%、`scale/scaleX/scaleY`、`rotate(<deg>)`，列表按 CSS 右到左语义组合；`transform-origin` 支持 left/center/right、top/center/bottom、px/% 两轴。非法/空参数、未支持单位、skew、matrix、3D/perspective 失败关闭。尚无 `rgb()`、变量、`calc()`、渐变和完整颜色集合。
 
-声明表示与顺序：当前 52 个受支持属性在编译期映射为稳定 Property ID，并把 keyword、number、integer、length/edges、color、string、flex 和 border 值解析为类型化 payload；同一份 Property Metadata 统一提供稳定名称、继承性及 Style/Measure/Layout/Paint/HitTest/Resource 影响分类。规则和元素 `style` 的正常 Runtime 热路径不再解析属性名或值字符串。有效声明按源顺序进入 Compiled UI IR；固定 Property winner slots 按 inline origin、specificity、source order 和 declaration order 决定胜者，无效声明产生警告且不参与级联。`margin`/`padding` 四边、`gap` 两轴、`flex` 已提供的 grow/shrink/basis、`background` 纯色及 `border` 已提供的 width/color 会与对应 longhand 竞争同一规范槽位。`border: none` 仍按零宽度 lowering；当前不是完整 CSS 四边 border/style reset 模型。
+声明表示与顺序：当前 54 个受支持属性在编译期映射为稳定 Property ID，并把 keyword、number、integer、length/edges、color、string、flex、border、visual transform 和 transform origin 值解析为类型化 payload；同一份 Property Metadata 统一提供稳定名称、继承性及 Style/Measure/Layout/Paint/HitTest/Resource 影响分类。规则和元素 `style` 的正常 Runtime 热路径不再解析属性名或值字符串。有效声明按源顺序进入 Compiled UI IR；固定 Property winner slots 按 inline origin、specificity、source order 和 declaration order 决定胜者，无效声明产生警告且不参与级联。`margin`/`padding` 四边、`gap` 两轴、`flex` 已提供的 grow/shrink/basis、`background` 纯色及 `border` 已提供的 width/color 会与对应 longhand 竞争同一规范槽位。`border: none` 仍按零宽度 lowering；当前不是完整 CSS 四边 border/style reset 模型。
 
 显式继承：`color`、`font-family`、`font-size`、`font-weight`、`text-align`、`white-space`。
+
+Visual Transform/Clip Runtime 边界：transform 不参与 Yoga Layout，只改变 Paint/Hit/Semantic projection。每个 Display command 保存 affine `LocalToView`/inverse、完整变换后 border-box `Bounds`、与祖先 overflow clip chain 相交后的 `VisibleBounds`；任意旋转 clip 以 quad 进入 Slate clipping/stencil。Semantic Bounds 使用完整 `Bounds`，让当前视口外但可滚入的后代仍参与手柄导航；128px 空间 broad phase 使用 `VisibleBounds`，精确命中逐个检查 clip quad 后逆变换到本地 border box。Hover transform 只 patch 受影响子树、空间 entries 与 dirty union，已验证不写/dirty Yoga。该合同只覆盖普通现有树；真实 Portal/Overlay 挂载、独立 Layout root 与跨 Anchor 合成仍未接入。
 
 ## 3. 绑定、事件、输入、反馈与资源
 
@@ -132,7 +137,7 @@ Native Component C++ 边界：Runtime 模块已提供实验性的 `FWebToUENativ
 
 Stable Semantic Identity C++ 边界：`FWebToUESemanticIdentityPolicy` 只以 `(Component Instance Identity, Stable Semantic Key)` 跨 Compiled UI IR 修订匹配节点。Component Instance 由 Route scope、显式 keyed component/list path 与 contract version 标识；provenance 只保存逻辑 source unit/span 并参与诊断，不参与匹配。计划要求同一 Runtime UI Instance Owner、不同 Generation，兼容 Kind/State Contract 后只保留双方显式 `LocalState`/`ScrollIntent`/`FocusIntent` 交集；unkeyed、新增、跨 Component 移动、不兼容和删除均显式重置/退出。旧 Handle、Pointer/Pseudo/Capture、Binding output、Animation、异步工作及 Style/Layout/Paint/Resource cache 不迁移。当前没有 Stable Key/Component 作者声明、Compiler lowering、Compiled IR 字段、真实状态快照/应用或跨重导入 Focus/Scroll 集成；成功重导入仍按现有路径推进 Generation 并重建 View。
 
-Resource Contract：`FWebToUEResourceContractPolicy` 对单个逻辑 Document 验证大小写敏感、非机器绝对路径的 Dependency/Resource/Route/Group ID；provenance 只允许 `/Game`/`/Engine` Unreal Asset、相对 Source 或 `generated:` 输入，并同时指向密封 Source 与 Resource dependency。Dependency 按逻辑 ID/Kind/BLAKE3-256 content hash 规范排序，Compiler fingerprint 与 provenance/residency/version Manifest 分别进入 freshness stamp。空 Route assignment 是 Document fallback；Route 只能把资源提升到同等或更积极的 `Critical`/`Visible`/`Lazy` 等级，不能降级。UI/Resource IR 必须存在，Behavior/Animation/Interop Schema 可显式 `0.0` 缺席；Runtime 只接受相同 Major 且 producer Minor 不高于 consumer 的层。Texture 与静态 Material importer 把当前 HTML/CSS、引用资源的 saved `.uasset` bytes 及实际传递依赖 BLAKE3 编入 snapshot；版本 11 资产序列化 ResourceId/provenance/residency/必要 Brush metadata/层版本/freshness。Hydration 在创建 Runtime Tree 前验证内部一致性。Cook `PreSave` 复用 importer 构建路径重建 expected stamp，任一 Source/Asset/Compiler/Manifest/version 漂移或 validator 缺席以 `WTUE-RES-004` Error 失败。Route 仍只有 Policy；完整 DDC/Lockfile/跨机 Incremental/CI 属 M6。
+Resource Contract：`FWebToUEResourceContractPolicy` 对单个逻辑 Document 验证大小写敏感、非机器绝对路径的 Dependency/Resource/Route/Group ID；provenance 只允许 `/Game`/`/Engine` Unreal Asset、相对 Source 或 `generated:` 输入，并同时指向密封 Source 与 Resource dependency。Dependency 按逻辑 ID/Kind/BLAKE3-256 content hash 规范排序，Compiler fingerprint 与 provenance/residency/version Manifest 分别进入 freshness stamp。空 Route assignment 是 Document fallback；Route 只能把资源提升到同等或更积极的 `Critical`/`Visible`/`Lazy` 等级，不能降级。UI/Resource IR 必须存在，Behavior/Animation/Interop Schema 可显式 `0.0` 缺席；Runtime 只接受相同 Major 且 producer Minor 不高于 consumer 的层。Texture 与静态 Material importer 把当前 HTML/CSS、引用资源的 saved `.uasset` bytes 及实际传递依赖 BLAKE3 编入 snapshot；版本 12 资产继续序列化 ResourceId/provenance/residency/必要 Brush metadata/层版本/freshness，并新增 typed Visual Transform/Origin。Hydration 在创建 Runtime Tree 前验证内部一致性。Cook `PreSave` 复用 importer 构建路径重建 expected stamp，任一 Source/Asset/Compiler/Manifest/version 漂移或 validator 缺席以 `WTUE-RES-004` Error 失败。Route 仍只有 Policy；完整 DDC/Lockfile/跨机 Incremental/CI 属 M6。
 
 输入：鼠标移动/点击/滚轮、Tab/Shift+Tab、Enter/Space，以及 Slate `FNavigationEvent` 驱动的手柄 D-pad/空间导航与 Accept。hover/pressed/capture 以稀疏 `(SlateUserIndex, PointerIndex)` 记录，focus 以 Slate User 记录；聚合引用计数使共享节点的 `:hover`/`:active`/`:focus` 在最后一个拥有者离开时才清除，错误 Pointer release 不影响其他身份。Slate capture lost 只清理匹配身份并派发不可取消事件。内部 Generation-safe Semantic/Focus Node 接口暴露 Instance Handle、ID、Label、Role、Bounds、Focusable/Enabled/Visible 状态，并支持 per-user request focus/activate；文档换代后旧 Handle 不再解析。焦点移动到被裁剪的后代时会沿现有滚动路径滚入视野；导航越过首尾边界时返回未处理，使外层 CommonUI/Slate 宿主接管。项目启用 CommonUI/CommonInput，但 WebToUE Runtime 不依赖每节点 CommonUI Widget，也不创建每节点 Slate Widget。尚无触摸/惯性、完整文本编辑/IME 和可访问性适配器；真实双 LocalPlayer/CommonUI Modal 与 Packaged 多指针未验证。
 
@@ -172,7 +177,7 @@ Runtime 绘制与命中：
 
 第一次导入错误不会产生有效运行数据；已有资产重导入失败（包括 UI Source 缺失）保留上次成功运行数据并更新诊断。自动化覆盖 HTML/CSS 依赖、成功重导入的 Generation 推进和旧 Handle 失效、失败时 last-good 保留、随后恢复，以及恢复前后 FieldNotify 绑定连续性。
 
-WTUE Document 使用自定义版本 GUID，当前版本 `StaticMaterialBrushes`（11）在 `RelativeTextureSources`（10）的 Texture intrinsic size 上增加静态 Material Kind/Brush metadata，并把 Resource IR 提升到 1.2。Hex CSS 颜色在编译时由 sRGB 字节转换为 Slate 使用的线性色；低于当前版本的已加载资产请求源文件重编译。版本 3 声明在无法立刻重编译时可于 Hydration 一次性解析兼容 payload，当前 writer 不再写入旧 Name/Value 字符串。项目内 MainMenu/HUD/ScrollableSettings 已持久化为版本 11，并继续保持 0 resources；ResourceTextureSmoke 为版本 11、1 个 RelativeSource generated Texture；ResourceMaterialSmoke 与 ResourceMaterialParameterSmoke 各为版本 11、1 个 UnrealAsset Material。动态参数状态属于 Runtime/Presentation，不写回 Compiled Asset。全局未加载资产扫描和完整多层字段迁移仍属于 M6。
+WTUE Document 使用自定义版本 GUID，当前版本 `VisualTransformAndClip`（12）在 `StaticMaterialBrushes`（11）上增加 typed Visual Transform/Origin；Resource IR 仍为 1.2。Hex CSS 颜色在编译时由 sRGB 字节转换为 Slate 使用的线性色；低于当前版本的已加载资产请求源文件重编译。版本 3 声明在无法立刻重编译时可于 Hydration 一次性解析兼容 payload，当前 writer 不再写入旧 Name/Value 字符串。项目内 MainMenu/HUD/ScrollableSettings 已持久化为版本 12，并继续保持 0 resources；ResourceTextureSmoke 为版本 12、1 个 RelativeSource generated Texture；ResourceMaterialSmoke 与 ResourceMaterialParameterSmoke 各为版本 12、1 个 UnrealAsset Material；TransformClipSmoke 为版本 12、0 resources。动态参数与 transform 的运行时 hover 状态属于 Runtime/Presentation，不写回 Compiled Asset。全局未加载资产扫描和完整多层字段迁移仍属于 M6。
 
 ## 5. 明确尚未支持
 
@@ -183,12 +188,12 @@ WTUE Document 使用自定义版本 GUID，当前版本 `StaticMaterialBrushes`�
 - Material Parameter 的 HTML/CSS/TS 作者声明、Compiled Behavior/Animation Op、字符串/反射写入、Texture 参数、插值/Transition/Track、Material `Time` 的 WTUE Clock 保证，以及 PSO/Shader Compile、GPU 成本和大型资源页性能；当前只支持 C++ typed Scalar/Vector transaction submission 与 View-owned MID。
 - World Surface Host、WidgetComponent/RT、3D Feedback Scope、世界输入与独立性能门；当前冻结 Corpus 的裁决是有证据的 `N/A`，不是产品支持。
 - Native Component 的 UI Source 声明、Compiler lowering、Compiled IR、Runtime Tree/Host 实例化和真实专用组件；当前只有实验性 C++ Registry/Factory/Instance 合同。
-- Portal/Overlay/Anchor 的 UI Source 声明、Compiler lowering、Compiled IR、现有 Runtime Tree/Yoga/Display List/Semantic Focus 挂载、真实 Anchor geometry/Clip/Transform/Hit、视觉/输入/性能与 Packaged 证据；当前只有多树投影与 Focus Restore C++ Policy。
+- Portal/Overlay/Anchor 的 UI Source 声明、Compiler lowering、Compiled IR、现有 Runtime Tree/Yoga/Display List/Semantic Focus 挂载、真实 Anchor geometry 与跨投影 Transform/Clip/Hit、视觉/输入/性能与 Packaged 证据；普通现有树的 Visual Transform/Clip 已支持，但当前仍只有 Portal 多树投影与 Focus Restore C++ Policy。
 - Stable Semantic Key、Component Instance/provenance 的 UI Source/TSX 声明与 Compiler/IR lowering、状态快照/事务化应用、跨重导入 Focus/Scroll 和状态保留式热重载；当前只有 C++ 匹配/重置规划 Policy。
 - 项目实际 C++ Data/Command Schema provider、Data/Command Context 验证 Adapter、Compiled Binding/Behavior/Command payload 接入、MVVM Adapter、`.d.ts` 磁盘生成/freshness 和作者可用类型化协议；当前只有规范 snapshot/version/evolution 与 Editor 内存投影 Policy。
 - 嵌套属性路径、Converter、双向绑定、类型化事件载荷。
 - 组件、Props、Slots、条件节点、循环和 Keyed Diff。
-- Transition、Keyframes、Transform、阴影、渐变、滤镜和 Mask。
+- Transition、Keyframes、Animation Track、3D transform、skew、matrix/perspective 作者值、阴影、渐变、滤镜和 Mask；受控 2D Translate/Scale/Rotate/Origin 与普通树 Clip Chain 已支持。
 - 动态 Material 的作者参数语法、Texture Parameter、Animation/Transition 与 `Time` 时钟保证，以及 relative/generated Material Source；静态 `/Game`/`/Engine` Material/MI Asset Brush 和 C++ Scalar/Vector typed parameter submission、View-owned MID/GC 已支持。
 - CSS Grid、Table、Float、CSS Variables、`calc()`、媒体查询。
 - 独立样式/布局/事件检查器、性能时间线和跨平台矩阵。
