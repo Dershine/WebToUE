@@ -36,7 +36,7 @@ function Test-FeedbackSmokeResult {
     }
     if ([string]$result.profile_path -ne
         "/Game/WebToUEExamples/Audio/DA_WTUE_FeedbackProfile.DA_WTUE_FeedbackProfile" -or
-        [string]$result.profile_id -ne "webtoue.feedback.default" -or
+        [string]$result.profile_id -ne "webtoue.personalgame.default" -or
         [int]$result.profile_schema_major -ne 1 -or
         [int]$result.profile_schema_minor -ne 0 -or
         [int]$result.sealed_dependency_count -le 0) {
