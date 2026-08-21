@@ -6,11 +6,11 @@
 >
 > 引擎/平台：Unreal Engine 5.8 / Win64
 >
-> 当前里程碑：M4——UE 原生表现与合成 1 / 9；活跃微观路线为 M4.2 Relative/Generated Texture Source 闭环 0 / 8
+> 当前里程碑：M4——UE 原生表现与合成 2 / 9；M4.2 Relative/Generated Texture Source 闭环已完成，下一微观路线尚未激活
 >
 > 当前交付 Profile：PersonalGame-ready 0.5——Win64 项目内生产使用；通用商业 1.0 延后
 >
-> 最近核验：2026-08-20 `6903e34`～`394cb94` 完成 Unreal Texture/Brush 的 Importer、版本化资产、ResourceId/Residency、Runtime 验证/句柄、stale Cook 和真实 Packaged 闭环；90 / 90 Automation、UE 5.8 Win64 Editor Development、Development/Shipping BuildCookRun Operations `d5342bea9249450db4d531b7473bbae2` / `cf6395f42be04034bc7da68c793792c4` 与双配置 Resource smoke 全部通过
+> 最近核验：2026-08-21 `3cce712`～`4eacabc` 完成 relative/generated Texture 的稳定身份、版本 10 intrinsic size、watch/reimport、saved-package freshness 和真实 Packaged 闭环；95 / 95 Automation、UE 5.8 Win64 Editor Development、Development/Shipping BuildCookRun Operations `8eafd177f300498eb6e329a212e0fb8f` / `fd28f6aa217b424492dbd3ca620a767d` 与双配置 relative texture smoke 全部通过
 >
 > 统一术语：[CONTEXT.md](../../../CONTEXT.md) · 历史证据：[WTUE_EvidenceLedger.md](WTUE_EvidenceLedger.md) · 精确支持边界：[WTUE_SupportMatrix.md](WTUE_SupportMatrix.md)
 
@@ -58,18 +58,18 @@
 | 生命周期 | Compiled IR、Runtime State、持久 Yoga/Layout、Text/Resource Handle 与 View-owned Display List/空间索引已分离 | ✅ |
 | 功能成熟度 | 可覆盖固定 MainMenu/HUD/ScrollableSettings 原型，具备局部 Display patch、语义焦点/手柄导航、DPI/Safe Zone、重导入恢复和跨 DPI Golden；尚非完整生产 UI 框架 | 🟡 |
 | 性能成熟度 | 无默认 Tick；局部更新、K=1 工作量、Packaged Development/Shipping GT/RT/GPU/input、Batch/Vertex、冷启动、Development LLM 与第二 View 硬门已建立并通过 | ✅ |
-| 当前最大风险 | M2 风险已降至当前 Win64 项目内 0.5 可接受等级；M3 基础合同与 M4.1 Texture/Brush 产品接入已收口，当前最大架构风险是 M4.2 relative/generated 身份、重导入与 Cook freshness；其后仍有 Material/MID 所有权、Transform/真实 Portal 合成、Behavior/FieldNotify/Command Adapter 与 Stable Identity 接入、真实双 LocalPlayer/CommonUI Modal、Feedback Profile/音频后端和确定性工具链 | 🟡 |
-| 当前策略 | 保持 M2 出口门、M3 合同边界和 M4.1 Texture/Brush 闭环；只执行 M4.2 relative/generated source 的解析、稳定生成资产身份、intrinsic size、重导入和 Cook/Packaged 纵向闭环，不进入 Material/MID、Feedback、Transform、Animation 或 Compositing | ✅ |
+| 当前最大风险 | M2 风险已降至当前 Win64 项目内 0.5 可接受等级；M3 基础合同与 M4.1/M4.2 Texture 产品接入已收口，M4 后续最大架构风险转为 Material/MID 所有权和 Transform/真实 Portal 合成；Behavior/FieldNotify/Command Adapter、Stable Identity 接入、真实双 LocalPlayer/CommonUI Modal、Feedback Profile/音频后端和确定性工具链仍开放 | 🟡 |
+| 当前策略 | 保持 M2 出口门、M3 合同边界和 M4.1/M4.2 Texture 闭环；本轮在 M4.2 完成后停止，未激活 Material/MID、Feedback、Transform、Animation 或 Compositing 路线 | ✅ |
 
 ### 2.2 验证快照
 
 | 项目 | 当前值 |
 | --- | --- |
-| 自动化测试 | 90 / 90 通过、0 failed、0 skipped（8.583 秒；2026-08-20，M4.1；`StartsWith:WebToUE`） |
-| 当前编译 | M4.1 最终 UE 5.8 Win64 Editor Development 完成 5 / 5 actions并启动 PID `31456`；随后 Shipping 发布门恢复 Editor PID `27168`，readiness/MCP HTTP 200、Python UE 5.8.1/Project WebToUE 与 `Lvl_TopDown` World 探针健康 |
-| 当前发布 | tracked Win64 Development/Shipping BuildCookRun Operations `d5342bea9249450db4d531b7473bbae2` / `cf6395f42be04034bc7da68c793792c4` 均通过，各 585 packages、2,250 chunks、250.23 MiB、AutomationTool 最终 ExitCode 0；Resource smoke `Development-394cb94-20260820T1445Z` / `Shipping-394cb94-20260820T1451Z` 均 `success=true`，各 1 个 compiled resource、主/第二 View 各 1 次 cache hit、0 同步加载/失败/取消；1920×1080 PNG 字节一致且已目视确认真实 Engine texture Brush |
+| 自动化测试 | 95 / 95 通过、0 failed、0 skipped（11.934 秒；2026-08-21，M4.2；`StartsWith:WebToUE`） |
+| 当前编译 | M4.2 最终 UE 5.8 Win64 Editor Development Operation `f3f26b142791497ab1c78b3c321887a7` 完成 5 / 5 actions并启动 PID `13748`；最终 Shipping 发布门恢复 Editor PID `14856`，VibeUE 5.0 readiness/MCP HTTP 200 健康；此前 Python 已确认 UE 5.8.1/Project WebToUE 与 `Lvl_TopDown` World |
+| 当前发布 | tracked Win64 Development/Shipping BuildCookRun Operations `8eafd177f300498eb6e329a212e0fb8f` / `fd28f6aa217b424492dbd3ca620a767d` 均通过，各 586 packages、2,252 chunks、251.92 MiB、AutomationTool 最终 ExitCode 0；双配置 relative texture smoke 均 `success=true`，各 1 个 RelativeSource、主 View 1 次 async request、第二 View 1 次 cache hit、0 同步加载/失败；1920×1080 PNG SHA-256 均为 `848D2466714191AB1AA030DDB13D1D15768294892B8576FB60ECB8CAB221634A`，已目视确认真实 generated Texture Brush |
 | 历史发布 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 曾通过；发布前须在当前提交重跑 |
-| Git 基线 | M2.9 检查点为 `8d26643`、`36fc522`、`e8ac686`、`e524997`、`64c2f7e`、`7df6832`；M3.0 为 `66ada22`、`ecb094c`；M3.1 为 `1fc2a20`、`5342bf6`、`3f1bf20`；M3.2 为 `7be0f8e`；M3.3 为 `692ffeb`、`048a676`、`a7c1db4`；M3.4 为 `9c33768`、`d3e1b80`、`2e0f1c3`；M3.5 为 `4001b08`、`4bdf63c`；M3.6 为 `f05ce52`、`0ae3ac4`；M3.7 为 `21f2933`、`f1c2e01`；M3.8 为 `c3383c6`、`9b666b3`；M3.9 为 `f60b94d`；M4.1 为 `6903e34`、`ccddf69`、`99ad868`、`507c616`、`394cb94`，路线/closure 文档随当前检查点收口 |
+| Git 基线 | M2.9 检查点为 `8d26643`、`36fc522`、`e8ac686`、`e524997`、`64c2f7e`、`7df6832`；M3.0 为 `66ada22`、`ecb094c`；M3.1 为 `1fc2a20`、`5342bf6`、`3f1bf20`；M3.2 为 `7be0f8e`；M3.3 为 `692ffeb`、`048a676`、`a7c1db4`；M3.4 为 `9c33768`、`d3e1b80`、`2e0f1c3`；M3.5 为 `4001b08`、`4bdf63c`；M3.6 为 `f05ce52`、`0ae3ac4`；M3.7 为 `21f2933`、`f1c2e01`；M3.8 为 `c3383c6`、`9b666b3`；M3.9 为 `f60b94d`；M4.1 为 `6903e34`、`ccddf69`、`99ad868`、`507c616`、`394cb94`；M4.2 为 `3cce712`、`9449bee`、`be4e728`、`2184640`、`4eacabc`，路线文档随当前 closure 提交收口 |
 | 发布级别 | Developer Preview |
 
 ### 2.3 宏观里程碑
@@ -80,7 +80,7 @@
 | M1 UI 基础语义 | ✅ | 10 / 10 | 受控菜单/HUD 原型的排版、交互、本地化和诊断基础 |
 | M2 增量原生运行时 | ✅ | 9 / 9 退出门 | 可度量、共享样式模板、稳定身份、持久 Layout/Resource、局部失效、真实渲染与 Win64 0.5 Go/No-Go 已完成 |
 | M3 Runtime Semantics、Host 与原生互操作 | ✅ | 11 / 11 | Native Component、Session/Host、事务/事件/异步、属性所有权、多树/Portal、Stable Identity、Feedback、C++ Data/Command Schema 与 Resource provenance/residency/freshness 基础合同完成 |
-| M4 UE 原生表现与合成 | 🚧 | 1 / 9 | Unreal Texture/Brush 的 Importer→Asset→Cook→View→Packaged 闭环已完成；其后分别进入 relative/generated source、Material/MID、Transform、Animation IR、UI Feedback Profile/UE Audio 与分级 Compositing |
+| M4 UE 原生表现与合成 | 🚧 | 2 / 9 | Unreal 与 relative/generated Texture/Brush 的 Importer→Asset→Cook→View→Packaged 闭环已完成；其后分别进入 Material/MID、Transform、Animation IR、UI Feedback Profile/UE Audio 与分级 Compositing |
 | M5 Dynamic UI 与 Compiled Behavior | ⬜ | 0 / 10 | Typed Mutation、动态结构、受限 Behavior TS、Feedback Cue 和原生事件驱动 Executor |
 | M6 现代作者工具链与 Inspector | ⬜ | 0 / 8 | Component/TSX/Tailwind 子集、Source Map、原生预览、Inspector 与确定性构建 |
 | M7 1.0 产品化 | ⬜ | 0 / 8 | 长期兼容、完整宿主/文本/无障碍、跨平台、外部分发与安全收口 |
@@ -173,8 +173,8 @@ flowchart LR
 
 | 层 | 当前实现 | 已接受的后续边界 |
 | --- | --- | --- |
-| Compiler | Parser/CSS 前端、RichText lowering、Property ID/Typed Value、Property Metadata、固定槽位 Typed Cascade、Property 应用、Yoga Adapter、C++ Interop Schema snapshot/`.d.ts` 投影；Unreal Texture importer 已生成确定性 ResourceId/provenance/residency、BLAKE3-256 Source/Asset dependency closure 与 freshness stamp | 受限 Behavior/TSX 静态编译消费 Schema；relative/generated、Material/MID、Source Map 与完整 Incremental/DDC/Lockfile |
-| Asset/IR | 私有扁平 CompiledNodes/Rules、类型化样式声明与 Texture/Font/String Table Resource Manifest、自定义版本 9、原子提交；Texture ResourceId/provenance/residency、独立层版本与 freshness stamp 已序列化 | Behavior/Animation/Capability IR、Material/MID、稳定 Feedback Cue ID/Profile与完整多层迁移 |
+| Compiler | Parser/CSS 前端、RichText lowering、Property ID/Typed Value、Property Metadata、固定槽位 Typed Cascade、Property 应用、Yoga Adapter、C++ Interop Schema snapshot/`.d.ts` 投影；Texture importer 已支持 Unreal、相对 Source 与 `generated:` 引用，并生成稳定 ResourceId/provenance/intrinsic size、BLAKE3-256 Source/saved-package closure 与 freshness stamp | 受限 Behavior/TSX 静态编译消费 Schema；Material/MID、Source Map 与完整 Incremental/DDC/Lockfile |
+| Asset/IR | 私有扁平 CompiledNodes/Rules、类型化样式声明与 Texture/Font/String Table Resource Manifest、自定义版本 10、原子提交；Texture ResourceId/provenance/residency/intrinsic size、独立层版本与 freshness stamp 已序列化 | Behavior/Animation/Capability IR、Material/MID、稳定 Feedback Cue ID/Profile与完整多层迁移 |
 | Session/Runtime | Screen UI Session 绑定 LocalPlayer、World、Surface、Data/Command、Environment、显式 Game/Unscaled/Real/Test Clock 与 Session Generation；Session-owned 更新协调器在 Game Thread 原子提交，异步协调器提供无默认 Tick 的 Timer、Command Result/Timeout/Cancel、worker MPSC、Generation/View/World cleanup 与有界 Trace；Property Ownership Policy 区分 CSS baseline、唯一 Binding/Behavior durable owner、Animation overlay 和 restrictive gate；Stable Semantic Identity Policy 以 Component-scoped Key 生成 same-owner/cross-generation 状态匹配/重置计划 | 把 FieldNotify/类型化 Command/Behavior 接入事务与异步结果；让 M5/M6 作者/Compiler/View 消费 Stable Identity 与多树合同 |
 | Data/Command | 根 UObject text/visible/enabled FieldNotify、字符串点击事件；项目 C++ 单一事实源的版本化 Schema descriptor/snapshot/evolution Policy，尚无真实 Context Adapter | 让 Compiled Binding/Behavior/Command payload 消费 Schema 与异步 Result/Cancel；直接 C++ 基础，MVVM 可选 Adapter |
 | Presentation | Handle-keyed Layout/Text/Paint/Brush、ResourceId-indexed View-owned 状态/强对象/异步句柄与可 patch Display List；Critical 在 activation、Visible 在可见边界、Lazy 只经显式 ResourceId 入口请求，失败为确定性无图片 fallback | Material/MID、Route、Transform/Clip Chain、Portal/Overlay、分级 Compositing、Feedback Profile/UE Router 与更大资源 Corpus 的真实释放/内存门 |
@@ -315,8 +315,8 @@ M2 不以模糊的“达到 Gameface”作为验收。性能合同分为三类�
 | R-15 | Behavior、FieldNotify、Command 与异步回调产生重入、循环或过期节点访问 | High | 事务/事件/Clock/异步/属性 owner 已收口；`c3383c6` 又冻结类型化 Data/Command snapshot 与 Command response/result/cancel shape，但现有 FieldNotify、Command payload/dispatch 与未来 Behavior 尚未接入 | M5 让真实 Adapter/Behavior 消费 Schema、事务与 Generation Cancellation；见 ADR-0004/0006/0009 | 🚧 M5 |
 | R-16 | Transform、Opacity、Material、Clip 与 Filter 需要 Stacking/Compositing，而扁平 Display List 语义不足 | High | `f05ce52` + ADR-0007 已冻结 Layout/Paint/Semantic projection、显式 Anchor、Overlay order 与 cycle 拒绝；当前真实命令仍为轴对齐 Box/Text，空间索引与命中使用 `FSlateRect`，无 Transform/Material/离屏层证据 | M4 在同一 Paint/Compositing projection 上按 Brush/Layer/RT 分层实现并测量 | 🚧 M4 |
 | R-17 | 全局 View/Focus 无法正确表达 LocalPlayer、Slate User、多指针、关卡生命周期和世界空间 Surface | Medium | `1fc2a20` + `5342bf6` 已建立 Screen UI Session/per-LocalPlayer Host；`048a676` 证明 per-user/pointer 身份隔离；`f05ce52` 冻结同 Session/Surface Anchor、最高 Modal scope、背景 inert 与同代 Focus Restore。真实双 LocalPlayer、CommonUI Modal 与 Packaged 多指针仍未验证；冻结 Corpus 不使用 World Surface | M7 完整 Screen/CommonUI/LocalPlayer 宿主矩阵补真实多用户、Modal 与 Packaged 输入；World Host 仅在冻结 Corpus 使用时提前升级为阻断门 | 🚧 M7 |
-| R-18 | 大型组件文档在 View 创建时预载完整 Manifest，形成 I/O、首帧与常驻内存悬崖 | High | M4.1 Texture 已按 ResourceId 消费 Document Critical/Visible/Lazy，View 不再批量请求完整 Manifest；Packaged 单 Texture 证明主/第二 View 各 1 次 cache hit、0 同步加载/失败/取消，但尚无大型资源页、Material/Feedback、Route、释放与内存压力证据 | M4 后续让 Material/Feedback/Route 消费同一分组并加入大型 Corpus、释放、首帧、PSO/Glyph、内存与 Chunk 门 | 🚧 M4 |
-| R-19 | TS/资源依赖和 last-good 可能造成不可复现构建或陈旧 IR 进入 Cook | High | M4.1 Unreal Texture 已由 Importer 密封 Source/Asset BLAKE3 closure、序列化独立层版本/stamp，Cook `PreSave` 重建 expected exact match并以 `WTUE-RES-004` 拒绝 stale last-good；双配置真实 Cook 通过 | M6 扩展到 Behavior/relative/generated/Material 的密封 Compiler、Lockfile/DDC Key、跨机 Incremental/DDC 与 CI | 🚧 M6 |
+| R-18 | 大型组件文档在 View 创建时预载完整 Manifest，形成 I/O、首帧与常驻内存悬崖 | High | M4.1/M4.2 Texture 已按 ResourceId 消费 Document Critical/Visible/Lazy；relative Packaged K=1 证明主 View 1 次 async request、第二 View 1 次 cache hit、0 同步加载/失败，但冻结 Corpus 没有大型资源页，Material/Feedback、Route、释放与内存压力仍无证据 | M4 后续让 Material/Feedback/Route 消费同一分组并加入大型 Corpus、释放、首帧、PSO/Glyph、内存与 Chunk 门 | 🚧 M4 |
+| R-19 | TS/资源依赖和 last-good 可能造成不可复现构建或陈旧 IR 进入 Cook | High | M4.1/M4.2 已密封 Unreal、relative/generated Texture 的 Source 与 saved-package BLAKE3 closure，序列化独立层版本/stamp；Cook `PreSave` exact match以 `WTUE-RES-004` 拒绝 stale last-good，跨进程专项和双配置真实 Cook 通过 | M4 后续补 Material/Feedback；M5/M6 补 Behavior/Schema、Lockfile/DDC Key、跨机 Incremental/DDC 与 CI | 🚧 M4/M6 |
 | R-20 | 缺少 Native Component 逃生口会迫使 Core 重写输入框、视频、模型预览、CommonUI 和项目控件 | High | `66ada22` 已建立命名空间+版本注册、类型化 Props/Event、Resource Slot、Measure/Input/Focus/Semantics/Lifecycle、显式 Slate Widget 与 RAII 注销合同；尚未接入 Compiler、Runtime Tree 或 Host | M6 只通过显式 Component/Host/Surface 接入作者声明、Compiler 与 Runtime 敌意切片，M7 再稳定公共扩展点；普通节点保持无 per-node Widget | 🚧 M6/M7 |
 | R-21 | 节点直接播放 UI Sound 会产生重复、错误作用域、首次交互加载尖峰，并把主题/用户设置/项目音频后端耦合进 Behavior | High | M3.1 提供 Request/Scope/Correlation/Generation 与注入式 Router；M3.2 证明 Feedback 可作为 Post-Commit Effect；M3.3 将真实 Click 默认动作纳入 Post-Commit，但尚无作者 Cue、Profile、资源预取、限频/去重或 UE 音频后端 | M4 实现 Profile、资源与 UE 后端；M5 实现语义默认和 `EmitFeedbackCue`；见 ADR-0005 | 🚧 M4/M5 |
 | R-22 | C++、UHT/MVVM、`.d.ts` 与 UI Compiler 各自定义协议会产生漂移或 UHT/UBT/Compiler 循环依赖 | High | `c3383c6` + ADR-0009 固定项目 C++ descriptor→Core snapshot→Runtime/Compiler 与 Editor `.d.ts` 的单向链；规范化/演进/投影 3 / 3 专项及 85 / 85 完整 Automation 通过，Runtime 不依赖 Editor/MVVM/生成文件 | M5/M6 实际 Adapter、Compiler 与磁盘 freshness 必须消费同一 snapshot；禁止 `.d.ts` 回读和生成 C++ | ✅ Mitigated |
@@ -360,10 +360,10 @@ M0/M1/M2 已完成，详细验收项保存在 [Evidence Ledger](WTUE_EvidenceLed
 
 退出结果：合同级敌意专项已覆盖异步结果晚到、更新/Feedback 重入与循环、Session 销毁、关卡切换清理、Portal/Modal Focus Restore、属性 owner 冲突、身份重绑定，以及非法 Resource provenance/residency/version 与 stale stamp 拒绝；真实双 LocalPlayer/CommonUI Modal、Transform/Material/WidgetComponent、Compiler/View/Cook 接入和 Packaged 多指针仍有明确后续归属，不由合同专项外推为产品能力。
 
-### M4——UE 原生表现与合成 🚧 1 / 9
+### M4——UE 原生表现与合成 🚧 2 / 9
 
 - [x] `P0.5` 让现有 Unreal Texture/基础 Brush 链路端到端消费版本化 Resource Identity、provenance、Document residency 与 freshness；Importer、Compiled Asset、Cook、View、异步句柄和 Packaged 可见结果形成一个纵向闭环，HTTP Runtime 继续拒绝。
-- [ ] `P0.5` 建立 relative/generated 作者资源解析、稳定生成资产身份、intrinsic size、重导入和 Cook 依赖；不把机器绝对路径或动态下载带入 Runtime。
+- [x] `P0.5` 建立 relative/generated 作者资源解析、稳定生成资产身份、intrinsic size、重导入和 Cook 依赖；不把机器绝对路径或动态下载带入 Runtime。
 - [ ] `P0.5` 将 Material/Material Instance 和必要 Brush Metadata 纳入 Resource Manifest；静态对象共享、View/Node MID 所有权、参数地址和 GC 明确。
 - [ ] `P0.5` 实现版本化 UI Feedback Profile 和默认注入式 UE Router：Cue 映射到 Sound/SoundCue/MetaSound 或项目 Adapter，覆盖 Critical 预取/Cook、用户设置、Concurrency/Cooldown/Throttle、缺项降级、Screen 2D 与 World Surface 策略；Core 不依赖音频中间件。
 - [ ] `P0.5` 实现 Translate/Scale/Rotate/Origin 的 Visual Transform、Clip Chain、transformed bounds、逆变换 Hit Test、Semantic Bounds 和空间索引更新。
@@ -568,18 +568,20 @@ M0/M1/M2 已完成，详细验收项保存在 [Evidence Ledger](WTUE_EvidenceLed
 
 本路线完成后已停止；以下 M4.2 是新的独立微观路线，不改变 M4.1 的历史验收边界。
 
-### M4.2——Relative/Generated Texture Source 闭环 🚧 0 / 8
+### M4.2——Relative/Generated Texture Source 闭环 ✅ 8 / 8
 
 `P0.5-if-used` 裁决：冻结的 MainMenu/HUD/ScrollableSettings 没有图片，因此额外目标游戏图片种类、超大资源页和对应性能工作量继续为有证据的 `N/A`；但 relative source 诊断、稳定生成资产身份、intrinsic size、重导入与 Cook dependency 是无条件 `P0.5`，必须用受控图片 fixture 和真实 Packaged 路径验收。
 
-- [ ] 明确并测试三种作者引用：`/Game`/`/Engine` Unreal Asset、相对 UI Source 的本地图片，以及 `generated:` Unreal 对象引用；HTTP、机器绝对路径、越过项目边界、目录和不支持格式全部失败关闭，Runtime 不读取作者文件。
-- [ ] 相对图片按规范 logical source identity 生成确定性的 `/Game/WebToUEGenerated/Textures` 资产身份；内容变化原位更新同一对象路径，等价引用去重，机器路径和 content hash 不进入稳定 ResourceId。
-- [ ] `FWebToUECompiledResource` 序列化验证后的 intrinsic pixel size；未驻留图片也能参与首次 Measure，加载后的 Brush size 必须与密封尺寸一致，尺寸漂移失败关闭而非静默改变布局。
-- [ ] RelativeSource/Generated provenance、原始图片字节、生成输出与 package dependency 进入同一个 M3.9 dependency closure；Cook expected stamp 对 source、generated asset 或 Compiler drift 保持 exact-match `WTUE-RES-004` 门。
-- [ ] Document dependency/watch/reimport 覆盖相对图片；合法内容或尺寸变化更新同一 generated asset、Manifest 与 stamp，缺失/损坏/越界输入保留 last-good 但不能 Cook。
-- [ ] Runtime 继续只消费版本化 ResourceId→soft object→View-owned handle；K=1 首次 Measure、请求、命中、失败、取消、同步加载和已知所有权可复现，不新增 per-node UObject/UWidget/Slate Widget 或默认 Tick。
-- [ ] 修改前失败、修改后通过的 Import/asset/runtime/freshness 专项覆盖规范化、稳定身份、intrinsic size、重导入、last-good 和 stale Cook；冻结 Corpus 审计明确保持上述 `P0.5-if-used=N/A` 边界。
-- [ ] 候选冻结后通过 `git diff --check`、完整 WebToUE Automation、UE 5.8 Win64 Editor Development、tracked Development/Shipping BuildCookRun、真实 Packaged relative/generated texture smoke 和可见截图；分别报告 Editor、Cook 与 Packaged Runtime 的证据边界。
+- [x] 明确并测试三种作者引用：`/Game`/`/Engine` Unreal Asset、相对 UI Source 的本地图片，以及 `generated:` Unreal 对象引用；HTTP、机器绝对路径、越过项目边界、目录和不支持格式全部失败关闭，Runtime 不读取作者文件。
+- [x] 相对图片按规范 logical source identity 生成确定性的 `/Game/WebToUEGenerated/Textures` 资产身份；内容变化原位更新同一对象路径，等价引用去重，机器路径和 content hash 不进入稳定 ResourceId。
+- [x] `FWebToUECompiledResource` 序列化验证后的 intrinsic pixel size；未驻留图片也能参与首次 Measure，加载后的 Brush size 必须与密封尺寸一致，尺寸漂移失败关闭而非静默改变布局。
+- [x] RelativeSource/Generated provenance、原始图片字节、生成输出与 package dependency 进入同一个 M3.9 dependency closure；Cook expected stamp 对 source、generated asset 或 Compiler drift 保持 exact-match `WTUE-RES-004` 门。
+- [x] Document dependency/watch/reimport 覆盖相对图片；合法内容或尺寸变化更新同一 generated asset、Manifest 与 stamp，缺失/损坏/越界输入保留 last-good 但不能 Cook。
+- [x] Runtime 继续只消费版本化 ResourceId→soft object→View-owned handle；K=1 首次 Measure、请求、命中、失败、取消、同步加载和已知所有权可复现，不新增 per-node UObject/UWidget/Slate Widget 或默认 Tick。
+- [x] 修改前失败、修改后通过的 Import/asset/runtime/freshness 专项覆盖规范化、稳定身份、intrinsic size、重导入、last-good 和 stale Cook；冻结 Corpus 审计明确保持上述 `P0.5-if-used=N/A` 边界。
+- [x] 候选冻结后通过 `git diff --check`、完整 WebToUE Automation、UE 5.8 Win64 Editor Development、tracked Development/Shipping BuildCookRun、真实 Packaged relative/generated texture smoke 和可见截图；分别报告 Editor、Cook 与 Packaged Runtime 的证据边界。
+
+退出证据：`StartsWith:WebToUE` 95 / 95、0 failed/skipped（11.934 秒）；Editor Development Operation `f3f26b142791497ab1c78b3c321887a7` 5 / 5 actions；Development/Shipping BuildCookRun `8eafd177f300498eb6e329a212e0fb8f` / `fd28f6aa217b424492dbd3ca620a767d` 均 AutomationTool ExitCode 0。双配置真实 Packaged smoke 各证明 1 个 `RelativeSource`、稳定 generated object path、1254×1254 sealed imported size、主 View 1 次 async request、第二 View 1 次 cache hit、0 同步加载/失败；两张 1920×1080 PNG SHA-256 均为 `848D2466714191AB1AA030DDB13D1D15768294892B8576FB60ECB8CAB221634A`，已目视确认真实 Texture Brush。首次 Development Cook 正确以 `WTUE-RES-004 dependency-closure` 失败，新增跨进程 freshness 测试后改为直接 BLAKE3 saved package bytes，修复候选才通过双配置发布门。该 K=1 fixture 不外推大型资源页、产品级内存/首帧或 WTUE↔UMG 性能等价。
 
 本路线完成后停止，不进入 Material/MID、Feedback、Transform、Animation 或 Compositing。
 
