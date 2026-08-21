@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、UI Feedback、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-20，M4.1 Unreal Texture/Brush Resource Contract 产品闭环。
+> 当前基线：2026-08-21，M4.3a Static Material Brush Resource Contract 产品闭环。
 >
 > 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Native Component 作者声明/Compiler/Runtime 挂接仍未支持。
 >
@@ -14,7 +14,7 @@
 >
 > 2026-08-20 的 M3.4 已实现 Game/Unscaled/Real/Test Clock、Virtual Clock、无默认 Tick 的一次性 Timer、异步 Command Result/Timeout/Cancel、worker MPSC、Generation/View/World cleanup 与有界 Trace；这只是 C++ Runtime 前置，不等于类型化 Command Schema、Behavior 或 Animation 已支持。
 >
-> 2026-08-20 的 M3.5 已实现 Core Property Ownership Policy：canonical Node/CSS/Transform/typed Material Parameter 地址、CSS/Pseudo baseline、唯一 Binding/Behavior durable owner、active-only Animation overlay、visibility/enabled restrictive gate 与稳定 `WTUE-OWN-001..003` 诊断。现有 Binding/CSS/Pseudo 集成已验证；Behavior、Animation Track、Material/MID 与其作者语法仍未支持。
+> 2026-08-20 的 M3.5 已实现 Core Property Ownership Policy：canonical Node/CSS/Transform/typed Material Parameter 地址、CSS/Pseudo baseline、唯一 Binding/Behavior durable owner、active-only Animation overlay、visibility/enabled restrictive gate 与稳定 `WTUE-OWN-001..003` 诊断。现有 Binding/CSS/Pseudo 集成已验证；静态 Material Brush 已支持，但 Behavior、Animation Track、MID typed parameters 与其作者语法仍未支持。
 >
 > 2026-08-20 的 M3.6 已实现 Runtime Tree Projection Policy：Component/Logical durable ownership、Layout/Paint/Semantic projection、同 Session/Surface Overlay Anchor、Portal cycle/order/Modal scope 与同代 Focus Restore，并提供 `WTUE-TREE-001..005` 诊断。UI Source/Compiler/现有 `SWebToUEView` 尚未创建真实 Portal，不能据此宣称 Overlay/Modal 产品能力已支持。
 >
@@ -22,7 +22,9 @@
 >
 > 2026-08-20 的 M3.8 已实现 C++ Interop Schema Policy：项目 C++ descriptor 是唯一事实源，Core 生成带 Major/Minor 版本的规范 Data/Command snapshot，Editor-only emitter 单向派生确定性 `.d.ts`，并提供 `WTUE-SCHEMA-001..004` 失败门。现有 FieldNotify/View、Command dispatch/payload、Behavior Compiler、MVVM Adapter 与文件 freshness 尚未消费该 snapshot，不能据此宣称类型化作者协议已产品接入。
 >
-> 2026-08-21 的 M4.2 已让 relative/generated Texture Source 产品链消费 M3.9 合同：Importer、版本 10 intrinsic size、稳定 generated asset、watch/reimport、跨进程 Cook freshness、Development/Shipping Packaged smoke 与可见截图均闭环。Route 作者声明、Material/MID、Feedback 资源和完整 Incremental/DDC/Lockfile 仍未支持。
+> 2026-08-21 的 M4.2 已让 relative/generated Texture Source 产品链消费 M3.9 合同：Importer、版本 10 intrinsic size、稳定 generated asset、watch/reimport、跨进程 Cook freshness、Development/Shipping Packaged smoke 与可见截图均闭环。
+>
+> 2026-08-21 的 M4.3a 已让静态 Material 产品链消费同一合同：版本 11、Resource IR 1.2、saved-package 传递 closure/Cook freshness、共享 `UMaterialInterface`、`FSlateMaterialBrush` 与双配置 Packaged smoke 已闭环。Route 作者声明、MID typed parameters、Feedback 资源和完整 Incremental/DDC/Lockfile 仍未支持。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -106,7 +108,7 @@ Flex：
 - Binding 与未来 Behavior 是互斥 durable owner。二者同时 claim 以 `WTUE-OWN-003` 错误拒绝；诊断包含 canonical target 和排序后的 source location，不依赖 claim 遍历顺序。
 - 分层属性采用 `Animation(active) > durable owner > CSS/Source`，但 visibility/enabled 采用全部 gate 必须允许的 restrictive composition。Animation 释放时必须显露最新 underlying value，不能写回旧快照。
 - 当前只把 Color、BackgroundColor、BorderColor、Opacity、Visual Transform 与 Scalar/Vector Material Parameter 归类为可动画目标；Layout、Text、Visibility、Enabled 和 Texture Parameter 拒绝 Animation writer。Material Parameter 不会由 CSS 名称或任意字符串隐式别名。
-- 当前产品路径只有 Binding text/visible/enabled 是已实现 durable owner；`PropertyOwnershipIntegration` 证明 Source text 覆盖、Pseudo visibility gate、Binding visibility gate、Enabled/Pseudo 恢复与上述合同一致。Policy 是 M4/M5 的前置，不等于 Behavior、Animation 或 Material 已支持。
+- 当前产品路径只有 Binding text/visible/enabled 是已实现 durable owner；`PropertyOwnershipIntegration` 证明 Source text 覆盖、Pseudo visibility gate、Binding visibility gate、Enabled/Pseudo 恢复与上述合同一致。静态 Material Brush 不含参数 writer；Policy 是 M4.3b/M5 的前置，不等于 Behavior、Animation 或 MID typed parameters 已支持。
 
 事件：Click 与 Pointer Capture Lost 使用不可变 root→target 事件路径快照；快照携带文档/Session Generation、Slate User/Pointer、Input Modality 与 Correlation，提交前逐段验证父子关系和身份。监听器按 capture→target→bubble 派发，支持 propagation/immediate stop；可取消 Click 支持 prevent default，Pointer Capture Lost 不可取消。`data-ue-on-click="EventName"` 仍广播 `EventName` 和 `ElementId`，但现作为 Session-owned 事务的 Post-Commit 默认动作执行；监听器状态写入先提交，失败/过期事务不广播。当前只有 C++ Listener API 和类型化事件种类，没有 UI Source 事件声明、类型化 payload schema 或 Behavior Event IR。
 
@@ -126,11 +128,13 @@ Native Component C++ 边界：Runtime 模块已提供实验性的 `FWebToUENativ
 
 Stable Semantic Identity C++ 边界：`FWebToUESemanticIdentityPolicy` 只以 `(Component Instance Identity, Stable Semantic Key)` 跨 Compiled UI IR 修订匹配节点。Component Instance 由 Route scope、显式 keyed component/list path 与 contract version 标识；provenance 只保存逻辑 source unit/span 并参与诊断，不参与匹配。计划要求同一 Runtime UI Instance Owner、不同 Generation，兼容 Kind/State Contract 后只保留双方显式 `LocalState`/`ScrollIntent`/`FocusIntent` 交集；unkeyed、新增、跨 Component 移动、不兼容和删除均显式重置/退出。旧 Handle、Pointer/Pseudo/Capture、Binding output、Animation、异步工作及 Style/Layout/Paint/Resource cache 不迁移。当前没有 Stable Key/Component 作者声明、Compiler lowering、Compiled IR 字段、真实状态快照/应用或跨重导入 Focus/Scroll 集成；成功重导入仍按现有路径推进 Generation 并重建 View。
 
-Resource Contract：`FWebToUEResourceContractPolicy` 对单个逻辑 Document 验证大小写敏感、非机器绝对路径的 Dependency/Resource/Route/Group ID；provenance 只允许 `/Game`/`/Engine` Unreal Asset、相对 Source 或 `generated:` 输入，并同时指向密封 Source 与 Resource dependency。Dependency 按逻辑 ID/Kind/BLAKE3-256 content hash 规范排序，Compiler fingerprint 与 provenance/residency/version Manifest 分别进入 freshness stamp。空 Route assignment 是 Document fallback；Route 只能把资源提升到同等或更积极的 `Critical`/`Visible`/`Lazy` 等级，不能降级。UI/Resource IR 必须存在，Behavior/Animation/Interop Schema 可显式 `0.0` 缺席；Runtime 只接受相同 Major 且 producer Minor 不高于 consumer 的层。Texture importer 把当前 HTML/CSS/relative image bytes 与直接读取的 saved `.uasset` bytes BLAKE3 编入 snapshot，版本 10 资产序列化 ResourceId/provenance/residency/intrinsic size/层版本/freshness；Hydration 在创建 Runtime Tree 前验证内部一致性。Cook `PreSave` 复用 importer 构建路径重建 expected stamp，任一 Source/Asset/Compiler/Manifest/version 漂移或 validator 缺席以 `WTUE-RES-004` Error 失败。Route 仍只有 Policy；完整 DDC/Lockfile/跨机 Incremental/CI 属 M6。
+Resource Contract：`FWebToUEResourceContractPolicy` 对单个逻辑 Document 验证大小写敏感、非机器绝对路径的 Dependency/Resource/Route/Group ID；provenance 只允许 `/Game`/`/Engine` Unreal Asset、相对 Source 或 `generated:` 输入，并同时指向密封 Source 与 Resource dependency。Dependency 按逻辑 ID/Kind/BLAKE3-256 content hash 规范排序，Compiler fingerprint 与 provenance/residency/version Manifest 分别进入 freshness stamp。空 Route assignment 是 Document fallback；Route 只能把资源提升到同等或更积极的 `Critical`/`Visible`/`Lazy` 等级，不能降级。UI/Resource IR 必须存在，Behavior/Animation/Interop Schema 可显式 `0.0` 缺席；Runtime 只接受相同 Major 且 producer Minor 不高于 consumer 的层。Texture 与静态 Material importer 把当前 HTML/CSS、引用资源的 saved `.uasset` bytes 及实际传递依赖 BLAKE3 编入 snapshot；版本 11 资产序列化 ResourceId/provenance/residency/必要 Brush metadata/层版本/freshness。Hydration 在创建 Runtime Tree 前验证内部一致性。Cook `PreSave` 复用 importer 构建路径重建 expected stamp，任一 Source/Asset/Compiler/Manifest/version 漂移或 validator 缺席以 `WTUE-RES-004` Error 失败。Route 仍只有 Policy；完整 DDC/Lockfile/跨机 Incremental/CI 属 M6。
 
 输入：鼠标移动/点击/滚轮、Tab/Shift+Tab、Enter/Space，以及 Slate `FNavigationEvent` 驱动的手柄 D-pad/空间导航与 Accept。hover/pressed/capture 以稀疏 `(SlateUserIndex, PointerIndex)` 记录，focus 以 Slate User 记录；聚合引用计数使共享节点的 `:hover`/`:active`/`:focus` 在最后一个拥有者离开时才清除，错误 Pointer release 不影响其他身份。Slate capture lost 只清理匹配身份并派发不可取消事件。内部 Generation-safe Semantic/Focus Node 接口暴露 Instance Handle、ID、Label、Role、Bounds、Focusable/Enabled/Visible 状态，并支持 per-user request focus/activate；文档换代后旧 Handle 不再解析。焦点移动到被裁剪的后代时会沿现有滚动路径滚入视野；导航越过首尾边界时返回未处理，使外层 CommonUI/Slate 宿主接管。项目启用 CommonUI/CommonInput，但 WebToUE Runtime 不依赖每节点 CommonUI Widget，也不创建每节点 Slate Widget。尚无触摸/惯性、完整文本编辑/IME 和可访问性适配器；真实双 LocalPlayer/CommonUI Modal 与 Packaged 多指针未验证。
 
-图片：`src` 支持 `/Game`/`/Engine` Unreal 软对象路径、相对当前 UI Source 的 `png/jpg/jpeg/bmp/tga/psd/dds/exr/hdr`，以及规范 `generated:textures/<64-hex-blake3>` 引用。相对 Source 以项目相对 logical source identity 在 `/Game/WebToUEGenerated/Textures/T_<stable-hash>` 原位生成/更新 Texture；等价引用共享同一 ResourceId，机器绝对路径和图片内容 hash 不进入稳定身份，HTTP、越界、目录和不支持格式失败关闭且不进入 Runtime。版本 10 Manifest 序列化 RelativeSource/Generated provenance 与正 intrinsic imported pixel size；首次未驻留 Measure 和 Brush 使用 sealed size，加载对象的 imported size 漂移会失败关闭。Document watcher 覆盖图片依赖，成功变化保持对象路径/ResourceId，失败保留 last-good 但 `WTUE-RES-004` 阻止 Cook。`img` 默认 `Visible`，`data-ue-residency="critical|visible|lazy"` 可选 Document 时机；当前没有 Route 作者入口。每个 View 按 ResourceId 持有独立状态、异步 request handle 和 strong UObject，生产 Runtime 不读作者文件、不调用 `LoadObject`/`LoadSynchronous`，热路径只查 O(1) Handle。Development/Shipping Packaged relative fixture 各证明 1 个 1254×1254 RelativeSource、主 View 1 次 async request、第二 View 1 次 cache hit、0 同步加载/失败并可见绘制真实 generated Texture Brush；该 K=1 证据不代表大型资源页、Route/释放、Material/PSO/Glyph 或产品级内存/首帧结论。
+图片：`src` 支持 `/Game`/`/Engine` Unreal 软对象路径、相对当前 UI Source 的 `png/jpg/jpeg/bmp/tga/psd/dds/exr/hdr`，以及规范 `generated:textures/<64-hex-blake3>` 引用。相对 Source 以项目相对 logical source identity 在 `/Game/WebToUEGenerated/Textures/T_<stable-hash>` 原位生成/更新 Texture；等价引用共享同一 ResourceId，机器绝对路径和图片内容 hash 不进入稳定身份，HTTP、越界、目录和不支持格式失败关闭且不进入 Runtime。自版本 10 起 Manifest 序列化 RelativeSource/Generated provenance 与正 intrinsic imported pixel size；首次未驻留 Measure 和 Brush 使用 sealed size，加载对象的 imported size 漂移会失败关闭。Document watcher 覆盖图片依赖，成功变化保持对象路径/ResourceId，失败保留 last-good 但 `WTUE-RES-004` 阻止 Cook。`img` 默认 `Visible`，`data-ue-residency="critical|visible|lazy"` 可选 Document 时机；当前没有 Route 作者入口。每个 View 按 ResourceId 持有独立状态、异步 request handle 和 strong UObject，生产 Runtime 不读作者文件、不调用 `LoadObject`/`LoadSynchronous`，热路径只查 O(1) Handle。Development/Shipping Packaged relative fixture 各证明 1 个 1254×1254 RelativeSource、主 View 1 次 async request、第二 View 1 次 cache hit、0 同步加载/失败并可见绘制真实 generated Texture Brush；该 K=1 证据不代表大型资源页、Route/释放、Material/PSO/Glyph 或产品级内存/首帧结论。
+
+静态 Material：`data-ue-material` 只接受 `/Game`/`/Engine` 下可加载为 `UMaterialInterface` 的完整对象路径；错误类、缺失对象、HTTP、机器绝对/相对路径与 `generated:` Material 以 `WTUE-RES-001` 失败关闭。Importer 生成 `Material` kind、`resource/material/<BLAKE3(path)>`、UnrealAsset provenance、Critical residency、正 Brush Image Size，并将直接 Material/MI package 与递归 MI parent、Material Function、Texture package bytes 密封进规范 dependency closure。Runtime 只经 ResourceId、soft object、View-owned async handle 和 strong `UMaterialInterface` 构建 `FSlateMaterialBrush`；跨节点/View 可共享静态对象，不创建 MID、默认 Tick、同步热加载或 per-node UObject/UWidget/Slate Widget，失败为确定性无 Brush fallback。Development/Shipping Packaged fixture 各证明 1 次 async request、第二 View 1 次 cache hit、0 sync/failure、`is_dynamic_instance=false` 和真实可见绘制；这是 K=1 正确性/工作量证据，不证明 PSO/Shader Compile、GPU Material 成本、大型页或产品级性能。
 
 Runtime 绘制与命中：
 
@@ -141,6 +145,7 @@ Runtime 绘制与命中：
 - 相邻 Rounded Box 只有在 Type、Resource/Shader、Clip、Draw Effect 和圆角/边框几何兼容时才复用 LayerId；颜色不进入 Slate Rounded Box 的几何兼容键。文本和不兼容 Clip/Geometry 会断开 run，保留 Slate 最终 batching 的正确性。
 - Packaged benchmark schema `6` 在既有 probe-child Draw Elements/几何覆盖率、全窗口 Slate Batches/Vertices、GT/RT/GPU、RSS、VRAM 与 input-to-backbuffer-ready 上，增加 Asset Load/UI Object Construction/TakeWidget/Prepass/Attach/Renderer Wait 冷启动归因、首/第二 View 进程内存点、Development known-owned Runtime/Presentation 与共享 Style Template census，以及 K=1 Style/Selector/Binding/Resource 工作量政策。`Tools/Invoke-WebToUEPackagedExitGate.ps1` 固定 1920×1080、120 warmup/600 samples、三次冷启动中位数、WTUE/UMG `≤2×`、Batch/Vertex 上限、Development LLM `≤64 MiB` 和同进程第二 View 门。独立进程原始 RSS 只报告；Development 可记录 LLM，UE 默认 Shipping 未编译 LLM 时显式输出 `llm_compiled_in=false`/`not_compiled_for_configuration`，不得把 0 当成已测内存。
 - `Tools/Invoke-WebToUEResourceSmoke.ps1` 是独立的 M4.1 Packaged 正确性/视觉门，不改变冻结三页 `maximum_compiled_resources=0` 的 M2 policy；它只接受 `ResourceTextureSmoke` 的 1 个 Resource、主 View恰好 1 次消费、第二 View 1 次 resident cache hit、全阶段 0 sync load/failure/cancellation 与实际 screenshot。它不是 WTUE↔UMG 性能比较门。
+- `Tools/Invoke-WebToUEMaterialSmoke.ps1` 是独立的 M4.3a Packaged 正确性/视觉门；它只接受 `ResourceMaterialSmoke` 的精确 Material ResourceId/path、静态对象、主 View 1 次 async request、第二 View 1 次 cache hit、全阶段 0 sync load/failure/cancellation 与实际 screenshot。它不替代 M2 性能门或 GPU/PSO 分析。
 - 目标专用 Golden 覆盖 MainMenu/HUD/ScrollableSettings 的 1280×720 逻辑视口，在 1x/2x 分别渲染实际 framebuffer PNG，并以规范化 32×18 RGBA 签名守住跨 DPI 视觉；这是冻结 Corpus 的回归门，不是通用 Screenshot/Golden 工具链。
 
 ## 4. 诊断与资产行为
@@ -156,11 +161,11 @@ Runtime 绘制与命中：
 - 树投影的无效/跨代节点域（`WTUE-TREE-001`）、父链/注册顺序（`WTUE-TREE-002`）、Anchor Session/Surface/父投影（`WTUE-TREE-003`）、Portal 挂载/cycle/Modal（`WTUE-TREE-004`）与 Focus Restore token/候选链（`WTUE-TREE-005`）；当前主要由 C++ Policy/Automation 使用。
 - Stable Semantic Identity 的无效 Owner/Generation/Component/provenance/node/state domain（`WTUE-ID-001`）、同 Component 重复 Key（`WTUE-ID-002`）、Kind/State Contract 不兼容重置（`WTUE-ID-003`）和 unkeyed retention 请求（`WTUE-ID-004`）；当前只由 C++ Policy/Automation 使用。
 - Interop Schema 的无效 Schema/version/identifier（`WTUE-SCHEMA-001`）、UE 大小写语义重复/enum wire value 冲突（`WTUE-SCHEMA-002`）、未知/递归类型与非法 Command shape（`WTUE-SCHEMA-003`）、版本倒退/同版本漂移/Minor breaking evolution（`WTUE-SCHEMA-004`）；当前只由 C++/Editor Policy Automation 使用。
-- Resource Contract 的无效 logical ID/provenance/dependency（`WTUE-RES-001`）、residency/assignment（`WTUE-RES-002`）、层版本/IR compatibility（`WTUE-RES-003`）、Cook freshness（`WTUE-RES-004`）和重复/不一致 Manifest（`WTUE-RES-005`）；Unreal 与 relative/generated Texture 的 Importer/Hydration/View/Cook 已实际消费，Route/Material 仍只到 Policy 边界。
+- Resource Contract 的无效 logical ID/provenance/dependency（`WTUE-RES-001`）、residency/assignment（`WTUE-RES-002`）、层版本/IR compatibility（`WTUE-RES-003`）、Cook freshness（`WTUE-RES-004`）和重复/不一致 Manifest（`WTUE-RES-005`）；Unreal 与 relative/generated Texture、静态 Material 的 Importer/Hydration/View/Cook 已实际消费，Route/MID/Feedback 仍只到 Policy 或未接入边界。
 
 第一次导入错误不会产生有效运行数据；已有资产重导入失败（包括 UI Source 缺失）保留上次成功运行数据并更新诊断。自动化覆盖 HTML/CSS 依赖、成功重导入的 Generation 推进和旧 Handle 失效、失败时 last-good 保留、随后恢复，以及恢复前后 FieldNotify 绑定连续性。
 
-WTUE Document 使用自定义版本 GUID，当前版本 `RelativeTextureSources`（10）在 `ResourceConsumerContract`（9）的 Resource manifest/stamp 与 Compiled Node ResourceId consumer 上增加 Texture intrinsic size。Hex CSS 颜色在编译时由 sRGB 字节转换为 Slate 使用的线性色；低于当前版本的已加载资产请求源文件重编译。版本 3 声明在无法立刻重编译时可于 Hydration 一次性解析兼容 payload，当前 writer 不再写入旧 Name/Value 字符串。项目内 MainMenu/HUD/ScrollableSettings 已持久化为版本 10，并继续保持 0 resources；ResourceTextureSmoke 为版本 10、1 个 RelativeSource generated Texture。全局未加载资产扫描和完整多层字段迁移仍属于 M6。
+WTUE Document 使用自定义版本 GUID，当前版本 `StaticMaterialBrushes`（11）在 `RelativeTextureSources`（10）的 Texture intrinsic size 上增加静态 Material Kind/Brush metadata，并把 Resource IR 提升到 1.2。Hex CSS 颜色在编译时由 sRGB 字节转换为 Slate 使用的线性色；低于当前版本的已加载资产请求源文件重编译。版本 3 声明在无法立刻重编译时可于 Hydration 一次性解析兼容 payload，当前 writer 不再写入旧 Name/Value 字符串。项目内 MainMenu/HUD/ScrollableSettings 已持久化为版本 11，并继续保持 0 resources；ResourceTextureSmoke 为版本 11、1 个 RelativeSource generated Texture；ResourceMaterialSmoke 为版本 11、1 个 UnrealAsset static Material。全局未加载资产扫描和完整多层字段迁移仍属于 M6。
 
 ## 5. 明确尚未支持
 
@@ -176,5 +181,6 @@ WTUE Document 使用自定义版本 GUID，当前版本 `RelativeTextureSources`
 - 嵌套属性路径、Converter、双向绑定、类型化事件载荷。
 - 组件、Props、Slots、条件节点、循环和 Keyed Diff。
 - Transition、Keyframes、Transform、阴影、渐变、滤镜和 Mask。
+- MID 创建/所有权/GC、Scalar/Vector typed parameter 写入、动态 Material 动画与 `Time` 时钟保证；relative/generated Material Source 也未支持。静态 `/Game`/`/Engine` Material/MI Asset Brush 已支持。
 - CSS Grid、Table、Float、CSS Variables、`calc()`、媒体查询。
 - 独立样式/布局/事件检查器、性能时间线和跨平台矩阵。
