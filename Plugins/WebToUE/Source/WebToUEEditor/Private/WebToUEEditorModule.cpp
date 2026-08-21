@@ -1,6 +1,7 @@
 #include "Modules/ModuleManager.h"
 
 #include "WebToUEDocument.h"
+#include "WebToUEFeedbackProfile.h"
 #include "WebToUEFactory.h"
 
 #include "DirectoryWatcherModule.h"
@@ -19,6 +20,8 @@ public:
 	{
 		UWebToUEDocument::CookFreshnessValidator().BindStatic(
 			&UWebToUEFactory::ValidateCookFreshness);
+		UWebToUEFeedbackProfile::CookFreshnessValidator().BindStatic(
+			&UWebToUEFeedbackProfile::ValidateCurrentCookFreshness);
 		RecompileRequestedHandle = UWebToUEDocument::OnDocumentNeedsRecompile().AddRaw(
 			this, &FWebToUEEditorModule::QueueVersionRecompile);
 		for (TObjectIterator<UWebToUEDocument> It; It; ++It)
@@ -43,6 +46,7 @@ public:
 	virtual void ShutdownModule() override
 	{
 		UWebToUEDocument::CookFreshnessValidator().Unbind();
+		UWebToUEFeedbackProfile::CookFreshnessValidator().Unbind();
 		if (TickerHandle.IsValid()) FTSTicker::GetCoreTicker().RemoveTicker(TickerHandle);
 		if (RecompileRequestedHandle.IsValid())
 		{

@@ -6,7 +6,7 @@
 >
 > 引擎/平台：Unreal Engine 5.8 / Win64
 >
-> 当前里程碑：M4——UE 原生表现与合成 3 / 9；M4.3b MID Ownership And Typed Parameters 已完成，M4.4 Feedback Profile And UE Router 为下一候选但尚未激活
+> 当前里程碑：M4——UE 原生表现与合成 3 / 9；M4.4 Feedback Profile And UE Router 已激活
 >
 > 当前交付 Profile：PersonalGame-ready 0.5——Win64 项目内生产使用；通用商业 1.0 延后
 >
@@ -632,7 +632,19 @@ M4.3a 当时在静态 Brush 边界停止；下述 M4.3b 现已闭环，因此宏
 
 退出证据：实现提交 `e4d4ba4`；聚焦 3 / 3、完整 `StartsWith:WebToUE` 103 / 103、0 failed/skipped（50.3764 秒）；Editor Development Operation `6f8fc44980b944bba93a99ff5defaf41` 19 / 19 actions、warnings-as-errors。Development/Shipping BuildCookRun Operations `357be076e7cb42439035062e57720da5` / `b392941066484d429c9bb2ed3e38b1bc` 均为 591 packages、2,258 WebToUE content chunks（含 global 2,259）、251.95 MiB、AutomationTool ExitCode 0；该证据只覆盖 Build/Cook/Stage/Pak/IoStore 与 Editor 恢复。独立 Packaged gates `Saved/Evidence/M4.3b/Development-20260821T071600Z` / `Shipping-20260821T072800Z` 均 `success=true`，记录上述精确 K=1 计数；两张 1920×1080 PNG 均为 38,954 bytes、SHA-256 `8F89CBBC870B074883887E932ABBE1F0C1C0CA2883197AE27BBFB495F0F8F136`，均已目视确认中央动态 Material Brush。首次 Shipping wrapper 错把 staged bootstrap `WebToUE.exe` 当实际 Game binary并以进程码 3 退出；门脚本改为解析 `WebToUE-Win64-<Configuration>.exe` 后，同一 Shipping 产物通过，失败目录保留但不计通过。
 
-本路线完成后停止，宏观 M4 更新到 `3 / 9`；M4.4 只作为下一建议，未激活，也未进入 Transform、Animation、Transition 或 Compositing。
+本路线完成后停止，宏观 M4 更新到 `3 / 9`；未进入 Transform、Animation、Transition 或 Compositing。
+
+### M4.4——Feedback Profile And UE Router 🚧 2 / 7
+
+本路线已激活。冻结 MainMenu/HUD/ScrollableSettings 没有 Feedback Cue/Sound 作者声明，额外目标游戏 Cue 集合、World Surface 空间反馈和对应资源/性能工作量暂定为有证据的 `P0.5-if-used=N/A`；版本化 Profile、Critical 资源/Cook、默认 UE Router 与确定性策略本身是无条件 `P0.5`，必须用受控 SoundWave/SoundCue/MetaSound fixture 和真实 Packaged 路径验收。Behavior `EmitFeedbackCue`、语义控件默认 Cue 与作者覆盖仍归 M5，不得由本路线提前引入。
+
+- [x] 版本化 Feedback Profile 以 namespaced Cue ID 映射受控 SoundWave/SoundCue/MetaSound variant、音量/音高、UE Concurrency 与项目 Route ID；重复/非法 Cue、错误资源类型、非有限策略值和不兼容版本失败关闭。
+- [x] Profile 资源消费 M3.9 的 Resource Identity/provenance/residency/dependency closure/freshness 合同；Critical 资源和 Concurrency 依赖跨 Editor 重启仍可验证，Cook 在 package drift 或 stale seal 时以稳定诊断拒绝。
+- [ ] Session 激活时只异步预取 Critical 资源并在其完成前保持不可交互；首次 Feedback 派发不执行同步加载，缺项、未驻留和加载失败可观测降级且不阻塞原 UI 事务。
+- [ ] Router 消费 LocalPlayer-aware 用户静音/音量设置，并以 Session/LocalPlayer/Viewport/Surface scope key 执行 correlation-aware 去重、Cooldown、Throttle、确定性 Variant 和 UE Concurrency 传递；策略状态有界并随 Session 释放。
+- [ ] Screen Surface 只生成 2D 播放意图；World Surface 只按显式 Profile 策略选择 Drop、2D 或 Host Owner 位置 3D。默认 UE backend 与项目注入 backend 共用类型化播放请求，Core 不依赖音频中间件、Sound 路径不进入 Behavior/UI Command。
+- [ ] 红绿 Automation 覆盖双 LocalPlayer、Hover/Focus 同事件去重、快速 Slider 限频、用户静音、Profile 缺项、Critical 未驻留、Session/Generation 销毁、Screen 2D 与 World 策略，并提供确定性 requested/committed/deduplicated/throttled/routed/missing/dropped trace。
+- [ ] 持久 Profile/音频 fixture、跨进程 freshness、完整 Automation、UE 5.8 Win64 Editor Development、Development/Shipping BuildCookRun 与独立 Packaged Feedback smoke 全部通过；Packaged 只证明受控资源驻留、路由/策略和进程内 UE backend 调用，不把扬声器实际出声、输入到像素或大型音频 Corpus 成本伪装为已测。
 
 M2.0～M2.9 已完成可观测性、生命周期、类型化样式、共享 Style Template、统一身份、Paint-only Pseudo 与根字段 FieldNotify/Text 局部失效、持久 Yoga/异步 Resource Handle、Display/Hit/Packaged 真实渲染、核心生产宿主与 M2 0.5 Go/No-Go。宏观 `9 / 9` 的全部性能预算和 Win64 Packaged 证据已经收口；BuildPlugin 与第二平台仍属 P1.0。
 

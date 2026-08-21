@@ -11,5 +11,9 @@ public class WebToUERuntime : ModuleRules
             "DeveloperSettings", "FieldNotification", "WebToUECore"
         });
         PrivateDependencyModuleNames.AddRange(new[] { "ApplicationCore", "RenderCore" });
+        if (Target.bBuildEditor)
+        {
+            PrivateDependencyModuleNames.Add("AssetRegistry");
+        }
     }
 }
