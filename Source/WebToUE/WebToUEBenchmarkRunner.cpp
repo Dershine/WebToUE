@@ -18,6 +18,7 @@
 #include "HAL/LowLevelMemTracker.h"
 #include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformMemory.h"
+#include "Hash/Blake3.h"
 #include "Input/Events.h"
 #include "Input/HittestGrid.h"
 #include "Layout/Children.h"
@@ -30,6 +31,8 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Misc/OutputDeviceNull.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "Performance/LatencyMarkerModule.h"
 #include "RenderTimer.h"
 #include "Rendering/DrawElements.h"
@@ -51,6 +54,12 @@
 namespace WebToUE::Benchmark::Private
 {
 	static constexpr double BytesToMiB = 1.0 / (1024.0 * 1024.0);
+
+	static FString HashUtf8(const FString& Value)
+	{
+		const FTCHARToUTF8 Utf8(*Value);
+		return LexToString(FBlake3::HashBuffer(Utf8.Get(), Utf8.Length())).ToLower();
+	}
 
 	static double ElapsedMilliseconds(uint64 StartCycles, uint64 EndCycles)
 	{
@@ -471,7 +480,8 @@ bool FWebToUEBenchmarkRunner::Tick(float DeltaSeconds)
 
 bool FWebToUEBenchmarkRunner::SetupUi()
 {
-	const bool bResourceSmoke = Corpus == TEXT("ResourceTextureSmoke");
+	const bool bResourceSmoke = Corpus == TEXT("ResourceTextureSmoke") ||
+		Corpus == TEXT("ResourceMaterialSmoke");
 	if ((Mode != TEXT("WebToUE") && Mode != TEXT("UMG")) ||
 		(Corpus != TEXT("MainMenu") && Corpus != TEXT("HUD") &&
 			Corpus != TEXT("ScrollableSettings") && !bResourceSmoke) ||
@@ -737,7 +747,9 @@ bool FWebToUEBenchmarkRunner::CaptureSecondViewEvidence()
 		return false;
 	}
 	SecondTargetWidget->SlatePrepass(1.0f);
-	if (Mode == TEXT("WebToUE") && Corpus == TEXT("ResourceTextureSmoke"))
+	if (Mode == TEXT("WebToUE") &&
+		(Corpus == TEXT("ResourceTextureSmoke") ||
+		 Corpus == TEXT("ResourceMaterialSmoke")))
 	{
 		FHittestGrid HittestGrid;
 		FSlateWindowElementList DrawElements(nullptr);
@@ -1070,30 +1082,56 @@ void FWebToUEBenchmarkRunner::Finish()
 		MeasurementWorkload = PerformanceCapture->GetSnapshot();
 	}
 	const bool bSecondViewEvidence = CaptureSecondViewEvidence();
-	const bool bResourceSmoke = Corpus == TEXT("ResourceTextureSmoke");
+	const bool bTextureResourceSmoke = Corpus == TEXT("ResourceTextureSmoke");
+	const bool bMaterialResourceSmoke = Corpus == TEXT("ResourceMaterialSmoke");
+	const bool bResourceSmoke = bTextureResourceSmoke || bMaterialResourceSmoke;
 	bool bResourceIdentityValid = !bResourceSmoke;
 	const FWebToUECompiledResource* SmokeResource = nullptr;
 	if (bResourceSmoke && BenchmarkDocument.IsValid() &&
 		BenchmarkDocument->GetResourceManifest().Num() == 1)
 	{
 		SmokeResource = &BenchmarkDocument->GetResourceManifest()[0];
-		const UTexture2D* Texture = Cast<UTexture2D>(
-			SmokeResource->Path.ResolveObject());
-		bResourceIdentityValid =
-			SmokeResource->Kind == EWebToUEResourceKind::Texture &&
-			SmokeResource->ResourceId.StartsWith(TEXT("resource/texture/")) &&
-			SmokeResource->Path.ToString().StartsWith(
-				TEXT("/Game/WebToUEGenerated/Textures/T_")) &&
-			SmokeResource->Provenance.Origin ==
-				EWebToUEResourceOrigin::RelativeSource &&
-			SmokeResource->Provenance.AuthorReference ==
-				TEXT("ResourceTextureSmoke.png") &&
-			SmokeResource->Provenance.ResolvedDependencyId.StartsWith(
-				TEXT("generated:textures/")) &&
-			SmokeResource->IntrinsicSize.X > 0.0f &&
-			SmokeResource->IntrinsicSize.Y > 0.0f && Texture &&
-			SmokeResource->IntrinsicSize == FVector2f(
-				Texture->GetImportedSize().X, Texture->GetImportedSize().Y);
+		if (bTextureResourceSmoke)
+		{
+			const UTexture2D* Texture = Cast<UTexture2D>(
+				SmokeResource->Path.ResolveObject());
+			bResourceIdentityValid =
+				SmokeResource->Kind == EWebToUEResourceKind::Texture &&
+				SmokeResource->ResourceId.StartsWith(TEXT("resource/texture/")) &&
+				SmokeResource->Path.ToString().StartsWith(
+					TEXT("/Game/WebToUEGenerated/Textures/T_")) &&
+				SmokeResource->Provenance.Origin ==
+					EWebToUEResourceOrigin::RelativeSource &&
+				SmokeResource->Provenance.AuthorReference ==
+					TEXT("ResourceTextureSmoke.png") &&
+				SmokeResource->Provenance.ResolvedDependencyId.StartsWith(
+					TEXT("generated:textures/")) &&
+				SmokeResource->IntrinsicSize.X > 0.0f &&
+				SmokeResource->IntrinsicSize.Y > 0.0f && Texture &&
+				SmokeResource->IntrinsicSize == FVector2f(
+					Texture->GetImportedSize().X, Texture->GetImportedSize().Y);
+		}
+		else
+		{
+			const FString ExpectedPath =
+				TEXT("/Game/WebToUEExamples/Materials/MI_WTUE_StaticMaterialBrush.MI_WTUE_StaticMaterialBrush");
+			const UMaterialInterface* Material = Cast<UMaterialInterface>(
+				SmokeResource->Path.ResolveObject());
+			bResourceIdentityValid =
+				SmokeResource->Kind == EWebToUEResourceKind::Material &&
+				SmokeResource->ResourceId ==
+					TEXT("resource/material/") + HashUtf8(ExpectedPath) &&
+				SmokeResource->Path.ToString() == ExpectedPath &&
+				SmokeResource->Provenance.Origin ==
+					EWebToUEResourceOrigin::UnrealAsset &&
+				SmokeResource->Provenance.AuthorReference == ExpectedPath &&
+				SmokeResource->Provenance.ResolvedDependencyId ==
+					TEXT("asset/Game/WebToUEExamples/Materials/MI_WTUE_StaticMaterialBrush") &&
+				SmokeResource->Residency == EWebToUEResidencyClass::Critical &&
+				SmokeResource->BrushImageSize.X > 0.0f &&
+				SmokeResource->BrushImageSize.Y > 0.0f && Material &&
+				!Material->IsA<UMaterialInstanceDynamic>();
+		}
 	}
 	const bool bHasWebToUERuntimeWork = Mode != TEXT("WebToUE") ||
 		(CompiledNodeCount > 0 &&
@@ -1297,28 +1335,49 @@ void FWebToUEBenchmarkRunner::Finish()
 		(CompiledRootNodeIndex >= 0 && CompiledRootNodeIndex < CompiledNodeCount));
 	if (bResourceSmoke)
 	{
-		TSharedRef<FJsonObject> TextureResource = MakeShared<FJsonObject>();
-		TextureResource->SetBoolField(TEXT("evaluated"), true);
-		TextureResource->SetBoolField(TEXT("passed"), bResourceIdentityValid);
+		TSharedRef<FJsonObject> ResourceEvidence = MakeShared<FJsonObject>();
+		ResourceEvidence->SetBoolField(TEXT("evaluated"), true);
+		ResourceEvidence->SetBoolField(TEXT("passed"), bResourceIdentityValid);
 		if (SmokeResource)
 		{
-			TextureResource->SetStringField(TEXT("resource_id"),
+			ResourceEvidence->SetStringField(TEXT("resource_id"),
 				SmokeResource->ResourceId);
-			TextureResource->SetStringField(TEXT("path"),
+			ResourceEvidence->SetStringField(TEXT("path"),
 				SmokeResource->Path.ToString());
-			TextureResource->SetStringField(TEXT("origin"),
+			ResourceEvidence->SetStringField(TEXT("origin"),
 				StaticEnum<EWebToUEResourceOrigin>()->GetNameStringByValue(
 					static_cast<int64>(SmokeResource->Provenance.Origin)));
-			TextureResource->SetStringField(TEXT("author_reference"),
+			ResourceEvidence->SetStringField(TEXT("author_reference"),
 				SmokeResource->Provenance.AuthorReference);
-			TextureResource->SetStringField(TEXT("resolved_dependency_id"),
+			ResourceEvidence->SetStringField(TEXT("resolved_dependency_id"),
 				SmokeResource->Provenance.ResolvedDependencyId);
-			TextureResource->SetNumberField(TEXT("intrinsic_width"),
-				SmokeResource->IntrinsicSize.X);
-			TextureResource->SetNumberField(TEXT("intrinsic_height"),
-				SmokeResource->IntrinsicSize.Y);
+			if (bTextureResourceSmoke)
+			{
+				ResourceEvidence->SetNumberField(TEXT("intrinsic_width"),
+					SmokeResource->IntrinsicSize.X);
+				ResourceEvidence->SetNumberField(TEXT("intrinsic_height"),
+					SmokeResource->IntrinsicSize.Y);
+			}
+			else
+			{
+				ResourceEvidence->SetStringField(TEXT("residency"),
+					StaticEnum<EWebToUEResidencyClass>()->GetNameStringByValue(
+						static_cast<int64>(SmokeResource->Residency)));
+				ResourceEvidence->SetNumberField(TEXT("brush_width"),
+					SmokeResource->BrushImageSize.X);
+				ResourceEvidence->SetNumberField(TEXT("brush_height"),
+					SmokeResource->BrushImageSize.Y);
+				const UMaterialInterface* Material = Cast<UMaterialInterface>(
+					SmokeResource->Path.ResolveObject());
+				ResourceEvidence->SetBoolField(TEXT("is_material_interface"),
+					Material != nullptr);
+				ResourceEvidence->SetBoolField(TEXT("is_dynamic_instance"),
+					Material && Material->IsA<UMaterialInstanceDynamic>());
+			}
 		}
-		DocumentContract->SetObjectField(TEXT("texture_resource"), TextureResource);
+		DocumentContract->SetObjectField(
+			bTextureResourceSmoke ? TEXT("texture_resource") : TEXT("material_resource"),
+			ResourceEvidence);
 	}
 	Root->SetObjectField(TEXT("compiled_document"), DocumentContract);
 	Root->SetObjectField(TEXT("setup_workload"), WorkloadObject(SetupWorkload));

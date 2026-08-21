@@ -17,6 +17,8 @@
 #include "Engine/Texture2D.h"
 #include "Hash/Blake3.h"
 #include "Input/HittestGrid.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
 #include "Rendering/DrawElements.h"
 #include "Types/PaintArgs.h"
@@ -36,6 +38,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEPackagedExitPolicyTest,
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceTextureSmokeContractTest,
 	"WebToUE.Benchmark.ResourceTextureSmokeContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceMaterialSmokeContractTest,
+	"WebToUE.Benchmark.ResourceMaterialSmokeContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebToUEBenchmarkCorpusContractTest::RunTest(const FString& Parameters)
@@ -367,6 +373,99 @@ bool FWebToUEResourceTextureSmokeContractTest::RunTest(const FString& Parameters
 		Workload.GetCounter(EWebToUEPerformanceCounter::ResourceCacheHits), uint64(1));
 	TestTrue(TEXT("The Visible texture materializes a Slate brush"),
 		Workload.GetCounter(EWebToUEPerformanceCounter::BrushBuilds) > 0);
+	return true;
+}
+
+bool FWebToUEResourceMaterialSmokeContractTest::RunTest(const FString& Parameters)
+{
+	const FString MaterialPath =
+		TEXT("/Game/WebToUEExamples/Materials/MI_WTUE_StaticMaterialBrush.MI_WTUE_StaticMaterialBrush");
+	const FTCHARToUTF8 MaterialPathUtf8(*MaterialPath);
+	const FString ExpectedResourceId = TEXT("resource/material/") +
+		LexToString(FBlake3::HashBuffer(
+			MaterialPathUtf8.Get(), MaterialPathUtf8.Length())).ToLower();
+	UWebToUEDocument* Document = LoadObject<UWebToUEDocument>(nullptr,
+		TEXT("/Game/WebToUEExamples/ResourceMaterialSmoke.ResourceMaterialSmoke"));
+	if (!TestNotNull(TEXT("The packaged Material smoke document loads"), Document))
+	{
+		return false;
+	}
+	TestEqual(TEXT("The Material fixture seals exactly one compiled resource"),
+		Document->GetResourceManifest().Num(), 1);
+	if (Document->GetResourceManifest().Num() != 1)
+	{
+		return false;
+	}
+	const FWebToUECompiledResource& Resource = Document->GetResourceManifest()[0];
+	TestEqual(TEXT("The fixture compiles a static Material resource"), Resource.Kind,
+		EWebToUEResourceKind::Material);
+	TestEqual(TEXT("The fixture preserves the exact Material soft path"),
+		Resource.Path.ToString(), MaterialPath);
+	TestEqual(TEXT("The fixture owns a path-stable Material ResourceId"),
+		Resource.ResourceId, ExpectedResourceId);
+	TestEqual(TEXT("The fixture records UnrealAsset provenance"),
+		Resource.Provenance.Origin, EWebToUEResourceOrigin::UnrealAsset);
+	TestEqual(TEXT("The fixture preserves its Material author reference"),
+		Resource.Provenance.AuthorReference, MaterialPath);
+	TestEqual(TEXT("The fixture seals its direct Material package identity"),
+		Resource.Provenance.ResolvedDependencyId,
+		FString(TEXT("asset/Game/WebToUEExamples/Materials/MI_WTUE_StaticMaterialBrush")));
+	TestEqual(TEXT("The fixture makes the Material Critical"), Resource.Residency,
+		EWebToUEResidencyClass::Critical);
+	TestTrue(TEXT("The fixture seals a positive Material brush size"),
+		Resource.BrushImageSize.X > 0.0f && Resource.BrushImageSize.Y > 0.0f);
+	TArray<FWebToUEResourceContractDiagnostic> Diagnostics;
+	TestTrue(TEXT("The fixture passes the serialized Material resource contract"),
+		Document->ValidateResourceContract(Diagnostics));
+	const FWebToUECompiledNode* MaterialNode =
+		Document->GetCompiledNodes().FindByPredicate(
+			[](const FWebToUECompiledNode& Node)
+			{
+				return Node.Attributes.ContainsByPredicate(
+					[](const FWebToUECompiledAttribute& Attribute)
+					{
+						return Attribute.Name == TEXT("id") &&
+							Attribute.Value == TEXT("static-material");
+					});
+			});
+	TestNotNull(TEXT("The fixture contains its compiled Material node"), MaterialNode);
+	if (MaterialNode)
+	{
+		TestEqual(TEXT("The node consumes the manifest Material ResourceId"),
+			MaterialNode->ResourceId, Resource.ResourceId);
+	}
+
+	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *MaterialPath);
+	TestNotNull(TEXT("The static MaterialInterface is resident before View creation"),
+		Material);
+	TestFalse(TEXT("The fixture never creates or serializes a MID"),
+		Material && Material->IsA<UMaterialInstanceDynamic>());
+	FWebToUEPerformanceCapture Capture;
+	UWebToUEView* View = NewObject<UWebToUEView>(GetTransientPackage());
+	View->SetDocument(Document);
+	const TSharedRef<SWidget> Widget = View->TakeWidget();
+	Widget->SlatePrepass(1.0f);
+	FHittestGrid HittestGrid;
+	FSlateWindowElementList DrawElements(nullptr);
+	const FGeometry Geometry = FGeometry::MakeRoot(
+		FVector2D(1920.0, 1080.0), FSlateLayoutTransform());
+	const FPaintArgs PaintArgs(
+		nullptr, HittestGrid, FVector2D::ZeroVector, 0.0, 0.0f);
+	Widget->Paint(PaintArgs, Geometry,
+		FSlateRect(0.0f, 0.0f, 1920.0f, 1080.0f), DrawElements, 0,
+		FWidgetStyle(), true);
+	const FWebToUEPerformanceSnapshot Workload = Capture.GetSnapshot();
+	FWebToUENode* RuntimeMaterial =
+		View->FindRuntimeNodeByIdForTesting(TEXT("static-material"));
+	TestNotNull(TEXT("The fixture hydrates its static Material node"), RuntimeMaterial);
+	TestEqual(TEXT("The View consumes one resident static Material"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::ResourceCacheHits), uint64(1));
+	TestEqual(TEXT("The static Material hot path performs no synchronous load"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::ResourceLoadAttempts), uint64(0));
+	TestTrue(TEXT("The static Material materializes a Slate brush"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::BrushBuilds) > 0);
+	TestTrue(TEXT("The Material-backed node contributes a paint element"),
+		Workload.GetCounter(EWebToUEPerformanceCounter::PaintDrawElements) > 0);
 	return true;
 }
 

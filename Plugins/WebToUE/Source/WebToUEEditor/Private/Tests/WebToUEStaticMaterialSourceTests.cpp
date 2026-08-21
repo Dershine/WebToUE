@@ -1,9 +1,16 @@
 #if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
 
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "ObjectTools.h"
+#include "UObject/Package.h"
+#include "UObject/SavePackage.h"
 #include "WebToUEDocument.h"
 #include "WebToUEFactory.h"
 
@@ -19,6 +26,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEStaticMaterialCookFreshnessTest,
 	"WebToUE.Editor.StaticMaterialCookFreshness",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEStaticMaterialPackageDriftTest,
+	"WebToUE.Editor.StaticMaterialPackageDrift",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 namespace WebToUE::StaticMaterialSource::Tests
 {
 	static FString MakeTestFilename(const TCHAR* Leaf)
@@ -27,6 +38,17 @@ namespace WebToUE::StaticMaterialSource::Tests
 			FPaths::ProjectSavedDir(), TEXT("WebToUEAutomation/StaticMaterial"));
 		IFileManager::Get().MakeDirectory(*Directory, true);
 		return FPaths::Combine(Directory, Leaf);
+	}
+
+	static bool SaveTestAsset(UObject& Asset)
+	{
+		UPackage* Package = Asset.GetPackage();
+		const FString Filename = FPackageName::LongPackageNameToFilename(
+			Package->GetName(), FPackageName::GetAssetPackageExtension());
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		SaveArgs.SaveFlags = SAVE_None;
+		return UPackage::SavePackage(Package, &Asset, *Filename, SaveArgs);
 	}
 }
 
@@ -141,6 +163,8 @@ bool FWebToUEStaticMaterialFailuresTest::RunTest(const FString& Parameters)
 	};
 	AddExpectedError(TEXT("WTUE-RES-001"),
 		EAutomationExpectedErrorFlags::Contains, RejectedReferences.Num());
+	AddExpectedError(TEXT("WTUE_Missing"),
+		EAutomationExpectedErrorFlags::Contains, -1);
 	for (const FString& Reference : RejectedReferences)
 	{
 		const FString Html = FString::Printf(
@@ -204,6 +228,81 @@ bool FWebToUEStaticMaterialCookFreshnessTest::RunTest(const FString& Parameters)
 	}
 	TestTrue(TEXT("The persisted Material fixture is Cook-fresh across processes"),
 		bFresh);
+	return true;
+}
+
+bool FWebToUEStaticMaterialPackageDriftTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::StaticMaterialSource::Tests;
+	const FString UniqueSuffix = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString AssetName = TEXT("MI_WTUE_Drift_") + UniqueSuffix;
+	const FString PackageName = TEXT("/Game/WebToUEAutomation/") + AssetName;
+	const FString ObjectPath = PackageName + TEXT(".") + AssetName;
+	const FString Filename = MakeTestFilename(TEXT("PackageDrift.html"));
+	UMaterialInstanceConstant* DriftMaterial = nullptr;
+	AddExpectedError(
+		TEXT("package was marked as deleted in editor, but has been modified on disk"),
+		EAutomationExpectedErrorFlags::Contains, -1);
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().Delete(*Filename, false, true);
+		if (DriftMaterial)
+		{
+			TArray<UObject*> AssetsToDelete { DriftMaterial };
+			ObjectTools::DeleteObjectsUnchecked(AssetsToDelete);
+		}
+	};
+
+	UMaterialInstanceConstant* SourceMaterial =
+		LoadObject<UMaterialInstanceConstant>(nullptr,
+			TEXT("/Game/WebToUEExamples/Materials/MI_WTUE_StaticMaterialBrush.MI_WTUE_StaticMaterialBrush"));
+	if (!TestNotNull(TEXT("The package-drift source MI loads"), SourceMaterial))
+	{
+		return false;
+	}
+	UPackage* Package = CreatePackage(*PackageName);
+	DriftMaterial = DuplicateObject<UMaterialInstanceConstant>(
+		SourceMaterial, Package, *AssetName);
+	if (!TestNotNull(TEXT("A disposable package-drift MI is created"), DriftMaterial))
+	{
+		return false;
+	}
+	DriftMaterial->SetFlags(RF_Public | RF_Standalone);
+	FAssetRegistryModule::AssetCreated(DriftMaterial);
+	TestTrue(TEXT("The disposable MI package is saved"),
+		SaveTestAsset(*DriftMaterial));
+	const FString Html = FString::Printf(
+		TEXT("<body><div data-ue-material='%s' data-ue-residency='critical'></div></body>"),
+		*ObjectPath);
+	TestTrue(TEXT("The package-drift source is written"),
+		FFileHelper::SaveStringToFile(Html, *Filename));
+	UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
+	TestTrue(TEXT("The disposable MI imports before drift"),
+		UWebToUEFactory::ImportIntoDocument(*Document, Filename, false));
+	TArray<FWebToUEResourceContractDiagnostic> Diagnostics;
+	TestTrue(TEXT("The disposable MI is initially Cook-fresh"),
+		UWebToUEFactory::ValidateCookFreshness(*Document, Diagnostics));
+
+	UMaterialInterface* AlternativeParent = LoadObject<UMaterialInterface>(nullptr,
+		TEXT("/Engine/EngineMaterials/DefaultMaterial.DefaultMaterial"));
+	if (!TestNotNull(TEXT("The alternate Material parent loads"), AlternativeParent))
+	{
+		return false;
+	}
+	DriftMaterial->SetParentEditorOnly(AlternativeParent);
+	DriftMaterial->MarkPackageDirty();
+	TestTrue(TEXT("The changed direct MI package is saved"),
+		SaveTestAsset(*DriftMaterial));
+	Diagnostics.Reset();
+	TestFalse(TEXT("Direct Material package drift fails Cook freshness"),
+		UWebToUEFactory::ValidateCookFreshness(*Document, Diagnostics));
+	TestTrue(TEXT("Direct package drift reports WTUE-RES-004 dependency closure"),
+		Diagnostics.ContainsByPredicate([](
+			const FWebToUEResourceContractDiagnostic& Diagnostic)
+		{
+			return Diagnostic.Code == TEXT("WTUE-RES-004") &&
+				Diagnostic.Path == TEXT("dependency-closure");
+		}));
 	return true;
 }
 

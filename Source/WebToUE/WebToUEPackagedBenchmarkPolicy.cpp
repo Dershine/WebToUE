@@ -124,7 +124,7 @@ bool FWebToUEPackagedBenchmarkPolicy::ValidateResourceSmokeEvidence(
 		OutFailures);
 	Require(Evidence.SecondViewResourceAsyncRequests == 0 &&
 		Evidence.SecondViewResourceCacheHits == 1,
-		TEXT("resource smoke second view did not reuse the resident texture"),
+		TEXT("resource smoke second view did not reuse the resident resource"),
 		OutFailures);
 	Require(Evidence.SecondViewResourceFailures == 0 &&
 		Evidence.SecondViewResourceCancellations == 0,
