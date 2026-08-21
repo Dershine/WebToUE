@@ -601,21 +601,6 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 	ColdPrepassMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
 		PrepassStartCycles, FPlatformTime::Cycles64());
 	AfterFirstViewMemory = CaptureMemoryPoint();
-#if WITH_DEV_AUTOMATION_TESTS
-	if (Mode == TEXT("WebToUE"))
-	{
-		FWebToUERuntimeMemoryCensus Census;
-		if (UWebToUEView* View = Cast<UWebToUEView>(PrimaryUiObject.Get());
-			View && View->GetRuntimeMemoryCensusForTesting(Census))
-		{
-			FirstViewCensus.bAvailable = true;
-			FirstViewCensus.SharedStyleTemplateBytes =
-				Census.SharedStyleTemplateKnownOwnedBytes;
-			FirstViewCensus.RuntimeBytes = Census.RuntimeKnownOwnedBytes;
-			FirstViewCensus.PresentationBytes = Census.PresentationKnownOwnedBytes;
-		}
-	}
-#endif
 	if (PerformanceCapture)
 	{
 		SetupWorkload = PerformanceCapture->GetSnapshot();
@@ -690,6 +675,23 @@ bool FWebToUEBenchmarkRunner::CaptureSecondViewEvidence()
 		UE_LOG(LogTemp, Error, TEXT("WTUE_BENCHMARK_SECOND_VIEW missing game world"));
 		return false;
 	}
+#if WITH_DEV_AUTOMATION_TESTS
+	// Compare equivalent mature view states. The primary view has completed its real
+	// renderer-backed warmup and measurement paints before the second view is created.
+	if (Mode == TEXT("WebToUE"))
+	{
+		FWebToUERuntimeMemoryCensus Census;
+		if (UWebToUEView* View = Cast<UWebToUEView>(PrimaryUiObject.Get());
+			View && View->GetRuntimeMemoryCensusForTesting(Census))
+		{
+			FirstViewCensus.bAvailable = true;
+			FirstViewCensus.SharedStyleTemplateBytes =
+				Census.SharedStyleTemplateKnownOwnedBytes;
+			FirstViewCensus.RuntimeBytes = Census.RuntimeKnownOwnedBytes;
+			FirstViewCensus.PresentationBytes = Census.PresentationKnownOwnedBytes;
+		}
+	}
+#endif
 	BeforeSecondViewMemory = CaptureMemoryPoint();
 	if (PerformanceCapture)
 	{
