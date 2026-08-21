@@ -171,8 +171,8 @@ bool FWebToUEVisualTransformClipTest::RunTest(const FString& Parameters)
 		TargetSemantic);
 	if (TargetSemantic)
 	{
-		TestTrue(TEXT("Semantic bounds expose transformed and clipped visual bounds"),
-			NearlyEqualRect(TargetSemantic->Bounds, Command->VisibleBounds));
+		TestTrue(TEXT("Semantic bounds expose the transformed border-box bounds"),
+			NearlyEqualRect(TargetSemantic->Bounds, Command->Bounds));
 	}
 
 	FHittestGrid HittestGrid;

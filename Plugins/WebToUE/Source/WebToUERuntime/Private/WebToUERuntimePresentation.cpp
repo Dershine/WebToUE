@@ -2066,7 +2066,7 @@ FSlateRect FWebToUERuntimePresentation::GetVisualBounds(const FWebToUENode& Node
 	if (bDisplayListDirty && !bLayoutDirty) RebuildDisplayList();
 	const int32* CommandIndex = DisplayCommandIndices.Find(RuntimeInstance.GetHandle(&Node));
 	return CommandIndex && DisplayCommands.IsValidIndex(*CommandIndex)
-		? DisplayCommands[*CommandIndex].VisibleBounds : FSlateRect();
+		? DisplayCommands[*CommandIndex].Bounds : FSlateRect();
 }
 
 FWebToUENode* FWebToUERuntimePresentation::HitTest(const FVector2f& LocalPosition) const

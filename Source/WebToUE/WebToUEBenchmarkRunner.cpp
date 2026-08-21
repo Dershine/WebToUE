@@ -1609,7 +1609,7 @@ void FWebToUEBenchmarkRunner::Finish()
 			SecondViewWorkload.GetCounter(
 				EWebToUEPerformanceCounter::ClipChainZonesResolved));
 		TransformEvidence->SetStringField(TEXT("contract"),
-			TEXT("Semantic bounds and the 128px broad-phase spatial index consume transformed/clipped AABBs; hit testing then evaluates every clip quad and inverse-transforms into the local border box. K=1 hover changes remain paint/hit-only and do not write or dirty Yoga."));
+			TEXT("Semantic bounds consume the transformed full border-box AABB so clipped descendants remain navigable; the 128px broad-phase spatial index consumes transformed/clipped AABBs. Hit testing then evaluates every clip quad and inverse-transforms into the local border box. K=1 hover changes remain paint/hit-only and do not write or dirty Yoga."));
 		Root->SetObjectField(TEXT("visual_transform"), TransformEvidence);
 	}
 	if (bDynamicMaterialParameterSmoke)
