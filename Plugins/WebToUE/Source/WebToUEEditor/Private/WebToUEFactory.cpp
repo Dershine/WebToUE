@@ -6,16 +6,19 @@
 #include "WebToUESettings.h"
 
 #include "AssetImportTask.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
 #include "EditorFramework/AssetImportData.h"
 #include "Factories/TextureFactory.h"
 #include "Internationalization/StringTable.h"
 #include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
 #include "HAL/FileManager.h"
 #include "Hash/Blake3.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Modules/ModuleManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWebToUEImport, Log, All);
 
@@ -31,6 +34,14 @@ namespace WebToUE::ResourceImport::Private
 		FWebToUEResourceProvenance Provenance;
 		FString SourceFilename;
 		FVector2f IntrinsicSize = FVector2f::ZeroVector;
+	};
+
+	struct FResolvedMaterialReference
+	{
+		FSoftObjectPath Path;
+		FString ResourceId;
+		FWebToUEResourceProvenance Provenance;
+		FVector2f BrushImageSize = FVector2f(1.0f, 1.0f);
 	};
 
 	static FString HashBuffer(const void* Data, uint64 Size)
@@ -255,6 +266,29 @@ namespace WebToUE::ResourceImport::Private
 		return true;
 	}
 
+	static bool ResolveMaterialReference(const FString& SourceUnit,
+		const FString& Reference, FResolvedMaterialReference& OutResolved)
+	{
+		if (!Reference.StartsWith(TEXT("/Game/")) &&
+			!Reference.StartsWith(TEXT("/Engine/")))
+		{
+			return false;
+		}
+		OutResolved.Path = FSoftObjectPath(Reference);
+		UMaterialInterface* Material =
+			Cast<UMaterialInterface>(OutResolved.Path.TryLoad());
+		if (!OutResolved.Path.IsValid() || !Material ||
+			FSoftObjectPath(Material) != OutResolved.Path)
+		{
+			return false;
+		}
+		OutResolved.ResourceId =
+			TEXT("resource/material/") + HashUtf8(Reference);
+		OutResolved.Provenance = { EWebToUEResourceOrigin::UnrealAsset,
+			SourceUnit, Reference, MakeAssetDependencyId(OutResolved.Path) };
+		return true;
+	}
+
 	static int32 ResidencyRank(EWebToUEResidencyClass Residency)
 	{
 		switch (Residency)
@@ -301,22 +335,104 @@ namespace WebToUE::ResourceImport::Private
 		{
 			return false;
 		}
-		const FString PackageFilename = FPackageName::LongPackageNameToFilename(
-			PackageNameString, FPackageName::GetAssetPackageExtension());
+		FString PackageFilename;
+		if (!FPackageName::DoesPackageExist(PackageNameString, &PackageFilename))
+		{
+			return false;
+		}
 		return HashFile(PackageFilename, OutHash);
+	}
+
+	static bool AddSealedPackageDependency(const FName PackageName,
+		TArray<FWebToUEResourceDependency>& OutDependencies,
+		TArray<FWebToUEResourceContractDiagnostic>& OutDiagnostics)
+	{
+		const FString PackageString = PackageName.ToString();
+		if (!PackageString.StartsWith(TEXT("/Game/")) &&
+			!PackageString.StartsWith(TEXT("/Engine/")))
+		{
+			return true;
+		}
+		FString PackageFilename;
+		FString PackageHash;
+		if (!FPackageName::DoesPackageExist(PackageString, &PackageFilename) ||
+			!HashFile(PackageFilename, PackageHash))
+		{
+			OutDiagnostics.Add({ TEXT("WTUE-RES-001"),
+				TEXT("dependencies.material-package"),
+				FString::Printf(TEXT("Referenced Material package is missing or has no saved content fingerprint: %s"),
+					*PackageString) });
+			return false;
+		}
+		const FString LogicalId = PackageString.StartsWith(TEXT("/"))
+			? TEXT("asset/") + PackageString.RightChop(1)
+			: TEXT("asset/") + PackageString;
+		if (!OutDependencies.ContainsByPredicate(
+			[&LogicalId](const FWebToUEResourceDependency& Dependency)
+			{
+				return Dependency.LogicalId == LogicalId;
+			}))
+		{
+			OutDependencies.Add({ LogicalId,
+				EWebToUEResourceDependencyKind::Resource, MoveTemp(PackageHash) });
+		}
+		return true;
+	}
+
+	static bool AddMaterialDependencyClosure(const FSoftObjectPath& MaterialPath,
+		TArray<FWebToUEResourceDependency>& OutDependencies,
+		TArray<FWebToUEResourceContractDiagnostic>& OutDiagnostics)
+	{
+		const FString RootPackage =
+			FPackageName::ObjectPathToPackageName(MaterialPath.ToString());
+		if (!FPackageName::IsValidLongPackageName(RootPackage))
+		{
+			return false;
+		}
+		IAssetRegistry& AssetRegistry =
+			FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TArray<FName> Pending = { FName(*RootPackage) };
+		TSet<FName> Visited;
+		bool bValid = true;
+		while (!Pending.IsEmpty())
+		{
+			const FName PackageName = Pending.Pop(EAllowShrinking::No);
+			if (Visited.Contains(PackageName))
+			{
+				continue;
+			}
+			Visited.Add(PackageName);
+			bValid &= AddSealedPackageDependency(
+				PackageName, OutDependencies, OutDiagnostics);
+			TArray<FName> ReferencedPackages;
+			AssetRegistry.GetDependencies(PackageName, ReferencedPackages,
+				UE::AssetRegistry::EDependencyCategory::Package);
+			ReferencedPackages.Sort(FNameLexicalLess());
+			for (const FName ReferencedPackage : ReferencedPackages)
+			{
+				const FString ReferencedString = ReferencedPackage.ToString();
+				if (!Visited.Contains(ReferencedPackage) &&
+					(ReferencedString.StartsWith(TEXT("/Game/")) ||
+					 ReferencedString.StartsWith(TEXT("/Engine/"))))
+				{
+					Pending.Add(ReferencedPackage);
+				}
+			}
+		}
+		return bValid;
 	}
 
 	static FWebToUEArtifactVersionSet CurrentArtifactVersions()
 	{
 		FWebToUEArtifactVersionSet Versions;
 		Versions.UiIr = { 1, 0 };
-		Versions.ResourceIr = { 1, 1 };
+		Versions.ResourceIr = { 1, 2 };
 		return Versions;
 	}
 
 	static FString CompilerFingerprint()
 	{
-		return HashUtf8(TEXT("WebToUE.Editor.ResourceImporter/2;UI-IR/1.0;Resource-IR/1.1"));
+		return HashUtf8(TEXT("WebToUE.Editor.ResourceImporter/3;UI-IR/1.0;Resource-IR/1.2;StaticMaterialBrush/1"));
 	}
 
 	static bool ResolveDocumentTextures(const FWebToUEDocument& Source,
@@ -382,6 +498,42 @@ namespace WebToUE::ResourceImport::Private
 		});
 		return bValid;
 	}
+
+	static bool ResolveDocumentMaterials(const FWebToUEDocument& Source,
+		const FString& SourceUnit,
+		TMap<FString, FResolvedMaterialReference>& OutResolvedByAuthorReference,
+		TArray<FWebToUEResourceContractDiagnostic>& OutDiagnostics)
+	{
+		bool bValid = true;
+		Source.ForEachNode([&](FWebToUENode& Node)
+		{
+			const FString Reference = Node.GetAttribute(TEXT("data-ue-material"));
+			if (Reference.IsEmpty() ||
+				OutResolvedByAuthorReference.Contains(Reference))
+			{
+				return;
+			}
+			FResolvedMaterialReference Resolved;
+			if (!ResolveMaterialReference(SourceUnit, Reference, Resolved))
+			{
+				const bool bUnsupportedSource =
+					Reference.StartsWith(TEXT("generated:")) ||
+					(!Reference.StartsWith(TEXT("/Game/")) &&
+					 !Reference.StartsWith(TEXT("/Engine/")));
+				OutDiagnostics.Add({ TEXT("WTUE-RES-001"),
+					TEXT("resources.material"),
+					bUnsupportedSource
+						? FString::Printf(TEXT("Static Material references only support sealed /Game or /Engine MaterialInterface assets; relative/generated/HTTP/absolute-disk sources are unsupported: %s"),
+							*Reference)
+						: FString::Printf(TEXT("Material reference is missing or is not a MaterialInterface asset: %s"),
+							*Reference) });
+				bValid = false;
+				return;
+			}
+			OutResolvedByAuthorReference.Add(Reference, MoveTemp(Resolved));
+		});
+		return bValid;
+	}
 }
 
 UWebToUEFactory::UWebToUEFactory()
@@ -414,7 +566,9 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 	const UWebToUEDocument& Target, const FString& SourceUnit,
 	const TMap<FString, WebToUE::ResourceImport::Private::FResolvedTextureReference>&
 		ResolvedTextures,
-	const TMap<FString, FString>& TextureIdentities)
+	const TMap<FString, FString>& TextureIdentities,
+	const TMap<FString, WebToUE::ResourceImport::Private::FResolvedMaterialReference>&
+		ResolvedMaterials)
 {
 	FWebToUECompiledDocumentData Result;
 	TMap<FString, FString> PreviousAutoKeys;
@@ -437,6 +591,12 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 		const FString* Identity = TextureIdentities.Find(AuthorReference);
 		return Identity ? ResolvedTextures.Find(*Identity) : nullptr;
 	};
+	const auto FindResolvedMaterial = [&ResolvedMaterials](
+		const FString& AuthorReference)
+		-> const WebToUE::ResourceImport::Private::FResolvedMaterialReference*
+	{
+		return ResolvedMaterials.Find(AuthorReference);
+	};
 
 	TFunction<int32(const TSharedPtr<FWebToUENode>&, int32, const FString&, int32)> AddNode =
 		[&](const TSharedPtr<FWebToUENode>& Node, int32 ParentIndex, const FString& ParentIdentity, int32 SiblingOrdinal)
@@ -453,6 +613,16 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 			if (ResolvedTexture)
 			{
 				Serialized.ResourceId = ResolvedTexture->ResourceId;
+			}
+		}
+		const FString MaterialReference =
+			Node->GetAttribute(TEXT("data-ue-material"));
+		if (!MaterialReference.IsEmpty())
+		{
+			if (const WebToUE::ResourceImport::Private::FResolvedMaterialReference*
+				ResolvedMaterial = FindResolvedMaterial(MaterialReference))
+			{
+				Serialized.ResourceId = ResolvedMaterial->ResourceId;
 			}
 		}
 		Serialized.Text = Node->Text;
@@ -557,7 +727,8 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 		}
 	}
 
-	const auto AddResource = [&Result, &FindResolvedTexture](EWebToUEResourceKind Kind,
+	const auto AddResource = [&Result, &FindResolvedTexture, &FindResolvedMaterial](
+		EWebToUEResourceKind Kind,
 		const FString& AuthorReference, EWebToUEResidencyClass Residency)
 	{
 		if (Kind == EWebToUEResourceKind::Texture)
@@ -594,6 +765,40 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 			Result.ResourceManifest.Add(MoveTemp(Resource));
 			return;
 		}
+		if (Kind == EWebToUEResourceKind::Material)
+		{
+			const WebToUE::ResourceImport::Private::FResolvedMaterialReference*
+				Resolved = FindResolvedMaterial(AuthorReference);
+			if (!Resolved)
+			{
+				return;
+			}
+			if (FWebToUECompiledResource* Existing =
+				Result.ResourceManifest.FindByPredicate(
+					[Resolved](const FWebToUECompiledResource& Resource)
+					{
+						return Resource.Kind == EWebToUEResourceKind::Material &&
+							Resource.ResourceId == Resolved->ResourceId;
+					}))
+			{
+				if (WebToUE::ResourceImport::Private::ResidencyRank(Residency) <
+					WebToUE::ResourceImport::Private::ResidencyRank(Existing->Residency))
+				{
+					Existing->Residency = Residency;
+				}
+				return;
+			}
+			FWebToUECompiledResource Resource;
+			Resource.Kind = Kind;
+			Resource.Path = Resolved->Path;
+			Resource.ResourceId = Resolved->ResourceId;
+			Resource.Provenance = Resolved->Provenance;
+			Resource.GroupId = TEXT("document/materials");
+			Resource.Residency = Residency;
+			Resource.BrushImageSize = Resolved->BrushImageSize;
+			Result.ResourceManifest.Add(MoveTemp(Resource));
+			return;
+		}
 
 		const FSoftObjectPath Path(AuthorReference);
 		if (!Path.IsValid()) return;
@@ -617,6 +822,13 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 		{
 			AddResource(EWebToUEResourceKind::Texture,
 				Node.GetAttribute(TEXT("src")),
+				WebToUE::ResourceImport::Private::ParseImageResidency(
+					Node.GetAttribute(TEXT("data-ue-residency"))));
+		}
+		const FString Material = Node.GetAttribute(TEXT("data-ue-material"));
+		if (!Material.IsEmpty())
+		{
+			AddResource(EWebToUEResourceKind::Material, Material,
 				WebToUE::ResourceImport::Private::ParseImageResidency(
 					Node.GetAttribute(TEXT("data-ue-residency"))));
 		}
@@ -672,34 +884,43 @@ static bool BuildResourceContract(const TArray<FString>& DependencyFiles,
 
 	for (const FWebToUECompiledResource& Resource : InOutDocument.ResourceManifest)
 	{
-		if (Resource.Kind != EWebToUEResourceKind::Texture)
+		if (Resource.Kind != EWebToUEResourceKind::Texture &&
+			Resource.Kind != EWebToUEResourceKind::Material)
 		{
 			continue;
 		}
-		FString AssetHash;
-		if (!HashAssetPackage(Resource.Path, AssetHash))
+		if (Resource.Kind == EWebToUEResourceKind::Material)
 		{
-			OutDiagnostics.Add({ TEXT("WTUE-RES-001"),
-				FString::Printf(TEXT("resources.%s"), *Resource.ResourceId),
-				FString::Printf(TEXT("Unreal texture package is missing or has no saved content fingerprint: %s"),
-					*Resource.Path.ToString()) });
+			AddMaterialDependencyClosure(Resource.Path,
+				Descriptor.Dependencies, OutDiagnostics);
 		}
-		const FString PackageDependencyId =
-			Resource.Provenance.Origin == EWebToUEResourceOrigin::UnrealAsset
-				? MakeAssetDependencyId(Resource.Path)
-				: Resource.Provenance.ResolvedDependencyId;
-		const EWebToUEResourceDependencyKind PackageDependencyKind =
-			Resource.Provenance.Origin == EWebToUEResourceOrigin::UnrealAsset
-				? EWebToUEResourceDependencyKind::Resource
-				: EWebToUEResourceDependencyKind::GeneratedInput;
-		if (!AssetHash.IsEmpty() && !Descriptor.Dependencies.ContainsByPredicate(
-			[&PackageDependencyId](const FWebToUEResourceDependency& Dependency)
-			{
-				return Dependency.LogicalId == PackageDependencyId;
-			}))
+		else
 		{
-			Descriptor.Dependencies.Add({ PackageDependencyId,
-				PackageDependencyKind, MoveTemp(AssetHash) });
+			FString AssetHash;
+			if (!HashAssetPackage(Resource.Path, AssetHash))
+			{
+				OutDiagnostics.Add({ TEXT("WTUE-RES-001"),
+					FString::Printf(TEXT("resources.%s"), *Resource.ResourceId),
+					FString::Printf(TEXT("Unreal texture package is missing or has no saved content fingerprint: %s"),
+						*Resource.Path.ToString()) });
+			}
+			const FString PackageDependencyId =
+				Resource.Provenance.Origin == EWebToUEResourceOrigin::UnrealAsset
+					? MakeAssetDependencyId(Resource.Path)
+					: Resource.Provenance.ResolvedDependencyId;
+			const EWebToUEResourceDependencyKind PackageDependencyKind =
+				Resource.Provenance.Origin == EWebToUEResourceOrigin::UnrealAsset
+					? EWebToUEResourceDependencyKind::Resource
+					: EWebToUEResourceDependencyKind::GeneratedInput;
+			if (!AssetHash.IsEmpty() && !Descriptor.Dependencies.ContainsByPredicate(
+				[&PackageDependencyId](const FWebToUEResourceDependency& Dependency)
+				{
+					return Dependency.LogicalId == PackageDependencyId;
+				}))
+			{
+				Descriptor.Dependencies.Add({ PackageDependencyId,
+					PackageDependencyKind, MoveTemp(AssetHash) });
+			}
 		}
 		Descriptor.Resources.Add({ Resource.ResourceId, Resource.Provenance });
 		Descriptor.ResidencyAssignments.Add({ Resource.ResourceId, FString(),
@@ -839,16 +1060,21 @@ bool UWebToUEFactory::ImportIntoDocument(UWebToUEDocument& Document, const FStri
 		TMap<FString, WebToUE::ResourceImport::Private::FResolvedTextureReference>
 			ResolvedTextures;
 		TMap<FString, FString> TextureIdentities;
+		TMap<FString, WebToUE::ResourceImport::Private::FResolvedMaterialReference>
+			ResolvedMaterials;
 		const bool bTexturesResolved =
 			WebToUE::ResourceImport::Private::ResolveDocumentTextures(
 				*Compiled, Filename, SourceUnit, ResolvedTextures,
 				TextureIdentities, Dependencies, ResourceDiagnostics);
-		if (bTexturesResolved)
+		const bool bMaterialsResolved =
+			WebToUE::ResourceImport::Private::ResolveDocumentMaterials(
+				*Compiled, SourceUnit, ResolvedMaterials, ResourceDiagnostics);
+		if (bTexturesResolved && bMaterialsResolved)
 		{
 			CompiledDocument = BuildCompiledDocument(*Compiled, Document, SourceUnit,
-				ResolvedTextures, TextureIdentities);
+				ResolvedTextures, TextureIdentities, ResolvedMaterials);
 		}
-		if (!bTexturesResolved || !BuildResourceContract(
+		if (!bTexturesResolved || !bMaterialsResolved || !BuildResourceContract(
 			Dependencies, CompiledDocument, ResourceDiagnostics))
 		{
 			bHasErrors = true;

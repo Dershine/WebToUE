@@ -78,13 +78,14 @@ bool UWebToUEDocument::ValidateResourceContract(
 	TArray<FWebToUEResourceContractDiagnostic>& OutDiagnostics) const
 {
 	OutDiagnostics.Reset();
-	const bool bHasTexture = ResourceManifest.ContainsByPredicate(
+	const bool bHasContractResource = ResourceManifest.ContainsByPredicate(
 		[](const FWebToUECompiledResource& Resource)
 		{
-			return Resource.Kind == EWebToUEResourceKind::Texture;
+			return Resource.Kind == EWebToUEResourceKind::Texture ||
+				Resource.Kind == EWebToUEResourceKind::Material;
 		});
 	const bool bHasContract = ResourceFreshness.ContractVersion.IsPresent();
-	if (!bHasTexture && !bHasContract)
+	if (!bHasContractResource && !bHasContract)
 	{
 		return true;
 	}
@@ -99,7 +100,8 @@ bool UWebToUEDocument::ValidateResourceContract(
 	TMap<FString, const FWebToUECompiledResource*> ResourcesById;
 	for (const FWebToUECompiledResource& Resource : ResourceManifest)
 	{
-		if (Resource.Kind != EWebToUEResourceKind::Texture)
+		if (Resource.Kind != EWebToUEResourceKind::Texture &&
+			Resource.Kind != EWebToUEResourceKind::Material)
 		{
 			continue;
 		}
@@ -110,7 +112,7 @@ bool UWebToUEDocument::ValidateResourceContract(
 		{
 			OutDiagnostics.Add({ TEXT("WTUE-RES-002"),
 				TEXT("manifest/") + Resource.ResourceId,
-				TEXT("Texture manifest paths and ResourceIds must be present and unique.") });
+				TEXT("Contract resource paths and ResourceIds must be present and unique.") });
 		}
 		else
 		{
@@ -118,18 +120,34 @@ bool UWebToUEDocument::ValidateResourceContract(
 		}
 		if (ResourceFreshness.ArtifactVersions.ResourceIr.Major == 1 &&
 			ResourceFreshness.ArtifactVersions.ResourceIr.Minor >= 1 &&
+			Resource.Kind == EWebToUEResourceKind::Texture &&
 			(Resource.IntrinsicSize.X <= 0.0f || Resource.IntrinsicSize.Y <= 0.0f))
 		{
 			OutDiagnostics.Add({ TEXT("WTUE-RES-003"),
 				TEXT("manifest/") + Resource.ResourceId + TEXT("/intrinsic-size"),
 				TEXT("Resource IR 1.1 texture entries require a positive sealed intrinsic size.") });
 		}
+		if (ResourceFreshness.ArtifactVersions.ResourceIr.Major == 1 &&
+			ResourceFreshness.ArtifactVersions.ResourceIr.Minor >= 2 &&
+			Resource.Kind == EWebToUEResourceKind::Material &&
+			(Resource.BrushImageSize.X <= 0.0f || Resource.BrushImageSize.Y <= 0.0f))
+		{
+			OutDiagnostics.Add({ TEXT("WTUE-RES-003"),
+				TEXT("manifest/") + Resource.ResourceId + TEXT("/brush-image-size"),
+				TEXT("Resource IR 1.2 Material entries require a positive sealed Slate brush image size.") });
+		}
 	}
 
 	for (int32 NodeIndex = 0; NodeIndex < CompiledNodes.Num(); ++NodeIndex)
 	{
 		const FWebToUECompiledNode& Node = CompiledNodes[NodeIndex];
-		if (Node.Tag != TEXT("img"))
+		const bool bTextureNode = Node.Tag == TEXT("img");
+		const FWebToUECompiledAttribute* MaterialAttribute =
+			Node.Attributes.FindByPredicate([](const FWebToUECompiledAttribute& Attribute)
+			{
+				return Attribute.Name == TEXT("data-ue-material");
+			});
+		if (!bTextureNode && !MaterialAttribute)
 		{
 			continue;
 		}
@@ -143,14 +161,20 @@ bool UWebToUEDocument::ValidateResourceContract(
 		const bool bLegacyUnrealBinding =
 			ResourceFreshness.ArtifactVersions.ResourceIr.Major == 1 &&
 			ResourceFreshness.ArtifactVersions.ResourceIr.Minor == 0;
-		if (!Resource || !SourceAttribute ||
-			(*Resource)->Provenance.AuthorReference != SourceAttribute->Value ||
-			(bLegacyUnrealBinding &&
-				(*Resource)->Path != FSoftObjectPath(SourceAttribute->Value)))
+		const FWebToUECompiledAttribute* AuthorAttribute = bTextureNode
+			? SourceAttribute : MaterialAttribute;
+		const EWebToUEResourceKind ExpectedKind = bTextureNode
+			? EWebToUEResourceKind::Texture : EWebToUEResourceKind::Material;
+		if (!Resource || (*Resource)->Kind != ExpectedKind || !AuthorAttribute ||
+			(*Resource)->Provenance.AuthorReference != AuthorAttribute->Value ||
+			(bTextureNode && bLegacyUnrealBinding &&
+				(*Resource)->Path != FSoftObjectPath(AuthorAttribute->Value)))
 		{
 			OutDiagnostics.Add({ TEXT("WTUE-RES-003"),
 				FString::Printf(TEXT("nodes/%d/resource-id"), NodeIndex),
-				TEXT("Image nodes must bind by ResourceId to their sealed Unreal texture manifest entry.") });
+				bTextureNode
+					? TEXT("Image nodes must bind by ResourceId to their sealed Unreal texture manifest entry.")
+					: TEXT("Material nodes must bind by ResourceId to their sealed static Material manifest entry.") });
 		}
 	}
 
@@ -165,7 +189,7 @@ bool UWebToUEDocument::ValidateResourceContract(
 	{
 		FWebToUEArtifactVersionSet SupportedVersions;
 		SupportedVersions.UiIr = { 1, 0 };
-		SupportedVersions.ResourceIr = { 1, 1 };
+		SupportedVersions.ResourceIr = { 1, 2 };
 		TArray<FWebToUEResourceContractDiagnostic> CompatibilityDiagnostics;
 		FWebToUEResourceContractPolicy::IsRuntimeCompatible(
 			Snapshot.Freshness.ArtifactVersions, SupportedVersions,

@@ -19,7 +19,8 @@ namespace WebToUE::Tests
 		FString SourceUnit = TEXT("source/runtime-test.html");
 		for (const FWebToUECompiledResource& Resource : Document.ResourceManifest)
 		{
-			if (Resource.Kind == EWebToUEResourceKind::Texture &&
+			if ((Resource.Kind == EWebToUEResourceKind::Texture ||
+				 Resource.Kind == EWebToUEResourceKind::Material) &&
 				!Resource.Provenance.SourceUnit.IsEmpty())
 			{
 				SourceUnit = Resource.Provenance.SourceUnit;
@@ -33,14 +34,16 @@ namespace WebToUE::Tests
 		for (int32 Index = 0; Index < Document.ResourceManifest.Num(); ++Index)
 		{
 			FWebToUECompiledResource& Resource = Document.ResourceManifest[Index];
-			if (Resource.Kind != EWebToUEResourceKind::Texture)
+			if (Resource.Kind != EWebToUEResourceKind::Texture &&
+				Resource.Kind != EWebToUEResourceKind::Material)
 			{
 				continue;
 			}
 			if (Resource.ResourceId.IsEmpty())
 			{
-				Resource.ResourceId = FString::Printf(
-					TEXT("resource/texture/fixture-%d"), Index);
+				Resource.ResourceId = Resource.Kind == EWebToUEResourceKind::Texture
+					? FString::Printf(TEXT("resource/texture/fixture-%d"), Index)
+					: FString::Printf(TEXT("resource/material/fixture-%d"), Index);
 			}
 			Resource.Provenance.Origin = EWebToUEResourceOrigin::UnrealAsset;
 			Resource.Provenance.SourceUnit = SourceUnit;
@@ -52,7 +55,8 @@ namespace WebToUE::Tests
 			}
 			if (Resource.GroupId.IsEmpty())
 			{
-				Resource.GroupId = TEXT("document/images");
+				Resource.GroupId = Resource.Kind == EWebToUEResourceKind::Texture
+					? TEXT("document/images") : TEXT("document/materials");
 			}
 			if (Resource.Residency == EWebToUEResidencyClass::Invalid)
 			{
@@ -68,14 +72,16 @@ namespace WebToUE::Tests
 
 		for (FWebToUECompiledNode& Node : Document.Nodes)
 		{
-			if (Node.Tag != TEXT("img") || !Node.ResourceId.IsEmpty())
+			if (!Node.ResourceId.IsEmpty())
 			{
 				continue;
 			}
+			const bool bTextureNode = Node.Tag == TEXT("img");
 			const FWebToUECompiledAttribute* Source = Node.Attributes.FindByPredicate(
-				[](const FWebToUECompiledAttribute& Attribute)
+				[bTextureNode](const FWebToUECompiledAttribute& Attribute)
 				{
-					return Attribute.Name == TEXT("src");
+					return Attribute.Name == (bTextureNode
+						? TEXT("src") : TEXT("data-ue-material"));
 				});
 			if (!Source)
 			{
@@ -83,9 +89,11 @@ namespace WebToUE::Tests
 			}
 			const FWebToUECompiledResource* Resource =
 				Document.ResourceManifest.FindByPredicate(
-					[&Source](const FWebToUECompiledResource& Candidate)
+					[Source, bTextureNode](const FWebToUECompiledResource& Candidate)
 					{
-						return Candidate.Kind == EWebToUEResourceKind::Texture &&
+						return Candidate.Kind == (bTextureNode
+							? EWebToUEResourceKind::Texture
+							: EWebToUEResourceKind::Material) &&
 							Candidate.Path == FSoftObjectPath(Source->Value);
 					});
 			if (Resource)

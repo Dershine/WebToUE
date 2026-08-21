@@ -9,6 +9,8 @@
 
 #include "Engine/Texture2D.h"
 #include "Input/HittestGrid.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "Rendering/DrawElements.h"
@@ -25,6 +27,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceResidencyTest,
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceIntrinsicSizeTest,
 	"WebToUE.Runtime.ResourceIntrinsicSize",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEStaticMaterialLifecycleTest,
+	"WebToUE.Runtime.StaticMaterialLifecycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 namespace WebToUE::ResourceLifecycle::Tests
@@ -235,6 +241,169 @@ bool FWebToUEResourceLifecycleTest::RunTest(const FString& Parameters)
 		EWebToUEResourceKind::Texture, TexturePath);
 	TestNotNull(TEXT("A view can recover with a valid document after cancelling a request"),
 		PendingView->GetPresentationResourceObjectForTesting(RecoveredTextureHandle));
+	return true;
+}
+
+bool FWebToUEStaticMaterialLifecycleTest::RunTest(const FString& Parameters)
+{
+	using namespace WebToUE::ResourceLifecycle::Tests;
+	const FSoftObjectPath MaterialPath(
+		TEXT("/Game/WebToUEExamples/Materials/MI_WTUE_StaticMaterialBrush.MI_WTUE_StaticMaterialBrush"));
+	UMaterialInterface* Material = LoadObject<UMaterialInterface>(
+		nullptr, *MaterialPath.ToString());
+	if (!TestNotNull(TEXT("The static Material fixture is resident"), Material))
+	{
+		return false;
+	}
+
+	UWebToUEDocument* Document = NewObject<UWebToUEDocument>(GetTransientPackage());
+	FWebToUECompiledDocumentData CompiledDocument;
+	CompiledDocument.RootNodeIndex = 0;
+	FWebToUECompiledNode& Root = CompiledDocument.Nodes.AddDefaulted_GetRef();
+	Root.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	Root.Tag = TEXT("body");
+	for (const TCHAR* Id : { TEXT("material-a"), TEXT("material-b") })
+	{
+		FWebToUECompiledNode& Node = CompiledDocument.Nodes.AddDefaulted_GetRef();
+		Node.Type = static_cast<uint8>(EWebToUENodeType::Element);
+		Node.Tag = TEXT("div");
+		Node.ParentIndex = 0;
+		AddAttribute(Node, TEXT("id"), Id);
+		AddAttribute(Node, TEXT("data-ue-material"), *MaterialPath.ToString());
+		AddInlineDeclaration(Node, TEXT("width"), TEXT("160px"));
+		AddInlineDeclaration(Node, TEXT("height"), TEXT("90px"));
+	}
+	FWebToUECompiledResource& Resource =
+		CompiledDocument.ResourceManifest.AddDefaulted_GetRef();
+	Resource.Kind = EWebToUEResourceKind::Material;
+	Resource.Path = MaterialPath;
+	Resource.Residency = EWebToUEResidencyClass::Critical;
+	Resource.BrushImageSize = FVector2f(1.0f, 1.0f);
+	WebToUE::Tests::SealResourceContractForTesting(
+		CompiledDocument, TEXT("document/static-material"), 2);
+	Document->CommitCompiledDocument(MoveTemp(CompiledDocument));
+
+	const TSharedRef<SWebToUEView> FirstView = SNew(SWebToUEView);
+	FWebToUEPerformanceSnapshot ColdSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		FirstView->SetDocument(Document);
+		PaintView(FirstView);
+		ColdSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("One static Material slot is consumed once"),
+		ColdSnapshot.GetCounter(EWebToUEPerformanceCounter::ResourceManifestEntries),
+		uint64(1));
+	TestEqual(TEXT("The resident static Material is one cache hit"),
+		ColdSnapshot.GetCounter(EWebToUEPerformanceCounter::ResourceCacheHits),
+		uint64(1));
+	TestEqual(TEXT("Static Material setup has no async request"),
+		ColdSnapshot.GetCounter(EWebToUEPerformanceCounter::ResourceAsyncRequests),
+		uint64(0));
+	TestEqual(TEXT("Static Material setup has no synchronous load"),
+		ColdSnapshot.GetCounter(EWebToUEPerformanceCounter::ResourceLoadAttempts),
+		uint64(0));
+	TestEqual(TEXT("Static Material setup has no resource failure"),
+		ColdSnapshot.GetCounter(EWebToUEPerformanceCounter::ResourceFailures),
+		uint64(0));
+	TestEqual(TEXT("Two nodes build two lightweight Slate brushes"),
+		ColdSnapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds),
+		uint64(3));
+
+	FWebToUENode* MaterialA =
+		FirstView->FindRuntimeNodeByIdForTesting(TEXT("material-a"));
+	FWebToUENode* MaterialB =
+		FirstView->FindRuntimeNodeByIdForTesting(TEXT("material-b"));
+	TestNotNull(TEXT("The first static Material node has a brush"),
+		MaterialA ? FirstView->GetPresentationBrushIdentityForTesting(*MaterialA) : nullptr);
+	TestNotNull(TEXT("The second static Material node has a brush"),
+		MaterialB ? FirstView->GetPresentationBrushIdentityForTesting(*MaterialB) : nullptr);
+	const int32 MaterialHandle = FirstView->FindPresentationResourceHandleForTesting(
+		EWebToUEResourceKind::Material, MaterialPath);
+	const UObject* FirstObject =
+		FirstView->GetPresentationResourceObjectForTesting(MaterialHandle);
+	TestEqual(TEXT("The View strongly retains the engine-owned static Material"),
+		FirstObject, static_cast<const UObject*>(Material));
+	TestFalse(TEXT("The static path never creates a MID"),
+		FirstObject && FirstObject->IsA<UMaterialInstanceDynamic>());
+
+	const TSharedRef<SWebToUEView> SecondView = SNew(SWebToUEView);
+	SecondView->SetDocument(Document);
+	SecondView->LayoutForTesting(FVector2f(640.0f, 360.0f));
+	const int32 SecondHandle = SecondView->FindPresentationResourceHandleForTesting(
+		EWebToUEResourceKind::Material, MaterialPath);
+	TestEqual(TEXT("Static Material handles are stable across Views"),
+		SecondHandle, MaterialHandle);
+	TestEqual(TEXT("Views share one engine-owned MaterialInterface"),
+		SecondView->GetPresentationResourceObjectForTesting(SecondHandle), FirstObject);
+
+	UWebToUEDocument* WrongClass =
+		NewObject<UWebToUEDocument>(GetTransientPackage());
+	FWebToUECompiledDocumentData WrongData;
+	WrongData.RootNodeIndex = 0;
+	FWebToUECompiledNode& WrongRoot = WrongData.Nodes.AddDefaulted_GetRef();
+	WrongRoot.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	WrongRoot.Tag = TEXT("body");
+	FWebToUECompiledNode& WrongNode = WrongData.Nodes.AddDefaulted_GetRef();
+	WrongNode.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	WrongNode.Tag = TEXT("div");
+	WrongNode.ParentIndex = 0;
+	AddAttribute(WrongNode, TEXT("id"), TEXT("wrong-material"));
+	AddAttribute(WrongNode, TEXT("data-ue-material"),
+		TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
+	FWebToUECompiledResource& WrongResource =
+		WrongData.ResourceManifest.AddDefaulted_GetRef();
+	WrongResource.Kind = EWebToUEResourceKind::Material;
+	WrongResource.Path = FSoftObjectPath(
+		TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
+	WrongResource.Residency = EWebToUEResidencyClass::Critical;
+	WrongResource.BrushImageSize = FVector2f(1.0f, 1.0f);
+	WebToUE::Tests::SealResourceContractForTesting(
+		WrongData, TEXT("document/static-material-wrong-class"), 2);
+	WrongClass->CommitCompiledDocument(MoveTemp(WrongData));
+	const TSharedRef<SWebToUEView> WrongView = SNew(SWebToUEView);
+	WrongView->SetDocument(WrongClass);
+	FWebToUENode* WrongRuntimeNode =
+		WrongView->FindRuntimeNodeByIdForTesting(TEXT("wrong-material"));
+	TestEqual(TEXT("Wrong-class Material fails once"),
+		WrongView->GetPresentationResourceFailuresForTesting(), uint64(1));
+	TestNull(TEXT("Wrong-class Material uses deterministic no-brush fallback"),
+		WrongRuntimeNode
+			? WrongView->GetPresentationBrushIdentityForTesting(*WrongRuntimeNode)
+			: nullptr);
+
+	UWebToUEDocument* Pending = NewObject<UWebToUEDocument>(GetTransientPackage());
+	FWebToUECompiledDocumentData PendingData;
+	PendingData.RootNodeIndex = 0;
+	FWebToUECompiledNode& PendingRoot = PendingData.Nodes.AddDefaulted_GetRef();
+	PendingRoot.Type = static_cast<uint8>(EWebToUENodeType::Element);
+	PendingRoot.Tag = TEXT("body");
+	FWebToUECompiledResource& PendingResource =
+		PendingData.ResourceManifest.AddDefaulted_GetRef();
+	PendingResource.Kind = EWebToUEResourceKind::Material;
+	PendingResource.Path = FSoftObjectPath(
+		TEXT("/Game/WebToUEAutomation/M_Pending.M_Pending"));
+	PendingResource.Residency = EWebToUEResidencyClass::Critical;
+	PendingResource.BrushImageSize = FVector2f(1.0f, 1.0f);
+	WebToUE::Tests::SealResourceContractForTesting(
+		PendingData, TEXT("document/static-material-pending"), 2);
+	Pending->CommitCompiledDocument(MoveTemp(PendingData));
+	const TSharedRef<SWebToUEView> PendingView = SNew(SWebToUEView);
+	AddExpectedError(TEXT("/Game/WebToUEAutomation/M_Pending"),
+		EAutomationExpectedErrorFlags::Contains, -1);
+	PendingView->SetDocument(Pending);
+	TestEqual(TEXT("An unresolved Material requests asynchronously"),
+		PendingView->GetPresentationResourceAsyncRequestsForTesting(), uint64(1));
+	FWebToUEPerformanceSnapshot MaterialCancellationSnapshot;
+	{
+		FWebToUEPerformanceCapture Capture;
+		PendingView->SetDocument(nullptr);
+		MaterialCancellationSnapshot = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("View reset cancels the pending Material request"),
+		MaterialCancellationSnapshot.GetCounter(
+			EWebToUEPerformanceCounter::ResourceCancellations),
+		uint64(1));
 	return true;
 }
 

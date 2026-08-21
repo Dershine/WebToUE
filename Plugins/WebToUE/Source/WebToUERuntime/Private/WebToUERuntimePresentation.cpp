@@ -7,6 +7,7 @@
 
 #include "Algo/StableSort.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
+#include "SlateMaterialBrush.h"
 #include "Engine/AssetManager.h"
 #include "Engine/Font.h"
 #include "Engine/FontFace.h"
@@ -18,6 +19,7 @@
 #include "Internationalization/Culture.h"
 #include "Internationalization/Internationalization.h"
 #include "Internationalization/StringTable.h"
+#include "Materials/MaterialInterface.h"
 #include "HAL/IConsoleManager.h"
 #include "Layout/Clipping.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
@@ -125,9 +127,9 @@ namespace WebToUE::Runtime::Presentation::Private
 			Hash = HashCombineFast(Hash, GetTypeHash(Style.FontWeight));
 			return HashCombineFast(Hash, GetTypeHash(Style.FontSize));
 		}
-		if (Node.Tag == TEXT("img"))
+		if (!Node.ResourceId.IsEmpty())
 		{
-			return GetTypeHash(FSoftObjectPath(Node.GetAttribute(TEXT("src"))));
+			return GetTypeHash(Node.ResourceId);
 		}
 		// Rounded boxes use the shared white resource. Fill and outline colors are
 		// vertex data and must not split otherwise compatible Slate batches.
@@ -141,7 +143,7 @@ namespace WebToUE::Runtime::Presentation::Private
 		{
 			return 0;
 		}
-		if (Node.Tag == TEXT("img"))
+		if (!Node.ResourceId.IsEmpty())
 		{
 			uint32 Hash = GetTypeHash(Size.X);
 			return HashCombineFast(Hash, GetTypeHash(Size.Y));
@@ -327,6 +329,8 @@ namespace WebToUE::Runtime::Presentation::Private
 		{
 		case EWebToUEResourceKind::Texture:
 			return Object->IsA<UTexture2D>();
+		case EWebToUEResourceKind::Material:
+			return Object->IsA<UMaterialInterface>();
 		case EWebToUEResourceKind::Font:
 			return Object->IsA<UFont>() || Object->IsA<UFontFace>();
 		case EWebToUEResourceKind::StringTable:
@@ -342,6 +346,11 @@ namespace WebToUE::Runtime::Presentation::Private
 		if (!IsExpectedResourceType(Resource.Kind, Object))
 		{
 			return false;
+		}
+		if (Resource.Kind == EWebToUEResourceKind::Material)
+		{
+			return Resource.BrushImageSize.X > 0.0f &&
+				Resource.BrushImageSize.Y > 0.0f;
 		}
 		if (Resource.Kind != EWebToUEResourceKind::Texture ||
 			Resource.IntrinsicSize.X <= 0.0f || Resource.IntrinsicSize.Y <= 0.0f)
@@ -397,7 +406,10 @@ void FWebToUERuntimePresentation::InitializeResourceResidency() const
 	for (int32 Index = 0; Index < Manifest.Num(); ++Index)
 	{
 		const FWebToUECompiledResource& Resource = Manifest[Index];
-		if (Resource.Kind != EWebToUEResourceKind::Texture ||
+		const bool bResidencyManaged =
+			Resource.Kind == EWebToUEResourceKind::Texture ||
+			Resource.Kind == EWebToUEResourceKind::Material;
+		if (!bResidencyManaged ||
 			Resource.Residency == EWebToUEResidencyClass::Critical)
 		{
 			RequestResource(Index);
@@ -480,7 +492,7 @@ bool FWebToUERuntimePresentation::RequestVisibleResources() const
 	bool bRequested = false;
 	RuntimeDocument->ForEachNode([this, RuntimeDocument, &bRequested](FWebToUENode& Node)
 	{
-		if (Node.Tag != TEXT("img") || !RuntimeDocument->IsDisplayed(Node))
+		if (Node.ResourceId.IsEmpty() || !RuntimeDocument->IsDisplayed(Node))
 		{
 			return;
 		}
@@ -583,7 +595,8 @@ void FWebToUERuntimePresentation::RefreshCriticalResourceReadiness() const
 		RuntimeInstance.GetResourceManifest();
 	for (int32 Index = 0; Index < Manifest.Num(); ++Index)
 	{
-		if (Manifest[Index].Kind == EWebToUEResourceKind::Texture &&
+		if ((Manifest[Index].Kind == EWebToUEResourceKind::Texture ||
+			 Manifest[Index].Kind == EWebToUEResourceKind::Material) &&
 			Manifest[Index].Residency == EWebToUEResidencyClass::Critical &&
 			(!ResourceLoadStates.IsValidIndex(Index) ||
 				ResourceLoadStates[Index] != EResourceLoadState::Resolved))
@@ -891,7 +904,7 @@ void FWebToUERuntimePresentation::Layout(const FVector2f& ViewportSize) const
 		TextLayouts.Reset();
 		RuntimeDocument->ForEachNode([this](FWebToUENode& Node)
 		{
-			if (Node.Tag == TEXT("img")) RebuildBrush(Node);
+			if (!Node.ResourceId.IsEmpty()) RebuildBrush(Node);
 		});
 		bDisplayListDirty = true;
 	}
@@ -924,7 +937,7 @@ int32 FWebToUERuntimePresentation::Paint(const FPaintArgs& Args, const FGeometry
 		TextLayouts.Reset();
 		RuntimeDocument->ForEachNode([this](FWebToUENode& Node)
 		{
-			if (Node.Tag == TEXT("img")) RebuildBrush(Node);
+			if (!Node.ResourceId.IsEmpty()) RebuildBrush(Node);
 		});
 		bLayoutDirty = true;
 		bDisplayListDirty = true;
@@ -1073,7 +1086,7 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 	{
 		const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(Command.Owner);
 		Command.bDrawable = Brush && Brush->IsValid() &&
-			(Node.Tag == TEXT("img") || Style.BackgroundColor.A > 0.0f ||
+			(!Node.ResourceId.IsEmpty() || Style.BackgroundColor.A > 0.0f ||
 				Style.BorderWidth > 0.0f);
 	}
 	Command.BatchKey.Type = Command.Type;
@@ -1587,29 +1600,53 @@ void FWebToUERuntimePresentation::RebuildBrushes(bool bReloadResources) const
 void FWebToUERuntimePresentation::RebuildBrush(FWebToUENode& Node) const
 {
 	const FWebToUEComputedStyle& Style = GetStyle(Node);
-	if (Node.Tag == TEXT("img"))
+	if (!Node.ResourceId.IsEmpty())
 	{
 		const FWebToUEInstanceHandle NodeHandle = RuntimeInstance.GetHandle(&Node);
 		Brushes.Remove(NodeHandle);
-		UTexture2D* Texture = Cast<UTexture2D>(
-			GetResolvedResourceById(Node.ResourceId));
-		if (Texture)
+		const int32 Handle = FindResourceHandleById(Node.ResourceId);
+		const TConstArrayView<FWebToUECompiledResource> Manifest =
+			RuntimeInstance.GetResourceManifest();
+		if (!Manifest.IsValidIndex(Handle))
 		{
-			const int32 Handle = FindResourceHandleById(Node.ResourceId);
-			const TConstArrayView<FWebToUECompiledResource> Manifest =
-				RuntimeInstance.GetResourceManifest();
+			return;
+		}
+		const FWebToUECompiledResource& Resource = Manifest[Handle];
+		if (Resource.Kind == EWebToUEResourceKind::Texture)
+		{
+			UTexture2D* Texture = Cast<UTexture2D>(
+				GetResolvedResourceById(Node.ResourceId));
+			if (!Texture)
+			{
+				return;
+			}
 			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
 			FWebToUEPerformanceCapture::RecordCounter(
 				EWebToUEPerformanceCounter::TrackedAllocations);
 			TSharedPtr<FSlateBrush> Brush = MakeShared<FSlateBrush>();
 			Brush->DrawAs = ESlateBrushDrawType::Image;
 			Brush->SetResourceObject(Texture);
-			Brush->ImageSize = Manifest.IsValidIndex(Handle) &&
-				Manifest[Handle].IntrinsicSize.X > 0.0f &&
-				Manifest[Handle].IntrinsicSize.Y > 0.0f
-				? Manifest[Handle].IntrinsicSize
+			Brush->ImageSize = Resource.IntrinsicSize.X > 0.0f &&
+				Resource.IntrinsicSize.Y > 0.0f
+				? Resource.IntrinsicSize
 				: FVector2f(Texture->GetImportedSize().X, Texture->GetImportedSize().Y);
 			Brushes.Add(NodeHandle, MoveTemp(Brush));
+			return;
+		}
+		if (Resource.Kind == EWebToUEResourceKind::Material)
+		{
+			UMaterialInterface* Material = Cast<UMaterialInterface>(
+				GetResolvedResourceById(Node.ResourceId));
+			if (!Material || Resource.BrushImageSize.X <= 0.0f ||
+				Resource.BrushImageSize.Y <= 0.0f)
+			{
+				return;
+			}
+			FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::BrushBuilds);
+			FWebToUEPerformanceCapture::RecordCounter(
+				EWebToUEPerformanceCounter::TrackedAllocations);
+			Brushes.Add(NodeHandle,
+				MakeShared<FSlateMaterialBrush>(*Material, Resource.BrushImageSize));
 		}
 	}
 	else if (Node.Type == EWebToUENodeType::Element)

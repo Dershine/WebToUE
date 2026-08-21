@@ -16,6 +16,7 @@ UENUM()
 enum class EWebToUEResourceKind : uint8
 {
 	Texture,
+	Material,
 	Font,
 	StringTable
 };
@@ -31,6 +32,7 @@ struct WEBTOUERUNTIME_API FWebToUECompiledResource
 	UPROPERTY() FString GroupId;
 	UPROPERTY() EWebToUEResidencyClass Residency = EWebToUEResidencyClass::Invalid;
 	UPROPERTY() FVector2f IntrinsicSize = FVector2f::ZeroVector;
+	UPROPERTY() FVector2f BrushImageSize = FVector2f::ZeroVector;
 
 	bool operator==(const FWebToUECompiledResource& Other) const
 	{
