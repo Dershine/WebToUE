@@ -45,4 +45,4 @@ WebToUE 的长期目标不是只渲染静态 HTML/CSS，而是让项目以代码
 - Material、Transform、Mask 或 Filter 必须区分普通 Brush、子树合成层和世界空间 Surface；允许 UE Material 不等于承诺浏览器级合成器。
 - UI Feedback 只作为事务提交后的语义意图进入 Behavior/Session，不把具体声音资产、播放 API、长期音乐状态或项目音频策略写入 Behavior IR；详细边界见 [ADR-0005](ADR-0005-UI-Feedback-And-Audio-Routing-Boundary.md)。
 - TS/TSX 编译器必须静态处理受限 AST，不默认执行任意组件函数、npm lifecycle script 或第三方构建代码。
-- Support Matrix 只按已取得的实现与证据更新：M3.0 可记录实验性 Native Component C++ Registry/Factory/Instance 合同，但在 UI Source、Compiler、Host/Runtime 实例化、真实组件、适用的 Packaged 性能与文档门全部通过前，不得宣称 Native Component 为产品可用能力；Behavior Source 与 Material 仍保持未支持。
+- Support Matrix 只按已取得的实现与证据更新：M3.0 可记录实验性 Native Component C++ Registry/Factory/Instance 合同，但在 UI Source、Compiler、Host/Runtime 实例化、真实组件、适用的 Packaged 性能与文档门全部通过前，不得宣称 Native Component 为产品可用能力；Behavior Source、Material 参数作者语法与动态 Material Animation 仍保持未支持，静态 Material Brush 与 C++ typed Scalar/Vector submission 以 M4.3 产品证据为准。

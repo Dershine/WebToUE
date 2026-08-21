@@ -215,6 +215,7 @@ Cooked 游戏保留 Compiled Nodes/Rules、Root、Texture/Font/String Table Reso
 - M3.2 已实现通用 C++ 更新协调器的评估→收集 State/Structural Mutation→原子提交→Post-Commit Effect 顺序，以及非 Game Thread 入队、遍历来源结构拒绝和重入/循环预算；M3.4 已为 Timer 与异步 Command Result 建立 Session/Generation token、exact-once result/timeout、显式取消、worker MPSC、View/World cleanup 和 Virtual Clock 合同。现有 FieldNotify、类型化 Command payload 与未来 Behavior/Typed Mutation 尚未接入。
 - UI Feedback Cue 与 Mutation/Command 一起在事件求值期收集，只在事务成功后作为 Post-Commit Effect 派发；UI Session 注入 Router，Profile/项目策略解析声音、限频、Scope、2D/3D 和资源，长期 Audio State 仍走类型化 UI Command。详细决定见 [ADR-0005](ADRs/ADR-0005-UI-Feedback-And-Audio-Routing-Boundary.md)。
 - CSS/Pseudo、Binding、Behavior、Animation 与 Material 参数已按 [ADR-0006](ADRs/ADR-0006-UI-Property-Ownership-And-Arbitration.md) 冻结为 canonical address、CSS baseline、唯一 durable owner、active-only overlay 与 restrictive gate；后续 M4/M5 必须消费同一 Policy，不能另建最后写入者获胜路径。
+- 静态 Material Resource、durable Material Parameter State、派生 MID 与 Brush/Display Render Data 按 [ADR-0011](ADRs/ADR-0011-View-Owned-MID-And-Material-Parameter-State.md) 分离：View 强拥有 Handle-keyed MID，Node 不拥有 UObject；只有首次成功提交显式 runtime-owned 参数状态才创建、后续提交复用 MID，跨节点/View 不隐式共享。
 - Component/Logical、Layout、Paint/Compositing 与 Semantic Tree 是不同投影；Portal/Overlay 可分离逻辑父级和绘制父级，但必须保持事件、焦点和 Source Map 对应。
 - Stable Semantic Key 只在 Component Instance 内唯一；Source provenance 只用于诊断，跨重导入状态只按 [ADR-0008](ADRs/ADR-0008-Stable-Semantic-Identity-And-Reimport-State.md) 的显式白名单规划并重新绑定 current-generation Handle，不能用 DOM id/source span/结构位置复活旧 Handle。
 - 普通 UI 继续走单 Slate Leaf；专用 UE 能力通过 Native Component Registry 或显式 Host Surface 接入。详细决定见 [ADR-0004](ADRs/ADR-0004-Compiled-Behavior-And-Native-Interop-Boundary.md)。
@@ -225,7 +226,7 @@ Cooked 游戏保留 Compiled Nodes/Rules、Root、Texture/Font/String Table Reso
 
 已验证能力包括 HTML/CSS 导入与失败回退、受控 Selector/Pseudo State、Flex/Wrap/Gap/绝对定位、约束文本与 RichText、本地化身份、滚动裁剪与命中、鼠标/键盘、内部语义焦点、手柄/CommonUI 最小导航、DPI/Safe Zone、根属性绑定/FieldNotify、语义点击事件、自定义资产版本和固定 Benchmark/Golden Corpus。
 
-当前已有 Native Component、Session/Host/Feedback、更新事务、事件/身份、Clock/异步、属性所有权、多树/Portal、Stable Identity 与 C++ Interop Schema C++ 基础 Policy。Interop Schema 以项目 C++ descriptor 为唯一事实源，在 Core 生成带 Major/Minor 版本的规范 Data/Command snapshot，并由 Editor-only emitter 单向派生确定性 `.d.ts`；`WTUE-SCHEMA-001..004` 拒绝无效/重复/未知/递归类型、非法 Command shape 和不兼容演进。现有 Binding text/visible/enabled 与字符串 Click/Async token 尚未消费该 snapshot，项目 Schema provider、Context Adapter、Command payload/dispatch、Behavior Compiler、MVVM Adapter、磁盘生成/freshness 都未实现；UI Source/Compiler/现有 View 也尚未创建真实 Portal 或生成/消费 Stable Identity。状态保留式热重载、Profile/真实音效、触摸/惯性、完整文本编辑/IME、无障碍、组件/列表、Behavior、动画、UE Material、复杂 CSS、Inspector 和跨平台仍未支持。逐项支持、限制和诊断以 [WTUE_SupportMatrix.md](WTUE_SupportMatrix.md) 为唯一精确来源。
+当前已有 Native Component、Session/Host/Feedback、更新事务、事件/身份、Clock/异步、属性所有权、多树/Portal、Stable Identity 与 C++ Interop Schema C++ 基础 Policy。Interop Schema 以项目 C++ descriptor 为唯一事实源，在 Core 生成带 Major/Minor 版本的规范 Data/Command snapshot，并由 Editor-only emitter 单向派生确定性 `.d.ts`；`WTUE-SCHEMA-001..004` 拒绝无效/重复/未知/递归类型、非法 Command shape 和不兼容演进。现有 Binding text/visible/enabled 与字符串 Click/Async token 尚未消费该 snapshot，项目 Schema provider、Context Adapter、Command payload/dispatch、Behavior Compiler、MVVM Adapter、磁盘生成/freshness 都未实现；UI Source/Compiler/现有 View 也尚未创建真实 Portal 或生成/消费 Stable Identity。状态保留式热重载、Profile/真实音效、触摸/惯性、完整文本编辑/IME、无障碍、组件/列表、Behavior、动画、Material 参数作者语法/Animation/`Time`、复杂 CSS、Inspector 和跨平台仍未支持；静态 Material Brush 与 C++ typed Scalar/Vector submission 已按 M4.3 产品边界支持。逐项支持、限制和诊断以 [WTUE_SupportMatrix.md](WTUE_SupportMatrix.md) 为唯一精确来源。
 
 M2.9 已把三类固定 Corpus 的 Packaged GT/RT/GPU/Batch/Vertices/RSS/Development LLM/输入基线、UMG 对照、三次冷启动中位数与分阶段归因、同进程第二 View 内存和 K=1 工作量固化为 schema 6 与可复现出口门。M2.8 的生产宿主输入、失败重导入恢复与跨 DPI Golden 继续守住正确性；外部不受控输入的通用安全加固仍属 M7。这些证据只支持当前 Win64 PersonalGame Profile，不等于 Behavior、Material、世界空间、Gameface 对等或硬件扫描出像素延迟。UE 默认 Shipping 未编译 LLM，Development LLM 与 Shipping RSS 分开原样记录。BuildPlugin 是后续外部分发门，不阻塞 PersonalGame-ready 0.5。
 
@@ -327,7 +328,7 @@ M2 不以模糊的“达到 Gameface”作为验收。性能合同分为三类�
 
 ## 8. 宏观路线
 
-M0/M1/M2 已完成，详细验收项保存在 [Evidence Ledger](WTUE_EvidenceLedger.md#1-完成里程碑证据)。2026-08-17 已接受 M3～M7 新路线和 [ADR-0004](ADRs/ADR-0004-Compiled-Behavior-And-Native-Interop-Boundary.md)；M3.0～M3.4 依次完成 Native Component、Screen Session/Host/Feedback、更新事务、事件/交互身份和 Clock/异步取消。2026-08-20 的 ADR-0006～0010 又完成属性所有权、多树/Portal、Stable Identity、C++ Data/Command Schema 与 Resource provenance/residency/freshness 合同，M3 为 `11 / 11`。这些基础 Policy 的真实 Material/Feedback、Compiler/View/Cook、Behavior/Command Adapter 产品接入仍分别归 M4～M6。
+M0/M1/M2 已完成，详细验收项保存在 [Evidence Ledger](WTUE_EvidenceLedger.md#1-完成里程碑证据)。2026-08-17 已接受 M3～M7 新路线和 [ADR-0004](ADRs/ADR-0004-Compiled-Behavior-And-Native-Interop-Boundary.md)；M3.0～M3.4 依次完成 Native Component、Screen Session/Host/Feedback、更新事务、事件/交互身份和 Clock/异步取消。2026-08-20 的 ADR-0006～0010 又完成属性所有权、多树/Portal、Stable Identity、C++ Data/Command Schema 与 Resource provenance/residency/freshness 合同，M3 为 `11 / 11`。2026-08-21 的 [ADR-0011](ADRs/ADR-0011-View-Owned-MID-And-Material-Parameter-State.md) 在 M4.3b 产品证据上冻结 View-owned MID 与 Runtime Parameter State 分离；其余基础 Policy 的真实 Feedback、Compiler/View/Cook、Behavior/Command Adapter 产品接入仍分别归 M4～M6。
 
 ### M2——增量原生运行时 ✅ 9 / 9
 
@@ -625,7 +626,7 @@ M4.3a 当时在静态 Brush 边界停止；下述 M4.3b 现已闭环，因此宏
 - [x] 静态 Material/MI Asset 继续走 M4.3a 的共享对象路径；只有节点第一次提交不同运行时参数状态时才创建 MID。默认所有权为 View，Node 只用 generation-safe Instance Handle 寻址 View slot；静态/无变化节点不创建 per-node UObject。
 - [x] 消费 ADR-0006 的 canonical typed Scalar/Vector Material Parameter address；Source baseline、唯一 Binding/Behavior durable owner 与后续 Animation overlay 共用属性仲裁。字符串/反射入口未开放，Texture 参数、未知参数、类型不匹配和冲突 owner 失败关闭。
 - [x] 参数变更通过 M3 Game Thread 更新事务，State Mutation 提交后才执行 Presentation effect并只 patch 受影响 Brush/Display subtree；相同 owner/value 不产生 patch。未创建插值器或默认 Tick，Material `Time` 不受 WTUE Clock 保证。
-- [x] Runtime State 的参数值、Presentation 的 MID strong slot 和 Resource cache 保持分离；View reset/destroy 与代次/节点 stale handle 释放或拒绝旧状态，MID 通过 `TStrongObjectPtr` 保活并引用共享 parent，双 View 在共享 parent 上持有不同 MID，GC 后仍隔离。
+- [x] [ADR-0011](ADRs/ADR-0011-View-Owned-MID-And-Material-Parameter-State.md) 冻结 Runtime State 的参数值、Presentation 的 MID strong slot 和 Resource cache 分离；View reset/destroy 与代次/节点 stale handle 释放或拒绝旧状态，MID 通过 `TStrongObjectPtr` 保活并引用共享 parent，双 View 在共享 parent 上持有不同 MID，GC 后仍隔离。
 - [x] K=1/多 View 专项记录 lookup/evaluation、MID create/reuse/release、Brush patch、Display patch、资源消费/加载和 GC/isolation；warmup 仅创建 1 个 MID，measurement 仅复用并各 patch 1 次 Brush/Display，第二 View 独立创建 1 个 MID，0 同步加载/失败，静态/unchanged/no-track 无额外 Tick/插值/MID。
 - [x] 红绿 Automation、Editor build、真实 Packaged 动态参数视觉与适用发布门通过；截图只证明受控 fixture 的可见正确性，K=1 不外推 PSO/Shader Compile、GPU 材质复杂度、输入到像素延迟或产品级大型资源页结论。
 
@@ -797,6 +798,7 @@ Editor 生命周期另有 Pester 6 / 6，Packaged 出口门脚本另有 Pester 5
 - Stable Semantic Identity 与重导入状态：[ADR-0008](ADRs/ADR-0008-Stable-Semantic-Identity-And-Reimport-State.md)
 - C++ Data/Command Schema 与 TypeScript 投影：[ADR-0009](ADRs/ADR-0009-Cpp-Interop-Schema-And-TypeScript-Projection.md)
 - Resource provenance、residency 与 Cook freshness：[ADR-0010](ADRs/ADR-0010-Resource-Provenance-Residency-And-Cook-Freshness.md)
+- View-owned MID 与 Material Parameter State：[ADR-0011](ADRs/ADR-0011-View-Owned-MID-And-Material-Parameter-State.md)
 - Stable Semantic Identity Policy：`Source/WebToUERuntime/Public/WebToUESemanticIdentity.h`、`Source/WebToUERuntime/Private/WebToUESemanticIdentity.cpp`
 - Interop Schema Policy：`Source/WebToUECore/Public/WebToUEInteropSchema.h`、`Source/WebToUECore/Private/WebToUEInteropSchema.cpp`；Editor `.d.ts` emitter：`Source/WebToUEEditor/Public/WebToUESchemaTypeScriptEmitter.h`
 - Resource Contract Policy：`Source/WebToUERuntime/Public/WebToUEResourceContract.h`、`Source/WebToUERuntime/Private/WebToUEResourceContract.cpp`

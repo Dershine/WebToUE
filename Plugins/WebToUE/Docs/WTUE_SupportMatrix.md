@@ -138,7 +138,7 @@ Resource Contract：`FWebToUEResourceContractPolicy` 对单个逻辑 Document �
 
 静态 Material：`data-ue-material` 只接受 `/Game`/`/Engine` 下可加载为 `UMaterialInterface` 的完整对象路径；错误类、缺失对象、HTTP、机器绝对/相对路径与 `generated:` Material 以 `WTUE-RES-001` 失败关闭。Importer 生成 `Material` kind、`resource/material/<BLAKE3(path)>`、UnrealAsset provenance、Critical residency、正 Brush Image Size，并将直接 Material/MI package 与递归 MI parent、Material Function、Texture package bytes 密封进规范 dependency closure。Runtime 只经 ResourceId、soft object、View-owned async handle 和 strong `UMaterialInterface` 构建 `FSlateMaterialBrush`；跨节点/View 可共享静态对象，不创建 MID、默认 Tick、同步热加载或 per-node UObject/UWidget/Slate Widget，失败为确定性无 Brush fallback。Development/Shipping Packaged fixture 各证明 1 次 async request、第二 View 1 次 cache hit、0 sync/failure、`is_dynamic_instance=false` 和真实可见绘制；这是 K=1 正确性/工作量证据，不证明 PSO/Shader Compile、GPU Material 成本、大型页或产品级性能。
 
-动态 Material 参数：`UWebToUEView::SubmitMaterialParameter` 是当前唯一产品入口，目标由 generation-safe Instance Handle 与 canonical `MaterialScalar`/`MaterialVector` 地址标识，值类型必须精确匹配。调用仅允许 Game Thread 上的 Binding 或 Behavior durable owner，经 Session-owned 或 standalone M3 coordinator 原子提交 Runtime State，成功后才由 Presentation 检查共享 parent 上的真实全局参数、按 View/Node slot 首次创建或后续复用 strong MID、重建该节点局部 Brush 并 patch Display subtree；相同 owner/value 幂等返回且不 patch。未知/Texture/类型不匹配/stale handle/重复 ID/owner conflict 失败关闭。Reset/destructor 释放 View slots，旧 generation 与删除节点不解析，MID strong ref 保证 GC 存活且不同 View 在同 parent 上隔离。受控 Development/Shipping fixture 各证明 warmup 1 create、measurement 1 reuse/1 Brush patch/1 Display patch、第二 View 1 create、1 次资源消费、0 sync load/failure；静态/unchanged/no-track 没有额外 MID、Tick 或插值。该 API 不等于作者语法、Animation/Transition、Material `Time` 确定性、Texture 参数、PSO/GPU 或大型资源页支持。
+动态 Material 参数：对象与状态分离见 [ADR-0011](ADRs/ADR-0011-View-Owned-MID-And-Material-Parameter-State.md)。`UWebToUEView::SubmitMaterialParameter` 是当前唯一产品入口，目标由 generation-safe Instance Handle 与 canonical `MaterialScalar`/`MaterialVector` 地址标识，值类型必须精确匹配。调用仅允许 Game Thread 上的 Binding 或 Behavior durable owner，经 Session-owned 或 standalone M3 coordinator 原子提交 Runtime State，成功后才由 Presentation 检查共享 parent 上的真实全局参数、按 View/Node slot 首次创建或后续复用 strong MID、重建该节点局部 Brush 并 patch Display subtree；相同 owner/value 幂等返回且不 patch。未知/Texture/类型不匹配/stale handle/重复 ID/owner conflict 失败关闭。Reset/destructor 释放 View slots，旧 generation 与删除节点不解析，MID strong ref 保证 GC 存活且不同 View 在同 parent 上隔离。受控 Development/Shipping fixture 各证明 warmup 1 create、measurement 1 reuse/1 Brush patch/1 Display patch、第二 View 1 create、1 次资源消费、0 sync load/failure；静态/unchanged/no-track 没有额外 MID、Tick 或插值。该 API 不等于作者语法、Animation/Transition、Material `Time` 确定性、Texture 参数、PSO/GPU 或大型资源页支持。
 
 Runtime 绘制与命中：
 
@@ -162,10 +162,11 @@ Runtime 绘制与命中：
 - 不支持的 at-rule、选择器、属性和值。
 - 外链、内联样式的实际文件、行和列。
 - 属性所有权的 invalid/untyped target（`WTUE-OWN-001`）、writer 不允许（`WTUE-OWN-002`）与 Binding/Behavior durable owner 冲突（`WTUE-OWN-003`）；后两类未来作者语法接入前主要由 C++ Policy/Automation 使用。
+- 动态 Material Parameter 的无效/不匹配 typed value（`WTUE-MID-001`）、target/resource/residency（`WTUE-MID-002`）、参数存在性或 durable owner（`WTUE-MID-003`），以及线程、代次、Session/事务生命周期（`WTUE-MID-004`）；当前 C++ submission、Automation 与 Packaged gate 已实际消费。
 - 树投影的无效/跨代节点域（`WTUE-TREE-001`）、父链/注册顺序（`WTUE-TREE-002`）、Anchor Session/Surface/父投影（`WTUE-TREE-003`）、Portal 挂载/cycle/Modal（`WTUE-TREE-004`）与 Focus Restore token/候选链（`WTUE-TREE-005`）；当前主要由 C++ Policy/Automation 使用。
 - Stable Semantic Identity 的无效 Owner/Generation/Component/provenance/node/state domain（`WTUE-ID-001`）、同 Component 重复 Key（`WTUE-ID-002`）、Kind/State Contract 不兼容重置（`WTUE-ID-003`）和 unkeyed retention 请求（`WTUE-ID-004`）；当前只由 C++ Policy/Automation 使用。
 - Interop Schema 的无效 Schema/version/identifier（`WTUE-SCHEMA-001`）、UE 大小写语义重复/enum wire value 冲突（`WTUE-SCHEMA-002`）、未知/递归类型与非法 Command shape（`WTUE-SCHEMA-003`）、版本倒退/同版本漂移/Minor breaking evolution（`WTUE-SCHEMA-004`）；当前只由 C++/Editor Policy Automation 使用。
-- Resource Contract 的无效 logical ID/provenance/dependency（`WTUE-RES-001`）、residency/assignment（`WTUE-RES-002`）、层版本/IR compatibility（`WTUE-RES-003`）、Cook freshness（`WTUE-RES-004`）和重复/不一致 Manifest（`WTUE-RES-005`）；Unreal 与 relative/generated Texture、静态 Material 的 Importer/Hydration/View/Cook 已实际消费，Route/MID/Feedback 仍只到 Policy 或未接入边界。
+- Resource Contract 的无效 logical ID/provenance/dependency（`WTUE-RES-001`）、residency/assignment（`WTUE-RES-002`）、层版本/IR compatibility（`WTUE-RES-003`）、Cook freshness（`WTUE-RES-004`）和重复/不一致 Manifest（`WTUE-RES-005`）；Unreal 与 relative/generated Texture、静态 Material 的 Importer/Hydration/View/Cook 已实际消费，动态 MID 复用相同 Material resource/residency，Route/Feedback 仍只到 Policy 或未接入边界。
 
 第一次导入错误不会产生有效运行数据；已有资产重导入失败（包括 UI Source 缺失）保留上次成功运行数据并更新诊断。自动化覆盖 HTML/CSS 依赖、成功重导入的 Generation 推进和旧 Handle 失效、失败时 last-good 保留、随后恢复，以及恢复前后 FieldNotify 绑定连续性。
 
@@ -186,6 +187,6 @@ WTUE Document 使用自定义版本 GUID，当前版本 `StaticMaterialBrushes`�
 - 嵌套属性路径、Converter、双向绑定、类型化事件载荷。
 - 组件、Props、Slots、条件节点、循环和 Keyed Diff。
 - Transition、Keyframes、Transform、阴影、渐变、滤镜和 Mask。
-- MID 创建/所有权/GC、Scalar/Vector typed parameter 写入、动态 Material 动画与 `Time` 时钟保证；relative/generated Material Source 也未支持。静态 `/Game`/`/Engine` Material/MI Asset Brush 已支持。
+- 动态 Material 的作者参数语法、Texture Parameter、Animation/Transition 与 `Time` 时钟保证，以及 relative/generated Material Source；静态 `/Game`/`/Engine` Material/MI Asset Brush 和 C++ Scalar/Vector typed parameter submission、View-owned MID/GC 已支持。
 - CSS Grid、Table、Float、CSS Variables、`calc()`、媒体查询。
 - 独立样式/布局/事件检查器、性能时间线和跨平台矩阵。

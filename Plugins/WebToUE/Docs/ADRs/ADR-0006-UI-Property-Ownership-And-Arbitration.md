@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-08-20
-- 范围：Source、CSS/Pseudo、Binding、Behavior、Animation 与 Material Parameter 对同一 UI 属性地址的所有权、合成和诊断；不表示 Behavior、Animation 或 Material 已实现
+- 范围：Source、CSS/Pseudo、Binding、Behavior、Animation 与 Material Parameter 对同一 UI 属性地址的所有权、合成和诊断；本 ADR 本身不证明各产品消费者已实现，当前 MID 对象生命周期由 ADR-0011 负责
 
 ## 背景
 
@@ -19,7 +19,7 @@ M2 已建立类型化 CSS Property、固定 Cascade slot、根字段 Binding、R
 5. `node.visibility` 与 `node.enabled` 使用 **restrictive gate**，不是覆盖层：Source/宿主约束、CSS/Pseudo gate 和 durable gate 必须全部允许，节点才可见/可用。任何 Binding、Behavior 或动画都不能重新打开被 Source、CSS、Session 或 Host 禁止的节点。Animation 不拥有这两个 gate。
 6. `node.text` 使用 layered override：Binding 或 Behavior 可以覆盖 Source/localized text；二者不能同时持有。Animation 不能写文本。释放 durable owner 后重新显露当前 Source/localized baseline。
 7. 只有受控表现属性可进入 Animation overlay。当前 M3 合同允许 Color、Background Color、Border Color、Opacity、Visual Transform，以及显式声明的 Scalar/Vector Material Parameter；Width/Layout、Visibility、Enabled、Text 和 Texture Parameter 均拒绝。M4 若扩展集合，必须同时更新类型元数据、工作量门和本 ADR 的实现证据。
-8. Material Parameter 是独立的类型化地址，不能由 CSS 名称、任意字符串属性写入或反射猜测。Material 默认值是 Source baseline；Binding/Behavior 可成为唯一 durable owner；Scalar/Vector 可有 Animation overlay，Texture 不可动画。Material/MID 实例、GC、资源驻留和参数存在性仍由 M4 Resource/Ownership 合同负责。
+8. Material Parameter 是独立的类型化地址，不能由 CSS 名称、任意字符串属性写入或反射猜测。Material 默认值是 Source baseline；Binding/Behavior 可成为唯一 durable owner；Scalar/Vector 可有 Animation overlay，Texture 不可动画。Material/MID 实例、GC、资源驻留和参数存在性由 M4 Resource/Ownership 合同与 [ADR-0011](ADR-0011-View-Owned-MID-And-Material-Parameter-State.md) 负责。
 9. 冲突诊断必须使用稳定 code、规范属性地址和排序后的 source location，因而不受 AST、Selector、Binding 或模块遍历顺序影响。`WTUE-OWN-001` 表示无效/未类型化地址，`WTUE-OWN-002` 表示 writer 不允许，`WTUE-OWN-003` 表示 Binding/Behavior durable owner 冲突。
 10. 所有 durable 值变化和 Animation lease 变化必须进入 Session-owned 更新事务并服从 Instance Handle/Generation；Policy 只裁决所有权域，不绕过事务、生命周期、Dirty 传播、资源加载或缓存所有权。Compiled IR、Runtime State、Render Data 与 Track/MID cache 继续分离。
 
@@ -37,4 +37,4 @@ M2 已建立类型化 CSS Property、固定 Cascade slot、根字段 Binding、R
 - M4 的 Transition/Animation 与 Material 实现必须消费同一 canonical address 和 policy，显式实现 lease/retarget/release，不得建立第二套优先级。
 - M5 的 Behavior Compiler 必须与 Binding claim 一起运行静态 ownership validation；发生 `WTUE-OWN-003` 时不生成可运行 Behavior IR。
 - M6 的 Source Map/Inspector 必须能显示 baseline、durable owner、active overlay、restrictive gate、来源和冲突 code。
-- 现有 Binding text/visible/enabled 仍是当前唯一产品可用 durable owner；Behavior、Animation 与 Material 在各自实现/资产/Packaged 门完成前继续标记为未支持。
+- Binding text/visible/enabled 与 M4.3b C++ typed Scalar/Vector Material Parameter submission 已是产品可用 durable owner 消费者；Behavior IR、Animation Track、参数作者语法和 Texture Parameter 仍在各自实现/资产/Packaged 门完成前标记为未支持。
