@@ -17,6 +17,25 @@ namespace
 		Result.Diagnostic = FString::Printf(TEXT("%s: %s"), Code, *Detail);
 		return Result;
 	}
+
+	static uint64 RequestedPixels(const FWebToUECompositingRequest& Request)
+	{
+		return Request.PixelExtent.X > 0 && Request.PixelExtent.Y > 0
+			? static_cast<uint64>(Request.PixelExtent.X) *
+				static_cast<uint64>(Request.PixelExtent.Y)
+			: 0;
+	}
+
+	static bool HandleLess(
+		const FWebToUEInstanceHandle& A, const FWebToUEInstanceHandle& B)
+	{
+		if (A.GetOwnerId() != B.GetOwnerId()) return A.GetOwnerId() < B.GetOwnerId();
+		if (A.GetGeneration() != B.GetGeneration())
+		{
+			return A.GetGeneration() < B.GetGeneration();
+		}
+		return A.GetSlot() < B.GetSlot();
+	}
 }
 
 FWebToUECompositingDecision FWebToUECompositingPolicy::Select(
@@ -104,4 +123,216 @@ FWebToUECompositingDecision FWebToUECompositingPolicy::Select(
 	Result.Tier = Tier;
 	Result.bAccepted = true;
 	return Result;
+}
+
+bool FWebToUECompositingPlan::Build(
+	TConstArrayView<FWebToUECompositingNodeRequest> Requests,
+	const FWebToUECompositingBackend& Backend,
+	const FWebToUECompositingBudget& Budget)
+{
+	Entries.Reset(Requests.Num());
+	ReservedUsage = {};
+	bAccepted = false;
+	Diagnostic.Reset();
+	TArray<FWebToUECompositingNodeRequest> Sorted;
+	Sorted.Append(Requests);
+	Sorted.Sort([](const FWebToUECompositingNodeRequest& A,
+		const FWebToUECompositingNodeRequest& B)
+	{
+		return A.PaintSequence != B.PaintSequence
+			? A.PaintSequence < B.PaintSequence
+			: HandleLess(A.Owner, B.Owner);
+	});
+	TSet<FWebToUEInstanceHandle> Seen;
+	for (const FWebToUECompositingNodeRequest& Node : Sorted)
+	{
+		FWebToUECompositingPlanEntry& Entry = Entries.AddDefaulted_GetRef();
+		Entry.Owner = Node.Owner;
+		Entry.Request = Node.Request;
+		Entry.PaintSequence = Node.PaintSequence;
+		if (!Node.Owner.IsValid())
+		{
+			Entry.Decision = Reject(EWebToUECompositingTier::DirectPaint,
+				TEXT("WTUE-COMP-001"), TEXT("plan owner handle is invalid"));
+		}
+		else if (Seen.Contains(Node.Owner))
+		{
+			Entry.Decision = Reject(EWebToUECompositingTier::DirectPaint,
+				TEXT("WTUE-COMP-004"), TEXT("plan contains a duplicate owner"));
+		}
+		else
+		{
+			Seen.Add(Node.Owner);
+			Entry.Decision = FWebToUECompositingPolicy::Select(
+				Node.Request, Backend, Budget, ReservedUsage);
+			if (Entry.Decision.bAccepted)
+			{
+				const uint64 Pixels = RequestedPixels(Node.Request);
+				const uint64 Bytes = Pixels * Node.Request.BytesPerPixel;
+				if (Entry.Decision.Tier == EWebToUECompositingTier::SubtreeLayer)
+				{
+					++ReservedUsage.ActiveLayers;
+					ReservedUsage.AllocatedPixels += Pixels;
+					ReservedUsage.AllocatedBytes += Bytes;
+				}
+				else if (Entry.Decision.Tier == EWebToUECompositingTier::RenderTarget)
+				{
+					++ReservedUsage.ActiveSurfaces;
+					ReservedUsage.AllocatedPixels += Pixels;
+					ReservedUsage.AllocatedBytes += Bytes;
+				}
+			}
+		}
+		if (!Entry.Decision.bAccepted && Diagnostic.IsEmpty())
+		{
+			Diagnostic = Entry.Decision.Diagnostic;
+		}
+	}
+	bAccepted = Diagnostic.IsEmpty();
+	return bAccepted;
+}
+
+FWebToUECompositingCache::FWebToUECompositingCache(
+	uint64 InOwnerId, uint32 InGeneration, FName InSurfaceId)
+	: OwnerId(InOwnerId)
+	, Generation(InGeneration)
+	, SurfaceId(InSurfaceId)
+{
+}
+
+bool FWebToUECompositingCache::ApplyPlan(
+	const FWebToUECompositingPlan& Plan,
+	uint64 ProjectionRevision,
+	FString& OutDiagnostic)
+{
+	OutDiagnostic.Reset();
+	if (bShutdown || SurfaceId.IsNone())
+	{
+		OutDiagnostic = TEXT("WTUE-COMP-005: cache is detached or shut down");
+		return false;
+	}
+	if (!Plan.IsAccepted())
+	{
+		OutDiagnostic = Plan.GetDiagnostic();
+		return false;
+	}
+	for (const FWebToUECompositingPlanEntry& Planned : Plan.GetEntries())
+	{
+		if (Planned.Owner.GetOwnerId() != OwnerId ||
+			Planned.Owner.GetGeneration() != Generation)
+		{
+			OutDiagnostic = TEXT("WTUE-COMP-001: plan owner is outside the cache generation");
+			return false;
+		}
+	}
+
+	TSet<FWebToUEInstanceHandle> Requested;
+	for (const FWebToUECompositingPlanEntry& Planned : Plan.GetEntries())
+	{
+		Requested.Add(Planned.Owner);
+		FEntry* Existing = Entries.Find(Planned.Owner);
+		const bool bReusable = Existing &&
+			Existing->Tier == Planned.Decision.Tier &&
+			Existing->PixelExtent == Planned.Request.PixelExtent &&
+			Existing->BytesPerPixel == Planned.Request.BytesPerPixel &&
+			Existing->ProjectionRevision == ProjectionRevision;
+		if (bReusable)
+		{
+			++Stats.Reused;
+			continue;
+		}
+		if (Existing) ReleaseEntry(Planned.Owner, true);
+		FEntry& Added = Entries.Add(Planned.Owner);
+		Added.Owner = Planned.Owner;
+		Added.Tier = Planned.Decision.Tier;
+		Added.PixelExtent = Planned.Request.PixelExtent;
+		Added.BytesPerPixel = Planned.Request.BytesPerPixel;
+		Added.ProjectionRevision = ProjectionRevision;
+		++Stats.Allocated;
+	}
+
+	TArray<FWebToUEInstanceHandle> Removed;
+	Entries.GetKeys(Removed);
+	Removed.Sort(HandleLess);
+	for (const FWebToUEInstanceHandle Handle : Removed)
+	{
+		if (!Requested.Contains(Handle)) ReleaseEntry(Handle, false);
+	}
+	RefreshStats();
+	return true;
+}
+
+void FWebToUECompositingCache::RemoveOwner(FWebToUEInstanceHandle Owner)
+{
+	ReleaseEntry(Owner, false);
+	RefreshStats();
+}
+
+void FWebToUECompositingCache::AdvanceGeneration(uint32 NewGeneration)
+{
+	if (NewGeneration == Generation) return;
+	ReleaseAll(true);
+	Generation = NewGeneration;
+}
+
+void FWebToUECompositingCache::DetachSurface()
+{
+	ReleaseAll(true);
+	SurfaceId = NAME_None;
+}
+
+void FWebToUECompositingCache::Shutdown()
+{
+	ReleaseAll(true);
+	bShutdown = true;
+}
+
+void FWebToUECompositingCache::ReleaseEntry(
+	FWebToUEInstanceHandle Owner, bool bEvicted)
+{
+	if (Entries.Remove(Owner) > 0)
+	{
+		++Stats.Released;
+		if (bEvicted) ++Stats.Evicted;
+	}
+}
+
+void FWebToUECompositingCache::ReleaseAll(bool bEvicted)
+{
+	TArray<FWebToUEInstanceHandle> Handles;
+	Entries.GetKeys(Handles);
+	Handles.Sort(HandleLess);
+	for (const FWebToUEInstanceHandle Handle : Handles)
+	{
+		ReleaseEntry(Handle, bEvicted);
+	}
+	RefreshStats();
+}
+
+void FWebToUECompositingCache::RefreshStats()
+{
+	Stats.CachedEntries = Entries.Num();
+	Stats.Usage = {};
+	for (const TPair<FWebToUEInstanceHandle, FEntry>& Pair : Entries)
+	{
+		const FEntry& Entry = Pair.Value;
+		const uint64 Pixels = RequestedPixels({
+			EWebToUECompositingRequirement::None,
+			Entry.PixelExtent,
+			Entry.BytesPerPixel
+		});
+		if (Entry.Tier == EWebToUECompositingTier::SubtreeLayer)
+		{
+			++Stats.Usage.ActiveLayers;
+		}
+		else if (Entry.Tier == EWebToUECompositingTier::RenderTarget)
+		{
+			++Stats.Usage.ActiveSurfaces;
+		}
+		if (Entry.Tier >= EWebToUECompositingTier::SubtreeLayer)
+		{
+			Stats.Usage.AllocatedPixels += Pixels;
+			Stats.Usage.AllocatedBytes += Pixels * Entry.BytesPerPixel;
+		}
+	}
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WebToUEIdentity.h"
 
 enum class EWebToUECompositingTier : uint8
 {
@@ -57,6 +58,86 @@ struct FWebToUECompositingDecision
 	EWebToUECompositingTier Tier = EWebToUECompositingTier::DirectPaint;
 	bool bAccepted = false;
 	FString Diagnostic;
+};
+
+struct FWebToUECompositingNodeRequest
+{
+	FWebToUEInstanceHandle Owner;
+	FWebToUECompositingRequest Request;
+	int32 PaintSequence = 0;
+};
+
+struct FWebToUECompositingPlanEntry
+{
+	FWebToUEInstanceHandle Owner;
+	FWebToUECompositingRequest Request;
+	FWebToUECompositingDecision Decision;
+	int32 PaintSequence = 0;
+};
+
+class FWebToUECompositingPlan
+{
+public:
+	bool Build(TConstArrayView<FWebToUECompositingNodeRequest> Requests,
+		const FWebToUECompositingBackend& Backend,
+		const FWebToUECompositingBudget& Budget);
+	const TArray<FWebToUECompositingPlanEntry>& GetEntries() const { return Entries; }
+	const FWebToUECompositingUsage& GetReservedUsage() const { return ReservedUsage; }
+	bool IsAccepted() const { return bAccepted; }
+	const FString& GetDiagnostic() const { return Diagnostic; }
+
+private:
+	TArray<FWebToUECompositingPlanEntry> Entries;
+	FWebToUECompositingUsage ReservedUsage;
+	bool bAccepted = false;
+	FString Diagnostic;
+};
+
+struct FWebToUECompositingCacheStats
+{
+	uint64 Allocated = 0;
+	uint64 Reused = 0;
+	uint64 Released = 0;
+	uint64 Evicted = 0;
+	int32 CachedEntries = 0;
+	FWebToUECompositingUsage Usage;
+};
+
+/** View/Surface-owned plan cache. Entries are handles, never node-owned UObject/Widget state. */
+class FWebToUECompositingCache
+{
+public:
+	FWebToUECompositingCache(uint64 InOwnerId, uint32 InGeneration,
+		FName InSurfaceId);
+	bool ApplyPlan(const FWebToUECompositingPlan& Plan,
+		uint64 ProjectionRevision, FString& OutDiagnostic);
+	void RemoveOwner(FWebToUEInstanceHandle Owner);
+	void AdvanceGeneration(uint32 NewGeneration);
+	void DetachSurface();
+	void Shutdown();
+	bool IsShutdown() const { return bShutdown; }
+	const FWebToUECompositingCacheStats& GetStats() const { return Stats; }
+
+private:
+	struct FEntry
+	{
+		FWebToUEInstanceHandle Owner;
+		EWebToUECompositingTier Tier = EWebToUECompositingTier::DirectPaint;
+		FIntPoint PixelExtent = FIntPoint::ZeroValue;
+		uint64 BytesPerPixel = 0;
+		uint64 ProjectionRevision = 0;
+	};
+
+	uint64 OwnerId = 0;
+	uint32 Generation = 0;
+	FName SurfaceId;
+	TMap<FWebToUEInstanceHandle, FEntry> Entries;
+	FWebToUECompositingCacheStats Stats;
+	bool bShutdown = false;
+
+	void ReleaseEntry(FWebToUEInstanceHandle Owner, bool bEvicted);
+	void ReleaseAll(bool bEvicted);
+	void RefreshStats();
 };
 
 /** Pure deterministic policy. It classifies sealed requirements and never silently downgrades. */
