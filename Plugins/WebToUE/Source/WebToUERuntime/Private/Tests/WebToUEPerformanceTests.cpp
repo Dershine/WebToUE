@@ -143,6 +143,19 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		uint64(3 * (sizeof(FWebToUERuntimeNodeState) + sizeof(FWebToUERuntimeRenderData))));
 	TestTrue(TEXT("The log snapshot exposes stable workload fields"),
 		Snapshot.ToLogString().Contains(TEXT("workload={hydrated_nodes=3")));
+	TestEqual(TEXT("The Display rebuild produces one compositing plan"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::CompositingPlanBuilds),
+		uint64(1));
+	TestEqual(TEXT("The plain fixture classifies all three nodes as Tier 0"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::CompositingTier0Decisions),
+		uint64(3));
+	TestEqual(TEXT("The View cache owns one logical entry per planned node"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::CompositingCacheAllocated),
+		uint64(3));
+	TestEqual(TEXT("A visible paint records one compositing redraw and pass"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::CompositingRedraws), uint64(1));
+	TestEqual(TEXT("A visible paint records one active compositing pass"),
+		Snapshot.GetCounter(EWebToUEPerformanceCounter::CompositingPasses), uint64(1));
 
 	TMap<FString, double> TelemetryMeasurements;
 	Snapshot.ForEachTelemetryMeasurement(
@@ -153,7 +166,7 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 			TelemetryMeasurements.Add(Name, Value);
 		});
 	TestEqual(TEXT("The telemetry schema has the expected version"),
-		FWebToUEPerformanceSnapshot::TelemetrySchemaVersion, 14);
+		FWebToUEPerformanceSnapshot::TelemetrySchemaVersion, 15);
 	TestEqual(TEXT("The telemetry schema exposes every phase field and workload counter"),
 		TelemetryMeasurements.Num(), FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);
 	static constexpr const TCHAR* ExpectedTelemetryNames[] = {
@@ -230,7 +243,25 @@ bool FWebToUEPerformanceInstrumentationTest::RunTest(const FString& Parameters)
 		TEXT("workload.visual_transform_commands_resolved"),
 		TEXT("workload.clip_chain_zones_resolved"),
 		TEXT("workload.inverse_hit_tests"),
-		TEXT("workload.exact_clip_tests")
+		TEXT("workload.exact_clip_tests"),
+		TEXT("workload.compositing_plan_builds"),
+		TEXT("workload.compositing_tier_decisions"),
+		TEXT("workload.compositing_tier_0_decisions"),
+		TEXT("workload.compositing_tier_1_decisions"),
+		TEXT("workload.compositing_tier_2_decisions"),
+		TEXT("workload.compositing_tier_3_decisions"),
+		TEXT("workload.compositing_plan_rejections"),
+		TEXT("workload.compositing_cache_allocated"),
+		TEXT("workload.compositing_cache_reused"),
+		TEXT("workload.compositing_cache_released"),
+		TEXT("workload.compositing_cache_evicted"),
+		TEXT("workload.compositing_active_layers"),
+		TEXT("workload.compositing_active_surfaces"),
+		TEXT("workload.compositing_allocated_pixels"),
+		TEXT("workload.compositing_allocated_bytes"),
+		TEXT("workload.compositing_redraws"),
+		TEXT("workload.compositing_passes"),
+		TEXT("workload.compositing_commands")
 	};
 	static_assert(UE_ARRAY_COUNT(ExpectedTelemetryNames) ==
 		FWebToUEPerformanceSnapshot::TelemetryMeasurementCount);

@@ -95,6 +95,24 @@ enum class EWebToUEPerformanceCounter : uint8
 	ClipChainZonesResolved,
 	InverseHitTests,
 	ExactClipTests,
+	CompositingPlanBuilds,
+	CompositingTierDecisions,
+	CompositingTier0Decisions,
+	CompositingTier1Decisions,
+	CompositingTier2Decisions,
+	CompositingTier3Decisions,
+	CompositingPlanRejections,
+	CompositingCacheAllocated,
+	CompositingCacheReused,
+	CompositingCacheReleased,
+	CompositingCacheEvicted,
+	CompositingActiveLayers,
+	CompositingActiveSurfaces,
+	CompositingAllocatedPixels,
+	CompositingAllocatedBytes,
+	CompositingRedraws,
+	CompositingPasses,
+	CompositingCommands,
 	Count
 };
 
@@ -110,7 +128,7 @@ struct WEBTOUECORE_API FWebToUEPerformanceSnapshot
 {
 	static constexpr int32 PhaseCount = static_cast<int32>(EWebToUEPerformancePhase::Count);
 	static constexpr int32 CounterCount = static_cast<int32>(EWebToUEPerformanceCounter::Count);
-	static constexpr int32 TelemetrySchemaVersion = 14;
+	static constexpr int32 TelemetrySchemaVersion = 15;
 	static constexpr int32 TelemetryMeasurementCount = (PhaseCount * 2) + CounterCount;
 	TStaticArray<FWebToUEPerformanceMetric, PhaseCount> Metrics;
 	TStaticArray<uint64, CounterCount> Counters{};

@@ -2,6 +2,7 @@
 
 #include "SWebToUEView.h"
 #include "WebToUEDocument.h"
+#include "WebToUECompositing.h"
 #include "WebToUEPerformance.h"
 #include "WebToUEResourceContractTestUtils.h"
 #include "WebToUESettings.h"
@@ -313,6 +314,21 @@ bool FWebToUEStaticMaterialLifecycleTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Two nodes build two lightweight Slate brushes"),
 		ColdSnapshot.GetCounter(EWebToUEPerformanceCounter::BrushBuilds),
 		uint64(3));
+	int32 Tier1Entries = 0;
+	for (const FWebToUECompositingPlanEntry& Entry :
+		FirstView->GetCompositingPlanForTesting().GetEntries())
+	{
+		if (Entry.Decision.Tier == EWebToUECompositingTier::MaterialBrush)
+		{
+			++Tier1Entries;
+		}
+	}
+	TestTrue(TEXT("The static Material fixture has an accepted compositing plan"),
+		FirstView->GetCompositingPlanForTesting().IsAccepted());
+	TestEqual(TEXT("Both static Material nodes classify as Tier 1"), Tier1Entries, 2);
+	TestEqual(TEXT("Telemetry records both Tier 1 decisions"),
+		ColdSnapshot.GetCounter(EWebToUEPerformanceCounter::CompositingTier1Decisions),
+		uint64(2));
 
 	FWebToUENode* MaterialA =
 		FirstView->FindRuntimeNodeByIdForTesting(TEXT("material-a"));

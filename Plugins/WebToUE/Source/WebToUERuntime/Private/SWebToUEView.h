@@ -13,6 +13,7 @@ class UWebToUEDocument;
 class UWebToUEView;
 class UMaterialInstanceDynamic;
 class FWebToUERuntimePresentation;
+class FWebToUECompositingPlan;
 struct FWebToUEPaintCommand;
 struct FWebToUEDisplayCommandRange;
 struct FWebToUEStyleUpdate;
@@ -31,6 +32,7 @@ public:
 	virtual ~SWebToUEView() override;
 	void Construct(const FArguments& InArgs);
 	void SetDocument(UWebToUEDocument* InDocument);
+	void HandleSurfaceChanged(FName SurfaceId);
 	bool RequestLazyResource(const FString& ResourceId);
 	FWebToUEMaterialParameterSubmitOutcome SubmitMaterialParameter(
 		const FWebToUEMaterialParameterSubmission& Submission);
@@ -149,6 +151,8 @@ public:
 	int32 GetDirtyRectCountForTesting() const;
 	int32 GetDirtyCommandCountForTesting() const;
 	const FSlateRect* GetDirtyRectForTesting(int32 Index) const;
+	const FWebToUECompositingPlan& GetCompositingPlanForTesting() const;
+	const FString& GetLastCompositingDiagnosticForTesting() const;
 #endif
 
 private:

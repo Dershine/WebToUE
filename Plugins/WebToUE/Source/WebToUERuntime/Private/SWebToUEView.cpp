@@ -107,6 +107,12 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	RebuildStylesAndBrushes();
 }
 
+void SWebToUEView::HandleSurfaceChanged(FName SurfaceId)
+{
+	Presentation->HandleSurfaceChanged(SurfaceId);
+	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
 const FWebToUEAnimationValue* SWebToUEView::FindAnimationOverlay(
 	FWebToUEInstanceHandle Target,
 	const FWebToUEPropertyAddress& Address) const
@@ -596,6 +602,16 @@ int32 SWebToUEView::GetDirtyCommandCountForTesting() const
 const FSlateRect* SWebToUEView::GetDirtyRectForTesting(int32 Index) const
 {
 	return Presentation->GetDirtyRectForTesting(Index);
+}
+
+const FWebToUECompositingPlan& SWebToUEView::GetCompositingPlanForTesting() const
+{
+	return Presentation->GetCompositingPlanForTesting();
+}
+
+const FString& SWebToUEView::GetLastCompositingDiagnosticForTesting() const
+{
+	return Presentation->GetLastCompositingDiagnosticForTesting();
 }
 
 FVector2f SWebToUEView::GetVisualPositionForTesting(const FWebToUENode& Node) const

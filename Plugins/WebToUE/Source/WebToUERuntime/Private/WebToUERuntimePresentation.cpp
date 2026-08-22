@@ -261,6 +261,7 @@ FWebToUERuntimePresentation::FWebToUERuntimePresentation(SWebToUEView& InOwnerWi
 
 FWebToUERuntimePresentation::~FWebToUERuntimePresentation()
 {
+	if (CompositingCache) CompositingCache->Shutdown();
 	CancelResourceRequests();
 	ResetDynamicMaterials();
 }
@@ -318,6 +319,13 @@ bool FWebToUERuntimePresentation::IsRichText(const FWebToUENode& Node) const
 
 void FWebToUERuntimePresentation::Reset()
 {
+	if (CompositingCache) CompositingCache->Shutdown();
+	CompositingCache.Reset();
+	CompositingCacheOwnerId = 0;
+	CompositingCacheGeneration = 0;
+	CompositingPlan = {};
+	LastCompositingDiagnostic.Reset();
+	++CompositingProjectionRevision;
 	LastViewportSize = FVector2f(-1.0f, -1.0f);
 	bLayoutDirty = true;
 	Brushes.Reset();
@@ -349,6 +357,19 @@ void FWebToUERuntimePresentation::Reset()
 	ResourceFailuresForTesting = 0;
 	ResourceCancellationsForTesting = 0;
 #endif
+}
+
+void FWebToUERuntimePresentation::HandleSurfaceChanged(FName SurfaceId)
+{
+	if (CompositingSurfaceId == SurfaceId) return;
+	if (CompositingCache) CompositingCache->DetachSurface();
+	CompositingCache.Reset();
+	CompositingCacheOwnerId = 0;
+	CompositingCacheGeneration = 0;
+	CompositingSurfaceId = SurfaceId;
+	LastCompositingDiagnostic.Reset();
+	++CompositingProjectionRevision;
+	bDisplayListDirty = true;
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -1264,6 +1285,16 @@ int32 FWebToUERuntimePresentation::Paint(const FPaintArgs& Args, const FGeometry
 		FMath::Max(LocalTopLeft.Y, LocalBottomRight.Y));
 	QueryDisplayCommands(LocalCullingRect, true, DisplayQueryScratch);
 	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::CompositingRedraws);
+	if (!DisplayQueryScratch.IsEmpty())
+	{
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::CompositingPasses);
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::CompositingCommands,
+			DisplayQueryScratch.Num());
+	}
+	FWebToUEPerformanceCapture::RecordCounter(
 		EWebToUEPerformanceCounter::PaintCommandsCulled,
 		FMath::Max(0, DisplayCommands.Num() - DisplayQueryScratch.Num()));
 	const FWebToUEPaintCommand* PreviousBatchableCommand = nullptr;
@@ -1334,6 +1365,7 @@ void FWebToUERuntimePresentation::RebuildDisplayList() const
 	DisplayCommandRanges.Reserve(RuntimeNodeCount);
 	BuildDisplaySubtree(*RuntimeDocument, *RuntimeDocument->Root, 1.0f, true, true,
 		0, FVector2f::ZeroVector, FTransform2D(), {});
+	RebuildCompositingPlan();
 	DisplayQueryMarks.SetNumZeroed(DisplayCommands.Num());
 	DisplayQueryScratch.Reserve(DisplayCommands.Num());
 	DirtyRects.Reserve(DisplayCommands.Num());
@@ -1342,6 +1374,179 @@ void FWebToUERuntimePresentation::RebuildDisplayList() const
 	FWebToUEPerformanceCapture::RecordCounter(
 		EWebToUEPerformanceCounter::DisplayCommandsBuilt, DisplayCommands.Num());
 	bDisplayListDirty = false;
+}
+
+bool FWebToUERuntimePresentation::RebuildCompositingPlan() const
+{
+	using namespace WebToUE::Runtime::Presentation::Private;
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::CompositingPlanBuilds);
+	LastCompositingDiagnostic.Reset();
+	TArray<FWebToUECompositingNodeRequest> Requests;
+	Requests.Reserve(DisplayCommands.Num());
+	for (int32 CommandIndex = 0; CommandIndex < DisplayCommands.Num(); ++CommandIndex)
+	{
+		const FWebToUEPaintCommand& Command = DisplayCommands[CommandIndex];
+		const FWebToUENode* Node = RuntimeInstance.ResolveNode(Command.Owner);
+		if (!Node) continue;
+		FWebToUECompositingNodeRequest& Planned = Requests.AddDefaulted_GetRef();
+		Planned.Owner = Command.Owner;
+		Planned.PaintSequence = CommandIndex;
+
+		if (!Node->ResourceId.IsEmpty())
+		{
+			const int32 ResourceHandle = FindResourceHandleById(Node->ResourceId);
+			const TConstArrayView<FWebToUECompiledResource> Manifest =
+				RuntimeInstance.GetResourceManifest();
+			if (Manifest.IsValidIndex(ResourceHandle) &&
+				Manifest[ResourceHandle].Kind == EWebToUEResourceKind::Material)
+			{
+				Planned.Request.Requirements |=
+					EWebToUECompositingRequirement::MaterialBrush;
+			}
+		}
+
+		const FWebToUEComputedStyle& Style = GetStyle(*Node);
+		if (Style.Opacity > 0.0f && Style.Opacity < 1.0f)
+		{
+			const TConstArrayView<FWebToUEInstanceHandle> Children = GetPaintOrder(*Node);
+			bool bHasOverlappingChildren = false;
+			for (int32 LeftIndex = 0;
+				LeftIndex < Children.Num() && !bHasOverlappingChildren; ++LeftIndex)
+			{
+				const int32* LeftCommandIndex = DisplayCommandIndices.Find(Children[LeftIndex]);
+				if (!LeftCommandIndex || !DisplayCommands.IsValidIndex(*LeftCommandIndex)) continue;
+				const FSlateRect& Left = DisplayCommands[*LeftCommandIndex].SubtreeBounds;
+				if (!IsUsableRect(Left)) continue;
+				for (int32 RightIndex = LeftIndex + 1; RightIndex < Children.Num(); ++RightIndex)
+				{
+					const int32* RightCommandIndex =
+						DisplayCommandIndices.Find(Children[RightIndex]);
+					if (!RightCommandIndex ||
+						!DisplayCommands.IsValidIndex(*RightCommandIndex)) continue;
+					const FSlateRect& Right =
+						DisplayCommands[*RightCommandIndex].SubtreeBounds;
+					bHasOverlappingChildren = IsUsableRect(Right) &&
+						Left.Left < Right.Right && Left.Right > Right.Left &&
+						Left.Top < Right.Bottom && Left.Bottom > Right.Top;
+					if (bHasOverlappingChildren) break;
+				}
+			}
+			if (bHasOverlappingChildren)
+			{
+				Planned.Request.Requirements |=
+					EWebToUECompositingRequirement::IsolatedSubtree;
+				Planned.Request.PixelExtent = FIntPoint(
+					FMath::Max(1, FMath::CeilToInt(Command.SubtreeBounds.Right -
+						Command.SubtreeBounds.Left)),
+					FMath::Max(1, FMath::CeilToInt(Command.SubtreeBounds.Bottom -
+						Command.SubtreeBounds.Top)));
+			}
+		}
+	}
+
+	FWebToUECompositingBackend Backend;
+	Backend.bMaterialBrushAvailable = true;
+	Backend.bSubtreeLayerAvailable = false;
+	Backend.bRenderTargetAvailable = false;
+	FWebToUECompositingBudget Budget;
+	Budget.MaxActiveLayers = Requests.Num();
+	Budget.MaxActiveSurfaces = Requests.Num();
+	Budget.MaxAllocatedPixels = MAX_uint64;
+	Budget.MaxAllocatedBytes = MAX_uint64;
+	const bool bPlanAccepted = CompositingPlan.Build(Requests, Backend, Budget);
+	for (const FWebToUECompositingPlanEntry& Entry : CompositingPlan.GetEntries())
+	{
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::CompositingTierDecisions);
+		const EWebToUEPerformanceCounter TierCounter =
+			Entry.Decision.Tier == EWebToUECompositingTier::DirectPaint
+			? EWebToUEPerformanceCounter::CompositingTier0Decisions
+			: Entry.Decision.Tier == EWebToUECompositingTier::MaterialBrush
+			? EWebToUEPerformanceCounter::CompositingTier1Decisions
+			: Entry.Decision.Tier == EWebToUECompositingTier::SubtreeLayer
+			? EWebToUEPerformanceCounter::CompositingTier2Decisions
+			: EWebToUEPerformanceCounter::CompositingTier3Decisions;
+		FWebToUEPerformanceCapture::RecordCounter(TierCounter);
+	}
+
+	const auto RecordCacheDelta = [](const FWebToUECompositingCacheStats& Before,
+		const FWebToUECompositingCacheStats& After)
+	{
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::CompositingCacheAllocated,
+			After.Allocated - Before.Allocated);
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::CompositingCacheReused,
+			After.Reused - Before.Reused);
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::CompositingCacheReleased,
+			After.Released - Before.Released);
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::CompositingCacheEvicted,
+			After.Evicted - Before.Evicted);
+	};
+	if (!bPlanAccepted || CompositingSurfaceId.IsNone() || Requests.IsEmpty())
+	{
+		LastCompositingDiagnostic = bPlanAccepted
+			? TEXT("WTUE-COMP-005: cache is detached or has no plan owner")
+			: CompositingPlan.GetDiagnostic();
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::CompositingPlanRejections);
+		if (CompositingCache)
+		{
+			const FWebToUECompositingCacheStats Before = CompositingCache->GetStats();
+			CompositingCache->Shutdown();
+			RecordCacheDelta(Before, CompositingCache->GetStats());
+			CompositingCache.Reset();
+			CompositingCacheOwnerId = 0;
+			CompositingCacheGeneration = 0;
+		}
+		for (FWebToUEPaintCommand& Command : DisplayCommands) Command.bDisplayed = false;
+		return false;
+	}
+
+	const FWebToUEInstanceHandle PlanOwner = Requests[0].Owner;
+	if (CompositingCache &&
+		(PlanOwner.GetOwnerId() != CompositingCacheOwnerId ||
+		 PlanOwner.GetGeneration() != CompositingCacheGeneration))
+	{
+		CompositingCache->Shutdown();
+		CompositingCache.Reset();
+		CompositingCacheOwnerId = 0;
+		CompositingCacheGeneration = 0;
+	}
+	if (!CompositingCache)
+	{
+		CompositingCache = MakeUnique<FWebToUECompositingCache>(
+			PlanOwner.GetOwnerId(), PlanOwner.GetGeneration(), CompositingSurfaceId);
+		CompositingCacheOwnerId = PlanOwner.GetOwnerId();
+		CompositingCacheGeneration = PlanOwner.GetGeneration();
+	}
+	const FWebToUECompositingCacheStats Before = CompositingCache->GetStats();
+	if (!CompositingCache->ApplyPlan(
+		CompositingPlan, CompositingProjectionRevision, LastCompositingDiagnostic))
+	{
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::CompositingPlanRejections);
+		for (FWebToUEPaintCommand& Command : DisplayCommands) Command.bDisplayed = false;
+		return false;
+	}
+	const FWebToUECompositingCacheStats& After = CompositingCache->GetStats();
+	RecordCacheDelta(Before, After);
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::CompositingActiveLayers,
+		After.Usage.ActiveLayers);
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::CompositingActiveSurfaces,
+		After.Usage.ActiveSurfaces);
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::CompositingAllocatedPixels,
+		After.Usage.AllocatedPixels);
+	FWebToUEPerformanceCapture::RecordCounter(
+		EWebToUEPerformanceCounter::CompositingAllocatedBytes,
+		After.Usage.AllocatedBytes);
+	return true;
 }
 
 void FWebToUERuntimePresentation::UpdateDisplayCommand(

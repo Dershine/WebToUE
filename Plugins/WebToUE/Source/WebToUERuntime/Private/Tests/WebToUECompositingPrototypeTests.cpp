@@ -136,6 +136,14 @@ bool FWebToUECompositingAdversarialSubtreePrototypeTest::RunTest(
 		LowerCommand->Opacity, 0.5f);
 	TestEqual(TEXT("The current direct path multiplies group opacity into the upper command"),
 		UpperCommand->Opacity, 0.5f);
+	TestFalse(TEXT("The product plan refuses unsupported isolated group compositing"),
+		View->GetCompositingPlanForTesting().IsAccepted());
+	TestTrue(TEXT("The product refusal reports the stable unavailable-backend diagnostic"),
+		View->GetLastCompositingDiagnosticForTesting().StartsWith(TEXT("WTUE-COMP-002")));
+	TestFalse(TEXT("The product path fails closed instead of painting incorrect opacity"),
+		LowerCommand->bDisplayed);
+	TestNull(TEXT("A refused compositing plan cannot leave a stale hit target"),
+		View->HitTestForTesting(FVector2f(40.0f, 40.0f)));
 
 	FWebToUECompositingRequest Request;
 	Request.Requirements = EWebToUECompositingRequirement::IsolatedSubtree;

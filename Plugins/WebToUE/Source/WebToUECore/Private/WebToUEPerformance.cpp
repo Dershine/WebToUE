@@ -90,7 +90,25 @@ namespace WebToUE::Performance::Private
 		TEXT("workload.visual_transform_commands_resolved"),
 		TEXT("workload.clip_chain_zones_resolved"),
 		TEXT("workload.inverse_hit_tests"),
-		TEXT("workload.exact_clip_tests")
+		TEXT("workload.exact_clip_tests"),
+		TEXT("workload.compositing_plan_builds"),
+		TEXT("workload.compositing_tier_decisions"),
+		TEXT("workload.compositing_tier_0_decisions"),
+		TEXT("workload.compositing_tier_1_decisions"),
+		TEXT("workload.compositing_tier_2_decisions"),
+		TEXT("workload.compositing_tier_3_decisions"),
+		TEXT("workload.compositing_plan_rejections"),
+		TEXT("workload.compositing_cache_allocated"),
+		TEXT("workload.compositing_cache_reused"),
+		TEXT("workload.compositing_cache_released"),
+		TEXT("workload.compositing_cache_evicted"),
+		TEXT("workload.compositing_active_layers"),
+		TEXT("workload.compositing_active_surfaces"),
+		TEXT("workload.compositing_allocated_pixels"),
+		TEXT("workload.compositing_allocated_bytes"),
+		TEXT("workload.compositing_redraws"),
+		TEXT("workload.compositing_passes"),
+		TEXT("workload.compositing_commands")
 	};
 
 	static_assert(UE_ARRAY_COUNT(PhaseTelemetryNames) == FWebToUEPerformanceSnapshot::PhaseCount);
@@ -329,6 +347,24 @@ const TCHAR* LexToString(EWebToUEPerformanceCounter Counter)
 	case EWebToUEPerformanceCounter::ClipChainZonesResolved: return TEXT("clip_chain_zones_resolved");
 	case EWebToUEPerformanceCounter::InverseHitTests: return TEXT("inverse_hit_tests");
 	case EWebToUEPerformanceCounter::ExactClipTests: return TEXT("exact_clip_tests");
+	case EWebToUEPerformanceCounter::CompositingPlanBuilds: return TEXT("compositing_plan_builds");
+	case EWebToUEPerformanceCounter::CompositingTierDecisions: return TEXT("compositing_tier_decisions");
+	case EWebToUEPerformanceCounter::CompositingTier0Decisions: return TEXT("compositing_tier_0_decisions");
+	case EWebToUEPerformanceCounter::CompositingTier1Decisions: return TEXT("compositing_tier_1_decisions");
+	case EWebToUEPerformanceCounter::CompositingTier2Decisions: return TEXT("compositing_tier_2_decisions");
+	case EWebToUEPerformanceCounter::CompositingTier3Decisions: return TEXT("compositing_tier_3_decisions");
+	case EWebToUEPerformanceCounter::CompositingPlanRejections: return TEXT("compositing_plan_rejections");
+	case EWebToUEPerformanceCounter::CompositingCacheAllocated: return TEXT("compositing_cache_allocated");
+	case EWebToUEPerformanceCounter::CompositingCacheReused: return TEXT("compositing_cache_reused");
+	case EWebToUEPerformanceCounter::CompositingCacheReleased: return TEXT("compositing_cache_released");
+	case EWebToUEPerformanceCounter::CompositingCacheEvicted: return TEXT("compositing_cache_evicted");
+	case EWebToUEPerformanceCounter::CompositingActiveLayers: return TEXT("compositing_active_layers");
+	case EWebToUEPerformanceCounter::CompositingActiveSurfaces: return TEXT("compositing_active_surfaces");
+	case EWebToUEPerformanceCounter::CompositingAllocatedPixels: return TEXT("compositing_allocated_pixels");
+	case EWebToUEPerformanceCounter::CompositingAllocatedBytes: return TEXT("compositing_allocated_bytes");
+	case EWebToUEPerformanceCounter::CompositingRedraws: return TEXT("compositing_redraws");
+	case EWebToUEPerformanceCounter::CompositingPasses: return TEXT("compositing_passes");
+	case EWebToUEPerformanceCounter::CompositingCommands: return TEXT("compositing_commands");
 	default: return TEXT("unknown");
 	}
 }

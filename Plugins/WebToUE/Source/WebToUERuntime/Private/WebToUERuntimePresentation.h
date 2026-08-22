@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WebToUECompositing.h"
 #include "WebToUECompiler.h"
 #include "WebToUEDocument.h"
 #include "WebToUEPropertyOwnership.h"
@@ -154,6 +155,7 @@ public:
 	~FWebToUERuntimePresentation();
 
 	void Reset();
+	void HandleSurfaceChanged(FName SurfaceId);
 	void RebuildCaches(bool bReloadResources);
 	bool ApplyBoundTextChange(FWebToUENode& Node);
 	void ApplyStyleUpdates(TConstArrayView<FWebToUEStyleUpdate> Updates);
@@ -229,6 +231,14 @@ public:
 	{
 		return DirtyRects.IsValidIndex(Index) ? &DirtyRects[Index] : nullptr;
 	}
+	const FWebToUECompositingPlan& GetCompositingPlanForTesting() const
+	{
+		return CompositingPlan;
+	}
+	const FString& GetLastCompositingDiagnosticForTesting() const
+	{
+		return LastCompositingDiagnostic;
+	}
 #endif
 
 private:
@@ -266,6 +276,13 @@ private:
 	mutable TArray<FSlateRect> DirtyRects;
 	mutable TArray<int32> DirtyCommandIndices;
 	mutable bool bDisplayListDirty = true;
+	mutable FWebToUECompositingPlan CompositingPlan;
+	mutable TUniquePtr<FWebToUECompositingCache> CompositingCache;
+	mutable uint64 CompositingCacheOwnerId = 0;
+	mutable uint32 CompositingCacheGeneration = 0;
+	mutable FName CompositingSurfaceId = TEXT("view.standalone");
+	mutable FString LastCompositingDiagnostic;
+	mutable uint64 CompositingProjectionRevision = 1;
 #if WITH_DEV_AUTOMATION_TESTS
 	mutable uint64 ResourceLoadAttemptsForTesting = 0;
 	mutable uint64 ResourceAsyncRequestsForTesting = 0;
@@ -303,6 +320,7 @@ private:
 	UObject* GetResolvedResourceById(const FString& ResourceId) const;
 	UObject* GetResolvedFont(const FString& Family) const;
 	void RebuildDisplayList() const;
+	bool RebuildCompositingPlan() const;
 	void BuildDisplaySubtree(const FWebToUEDocument& RuntimeDocument,
 		const FWebToUENode& Node, float ParentOpacity, bool bParentDisplayed,
 		bool bParentEnabled, int32 Depth,

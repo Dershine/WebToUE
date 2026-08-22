@@ -40,7 +40,7 @@ namespace WebToUE::Compositing::Lifecycle
 		Result.PaintSequence = PaintSequence;
 		Result.Request.Requirements = Requirements;
 		if (EnumHasAnyFlags(Requirements,
-			EWebToUECompositingRequirement::IsolatedSubtree | 
+			EWebToUECompositingRequirement::IsolatedSubtree |
 			EWebToUECompositingRequirement::SamplesCompositedSubtree))
 		{
 			Result.Request.PixelExtent = FIntPoint(128, 128);

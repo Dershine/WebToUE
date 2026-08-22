@@ -14,6 +14,12 @@ UWebToUEView::UWebToUEView(const FObjectInitializer& ObjectInitializer)
 TSharedRef<SWidget> UWebToUEView::RebuildWidget()
 {
 	SlateView = SNew(SWebToUEView).Owner(this);
+	FName SurfaceId(TEXT("view.standalone"));
+	if (const TSharedPtr<FWebToUESession> ActiveSession = Session.Pin())
+	{
+		SurfaceId = ActiveSession->GetSurface().SurfaceId;
+	}
+	SlateView->HandleSurfaceChanged(SurfaceId);
 	SafeZone = SNew(SSafeZone)
 		.IsTitleSafe(false)
 		.SafeAreaScale(bRespectSafeZone ? FMargin(1.0f) : FMargin(0.0f))
@@ -71,11 +77,17 @@ void UWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 void UWebToUEView::SetSession(TSharedPtr<FWebToUESession> InSession)
 {
 	Session = InSession;
+	if (SlateView)
+	{
+		SlateView->HandleSurfaceChanged(InSession
+			? InSession->GetSurface().SurfaceId : FName(TEXT("view.standalone")));
+	}
 }
 
 void UWebToUEView::ClearSession()
 {
 	Session.Reset();
+	if (SlateView) SlateView->HandleSurfaceChanged(NAME_None);
 }
 
 void UWebToUEView::SetDataContext(UObject* InDataContext)
