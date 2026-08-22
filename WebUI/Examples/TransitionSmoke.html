@@ -12,11 +12,11 @@
     }
 
     #heading {
-      width: 880px;
-      height: 54px;
-      margin-bottom: 30px;
+      width: 920px;
+      height: 48px;
+      margin-bottom: 24px;
       color: #8fc8ee;
-      font-size: 34px;
+      font-size: 28px;
     }
 
     #stage {
@@ -29,15 +29,15 @@
     }
 
     #transition-target {
-      width: 500px;
-      height: 190px;
+      width: 520px;
+      height: 180px;
       padding: 28px;
+      flex-direction: column;
       opacity: 0.72;
       color: #eaf6ff;
       background-color: #24506d;
       border: 6px solid #83c5e8;
       border-radius: 20px;
-      font-size: 34px;
       transform: translate(0px, 0px) rotate(0deg) scale(1);
       transform-origin: left top;
       transition: opacity 600ms ease-in-out,
@@ -55,12 +55,17 @@
       transform: translate(180px, 70px) rotate(8deg) scale(1.08, 0.94);
     }
 
+    #title {
+      width: 430px;
+      height: 46px;
+      font-size: 32px;
+    }
+
     #detail {
-      width: 420px;
-      height: 44px;
-      margin-top: 14px;
-      color: #b9ddf3;
-      font-size: 21px;
+      width: 430px;
+      height: 34px;
+      margin-top: 10px;
+      font-size: 20px;
     }
 
   </style>
@@ -69,8 +74,8 @@
   <div id="heading">Compiled Transition IR → native Session animation</div>
   <div id="stage">
     <button id="transition-target">
-      Deterministic visible transition
-      <div id="detail">Pointer entry animates paint and local spatial transform.</div>
+      <div id="title">Native Transition</div>
+      <div id="detail">5 typed tracks · completed hover state</div>
     </button>
   </div>
 </body>
