@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+<head>
+  <style>
+    body {
+      width: 1920px;
+      height: 1080px;
+      padding: 72px 120px;
+      background-color: #07111f;
+      color: #e9f4ff;
+      font-size: 28px;
+    }
+
+    #heading {
+      width: 1040px;
+      height: 54px;
+      margin-bottom: 28px;
+      color: #9bd9ff;
+      font-size: 36px;
+    }
+
+    #overlap-stage {
+      width: 720px;
+      height: 330px;
+      overflow: hidden;
+      background-color: #11283d;
+      border: 4px solid #58b7e8;
+      border-radius: 24px;
+      transform: translate(36px, 8px) rotate(-3deg);
+      transform-origin: center center;
+    }
+
+    #lower-card {
+      width: 470px;
+      height: 210px;
+      margin-left: 42px;
+      margin-top: 48px;
+      background-color: #d84262;
+      border: 4px solid #ffd0d8;
+      border-radius: 18px;
+    }
+
+    #upper-card {
+      width: 430px;
+      height: 180px;
+      background-color: #2176d2;
+      border: 4px solid #c9e5ff;
+      border-radius: 18px;
+      transform: translate(250px, -150px) rotate(8deg);
+      transform-origin: left top;
+    }
+
+    #opacity-chip {
+      width: 230px;
+      height: 62px;
+      margin-left: 90px;
+      margin-top: 18px;
+      background-color: #f6c945;
+      border: 3px solid #fff0a8;
+      border-radius: 15px;
+      opacity: 0.62;
+    }
+
+    #outer-clip {
+      width: 700px;
+      height: 390px;
+      margin-left: 820px;
+      margin-top: -330px;
+      overflow: hidden;
+      padding: 32px;
+      background-color: #17334d;
+      border: 4px solid #79c8ef;
+      border-radius: 24px;
+      transform: translate(26px, 18px) rotate(4deg);
+      transform-origin: center center;
+    }
+
+    #inner-clip {
+      width: 610px;
+      height: 292px;
+      overflow: hidden;
+      padding: 24px;
+      background-color: #28536b;
+      border: 3px solid #b9e6f8;
+      border-radius: 19px;
+      transform: translate(34px, 20px) rotate(-8deg);
+      transform-origin: 20% 30%;
+    }
+
+    #compositing-hit {
+      width: 470px;
+      height: 150px;
+      padding: 24px;
+      background-color: #ff744d;
+      color: #25121b;
+      border: 5px solid #ffd2a6;
+      border-radius: 18px;
+      font-size: 32px;
+      transform: translate(92px, 64px) rotate(13deg);
+      transform-origin: left top;
+    }
+
+    #compositing-hit:hover {
+      background-color: #ffd166;
+      transform: translate(66px, 42px) rotate(-9deg);
+      transform-origin: 30% 70%;
+    }
+
+    #dynamic-material {
+      width: 760px;
+      height: 240px;
+      margin-left: 410px;
+      margin-top: 80px;
+      transform: rotate(-2deg);
+      transform-origin: center center;
+    }
+  </style>
+</head>
+<body>
+  <div id="heading">Deterministic direct + Material compositing smoke</div>
+  <div id="overlap-stage">
+    <div id="lower-card"></div>
+    <div id="upper-card"></div>
+    <div id="opacity-chip"></div>
+  </div>
+  <div id="outer-clip">
+    <div id="inner-clip">
+      <button id="compositing-hit">Hover validates inverse hit + local dirty</button>
+    </div>
+  </div>
+  <div id="dynamic-material"
+       data-ue-material="/Game/WebToUEExamples/Materials/M_WTUE_DynamicMaterialBrush.M_WTUE_DynamicMaterialBrush"
+       data-ue-residency="critical"></div>
+</body>
+</html>

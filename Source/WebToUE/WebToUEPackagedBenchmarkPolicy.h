@@ -35,6 +35,7 @@ struct FWebToUEPackagedBenchmarkEvidence
 	uint64 SecondViewResourceFailures = 0;
 	uint64 SecondViewResourceCancellations = 0;
 	bool bDynamicMaterialParameterSmoke = false;
+	bool bCompositingSmoke = false;
 	uint64 WarmupMaterialParameterLookups = 0;
 	uint64 WarmupMaterialParameterEvaluations = 0;
 	uint64 WarmupMaterialInstancesCreated = 0;

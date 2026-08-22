@@ -55,6 +55,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETransformClipSmokeContractTest,
 	"WebToUE.Benchmark.TransformClipSmokeContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUECompositingSmokeContractTest,
+	"WebToUE.Benchmark.CompositingSmokeContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETransitionSmokeContractTest,
 	"WebToUE.Benchmark.TransitionSmokeContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -641,6 +645,197 @@ bool FWebToUETransformClipSmokeContractTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+bool FWebToUECompositingSmokeContractTest::RunTest(const FString& Parameters)
+{
+	const FString MaterialPath =
+		TEXT("/Game/WebToUEExamples/Materials/M_WTUE_DynamicMaterialBrush.M_WTUE_DynamicMaterialBrush");
+	UWebToUEDocument* Document = LoadObject<UWebToUEDocument>(nullptr,
+		TEXT("/Game/WebToUEExamples/CompositingSmoke.CompositingSmoke"));
+	if (!TestNotNull(TEXT("The packaged compositing smoke document loads"), Document))
+	{
+		return false;
+	}
+	TestFalse(TEXT("The compositing fixture is persisted at the current version"),
+		Document->NeedsRecompile());
+	TestEqual(TEXT("The fixture seals one shared parent Material"),
+		Document->GetResourceManifest().Num(), 1);
+	if (Document->GetResourceManifest().Num() != 1) return false;
+	const FWebToUECompiledResource& Resource = Document->GetResourceManifest()[0];
+	TestEqual(TEXT("The shared resource remains a Material"), Resource.Kind,
+		EWebToUEResourceKind::Material);
+	TestEqual(TEXT("The fixture preserves the parent Material path"),
+		Resource.Path.ToString(), MaterialPath);
+	TestEqual(TEXT("The parent Material is Critical"), Resource.Residency,
+		EWebToUEResidencyClass::Critical);
+	UMaterialInterface* ParentMaterial = LoadObject<UMaterialInterface>(
+		nullptr, *MaterialPath);
+	if (!TestNotNull(TEXT("The sealed parent Material is resident"), ParentMaterial))
+	{
+		return false;
+	}
+
+	UWebToUEView* FirstView = NewObject<UWebToUEView>(GetTransientPackage());
+	FirstView->SetDocument(Document);
+	const TSharedRef<SWidget> Widget = FirstView->TakeWidget();
+	Widget->SlatePrepass(1.0f);
+	const TSharedRef<SWindow> PaintWindow = SNew(SWindow)
+		.ClientSize(FVector2D(1920.0, 1080.0));
+	FHittestGrid HittestGrid;
+	FSlateWindowElementList DrawElements(PaintWindow);
+	const FGeometry Geometry = FGeometry::MakeRoot(
+		FVector2D(1920.0, 1080.0), FSlateLayoutTransform());
+	const FPaintArgs PaintArgs(
+		nullptr, HittestGrid, FVector2D::ZeroVector, 0.0, 0.0f);
+	FWebToUEPerformanceSnapshot PaintWorkload;
+	{
+		FWebToUEPerformanceCapture Capture;
+		Widget->Paint(PaintArgs, Geometry,
+			FSlateRect(0.0f, 0.0f, 1920.0f, 1080.0f), DrawElements, 0,
+			FWidgetStyle(), true);
+		PaintWorkload = Capture.GetSnapshot();
+	}
+	TestEqual(TEXT("The product slice accepts its deterministic plan"),
+		PaintWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingPlanRejections),
+		uint64(0));
+	TestTrue(TEXT("Direct commands are classified as Tier 0"),
+		PaintWorkload.GetCounter(
+			EWebToUEPerformanceCounter::CompositingTier0Decisions) > 0);
+	TestEqual(TEXT("The Material node is classified exactly once as Tier 1"),
+		PaintWorkload.GetCounter(
+			EWebToUEPerformanceCounter::CompositingTier1Decisions), uint64(1));
+	TestEqual(TEXT("The sealed product fixture activates no Tier 2"),
+		PaintWorkload.GetCounter(
+			EWebToUEPerformanceCounter::CompositingTier2Decisions), uint64(0));
+	TestEqual(TEXT("The sealed product fixture activates no Tier 3"),
+		PaintWorkload.GetCounter(
+			EWebToUEPerformanceCounter::CompositingTier3Decisions), uint64(0));
+
+	const auto& RoundedBoxes = DrawElements.GetUncachedDrawElements()
+		.Get<(uint8)EElementType::ET_RoundedBox>();
+	const FLinearColor LowerColor =
+		FLinearColor::FromSRGBColor(FColor(0xd8, 0x42, 0x62, 0xff));
+	const FLinearColor UpperColor =
+		FLinearColor::FromSRGBColor(FColor(0x21, 0x76, 0xd2, 0xff));
+	const FLinearColor OpacityColor =
+		FLinearColor::FromSRGBColor(FColor(0xf6, 0xc9, 0x45, 0xff));
+	const int32 LowerIndex = RoundedBoxes.IndexOfByPredicate(
+		[&LowerColor](const auto& Element)
+		{
+			return Element.GetTint().Equals(LowerColor, KINDA_SMALL_NUMBER);
+		});
+	const int32 UpperIndex = RoundedBoxes.IndexOfByPredicate(
+		[&UpperColor](const auto& Element)
+		{
+			return Element.GetTint().Equals(UpperColor, KINDA_SMALL_NUMBER);
+		});
+	TestTrue(TEXT("Overlapping sibling order reaches Slate deterministically"),
+		LowerIndex != INDEX_NONE && UpperIndex > LowerIndex);
+	TestTrue(TEXT("Leaf-local opacity reaches Slate without an offscreen surface"),
+		RoundedBoxes.ContainsByPredicate([&OpacityColor](const auto& Element)
+		{
+			const FLinearColor Tint = Element.GetTint();
+			return FMath::IsNearlyEqual(Tint.R, OpacityColor.R, KINDA_SMALL_NUMBER) &&
+				FMath::IsNearlyEqual(Tint.G, OpacityColor.G, KINDA_SMALL_NUMBER) &&
+				FMath::IsNearlyEqual(Tint.B, OpacityColor.B, KINDA_SMALL_NUMBER) &&
+				FMath::IsNearlyEqual(Tint.A, 0.62f, KINDA_SMALL_NUMBER);
+		}));
+	TestTrue(TEXT("Nested rotated overflow reaches Slate stencil clipping"),
+		DrawElements.GetClippingManager().GetClippingStates().ContainsByPredicate(
+			[](const FSlateClippingState& State)
+			{
+				return State.GetClippingMethod() == EClippingMethod::Stencil;
+			}));
+
+	TArray<FWebToUESemanticNode> Semantics;
+	FirstView->GetSemanticNodes(Semantics);
+	const FWebToUESemanticNode* HitTarget = Semantics.FindByPredicate(
+		[](const FWebToUESemanticNode& Node)
+		{
+			return Node.ElementId == TEXT("compositing-hit");
+		});
+	TestNotNull(TEXT("The transformed hit target remains semantic"), HitTarget);
+	if (HitTarget)
+	{
+		const FVector2D Center(
+			(HitTarget->Bounds.Left + HitTarget->Bounds.Right) * 0.5,
+			(HitTarget->Bounds.Top + HitTarget->Bounds.Bottom) * 0.5);
+		const FPointerEvent MoveEvent(0, Center, FVector2D::ZeroVector,
+			TSet<FKey>(), FKey(), 0.0f, FModifierKeysState());
+		const TSharedPtr<SWidget> PointerTarget =
+			WebToUE::Benchmark::ResolvePointerTarget(Widget);
+		FWebToUEPerformanceSnapshot HitWorkload;
+		{
+			FWebToUEPerformanceCapture Capture;
+			TestTrue(TEXT("The production leaf handles the exact transformed hit"),
+				PointerTarget.IsValid() && PointerTarget->OnMouseMove(
+					Geometry, MoveEvent).IsEventHandled());
+			HitWorkload = Capture.GetSnapshot();
+		}
+		TestTrue(TEXT("Exact hit traverses candidates and inverse transforms"),
+			HitWorkload.GetCounter(EWebToUEPerformanceCounter::HitTestCommandsVisited) > 0 &&
+			HitWorkload.GetCounter(EWebToUEPerformanceCounter::InverseHitTests) > 0 &&
+			HitWorkload.GetCounter(EWebToUEPerformanceCounter::ExactClipTests) >= 2);
+		TestTrue(TEXT("Hover changes only local Display/spatial/dirty state"),
+			HitWorkload.GetCounter(EWebToUEPerformanceCounter::DisplayCommandsPatched) > 0 &&
+			HitWorkload.GetCounter(EWebToUEPerformanceCounter::DisplaySpatialIndexPatches) > 0 &&
+			HitWorkload.GetCounter(EWebToUEPerformanceCounter::DirtyRectsAdded) > 0 &&
+			HitWorkload.GetCounter(EWebToUEPerformanceCounter::YogaStyleWrites) == 0 &&
+			HitWorkload.GetCounter(EWebToUEPerformanceCounter::YogaNodesDirtied) == 0 &&
+			HitWorkload.GetCounter(EWebToUEPerformanceCounter::YogaLayoutResultsChanged) == 0);
+	}
+
+	FWebToUEMaterialParameterSubmission FirstSubmission;
+	FirstSubmission.Target = FirstView->FindElementById(TEXT("dynamic-material"));
+	FirstSubmission.Address = FWebToUEPropertyAddress::Material(
+		TEXT("Tint"), EWebToUEMaterialParameterType::Vector);
+	FirstSubmission.Value = FWebToUEMaterialParameterValue::MakeVector(
+		FLinearColor(1.0f, 0.08f, 0.18f, 1.0f));
+	FWebToUEMaterialParameterSubmitOutcome FirstOutcome;
+	FWebToUEPerformanceSnapshot FirstMaterialWorkload;
+	{
+		FWebToUEPerformanceCapture Capture;
+		FirstOutcome = FirstView->SubmitMaterialParameter(FirstSubmission);
+		FirstMaterialWorkload = Capture.GetSnapshot();
+	}
+	TestEqual(*FString::Printf(TEXT("The first View creates its local MID (%s)"),
+		*FirstOutcome.Diagnostic), FirstOutcome.Result,
+		EWebToUEMaterialParameterSubmitResult::Committed);
+	TestEqual(TEXT("The first View records one isolated MID allocation"),
+		FirstMaterialWorkload.GetCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesCreated), uint64(1));
+	UWebToUEView* SecondView = NewObject<UWebToUEView>(GetTransientPackage());
+	SecondView->SetDocument(Document);
+	SecondView->TakeWidget()->SlatePrepass(1.0f);
+	FWebToUEMaterialParameterSubmission SecondSubmission = FirstSubmission;
+	SecondSubmission.Target = SecondView->FindElementById(TEXT("dynamic-material"));
+	SecondSubmission.Value = FWebToUEMaterialParameterValue::MakeVector(
+		FLinearColor(0.05f, 0.9f, 0.2f, 1.0f));
+	FWebToUEMaterialParameterSubmitOutcome SecondOutcome;
+	FWebToUEPerformanceSnapshot SecondMaterialWorkload;
+	{
+		FWebToUEPerformanceCapture Capture;
+		SecondOutcome = SecondView->SubmitMaterialParameter(SecondSubmission);
+		SecondMaterialWorkload = Capture.GetSnapshot();
+	}
+	TestEqual(*FString::Printf(
+		TEXT("The second View creates independent material state (%s)"),
+		*SecondOutcome.Diagnostic),
+		SecondOutcome.Result,
+		EWebToUEMaterialParameterSubmitResult::Committed);
+	TestEqual(TEXT("The second View records a distinct MID allocation"),
+		SecondMaterialWorkload.GetCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesCreated), uint64(1));
+	TestEqual(TEXT("The second View cannot reuse the first View's MID"),
+		SecondMaterialWorkload.GetCounter(
+			EWebToUEPerformanceCounter::MaterialInstancesReused), uint64(0));
+	TestTrue(TEXT("Both View-local MIDs retain one sealed static parent Material"),
+		FirstOutcome.Result == EWebToUEMaterialParameterSubmitResult::Committed &&
+		SecondOutcome.Result == EWebToUEMaterialParameterSubmitResult::Committed &&
+		ParentMaterial == Resource.Path.ResolveObject() &&
+		!ParentMaterial->IsA<UMaterialInstanceDynamic>());
+	return true;
+}
+
 bool FWebToUETransitionSmokeContractTest::RunTest(const FString& Parameters)
 {
 	UWebToUEDocument* Document = LoadObject<UWebToUEDocument>(nullptr,
@@ -825,6 +1020,33 @@ bool FWebToUEPackagedExitPolicyTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("A second-view reload fails the resident reuse contract"),
 		FWebToUEPackagedBenchmarkPolicy::ValidateResourceSmokeEvidence(
 			ResourceSmoke, Failures));
+
+	FWebToUEPackagedBenchmarkEvidence CompositingSmoke;
+	CompositingSmoke.CompiledNodeCount = 12;
+	CompositingSmoke.CompiledResourceCount = 1;
+	CompositingSmoke.SetupHydratedNodes = 12;
+	CompositingSmoke.SetupResourceCacheHits = 1;
+	CompositingSmoke.SetupBrushBuilds = 8;
+	CompositingSmoke.SecondViewHydratedNodes = 12;
+	CompositingSmoke.SecondViewResourceCacheHits = 1;
+	CompositingSmoke.bDynamicMaterialParameterSmoke = true;
+	CompositingSmoke.bCompositingSmoke = true;
+	CompositingSmoke.WarmupMaterialParameterLookups = 1;
+	CompositingSmoke.WarmupMaterialParameterEvaluations = 1;
+	CompositingSmoke.WarmupMaterialInstancesCreated = 1;
+	CompositingSmoke.MeasurementMaterialParameterLookups = 1;
+	CompositingSmoke.MeasurementMaterialParameterEvaluations = 1;
+	CompositingSmoke.MeasurementMaterialInstancesReused = 1;
+	CompositingSmoke.MeasurementMaterialBrushPatches = 1;
+	CompositingSmoke.MeasurementDisplayCommandsPatched = 2;
+	CompositingSmoke.SecondViewMaterialInstancesCreated = 1;
+	TestTrue(TEXT("Compositing smoke permits one MID patch plus one local hover patch"),
+		FWebToUEPackagedBenchmarkPolicy::ValidateResourceSmokeEvidence(
+			CompositingSmoke, Failures));
+	CompositingSmoke.MeasurementDisplayCommandsPatched = 1;
+	TestFalse(TEXT("Compositing smoke fails without its distinct local hover patch"),
+		FWebToUEPackagedBenchmarkPolicy::ValidateResourceSmokeEvidence(
+			CompositingSmoke, Failures));
 	return true;
 }
 

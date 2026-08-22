@@ -487,10 +487,12 @@ bool FWebToUEBenchmarkRunner::Tick(float DeltaSeconds)
 
 bool FWebToUEBenchmarkRunner::SetupUi()
 {
+	const bool bCompositingSmoke = Corpus == TEXT("CompositingSmoke");
 	const bool bResourceSmoke = Corpus == TEXT("ResourceTextureSmoke") ||
 		Corpus == TEXT("ResourceMaterialSmoke") ||
-		Corpus == TEXT("ResourceMaterialParameterSmoke");
-	const bool bVisualTransformSmoke = Corpus == TEXT("TransformClipSmoke");
+		Corpus == TEXT("ResourceMaterialParameterSmoke") || bCompositingSmoke;
+	const bool bVisualTransformSmoke =
+		Corpus == TEXT("TransformClipSmoke") || bCompositingSmoke;
 	const bool bTransitionSmoke = Corpus == TEXT("TransitionSmoke");
 	if ((Mode != TEXT("WebToUE") && Mode != TEXT("UMG")) ||
 		(Corpus != TEXT("MainMenu") && Corpus != TEXT("HUD") &&
@@ -760,7 +762,8 @@ bool FWebToUEBenchmarkRunner::CaptureSecondViewEvidence()
 		SecondUiObject.Reset(View);
 		SecondDataContextObject.Reset(ViewModel);
 		SecondTargetWidget = SecondScreenHost->GetContentWidget();
-		if (Corpus == TEXT("ResourceMaterialParameterSmoke"))
+		if (Corpus == TEXT("ResourceMaterialParameterSmoke") ||
+			Corpus == TEXT("CompositingSmoke"))
 		{
 			FWebToUEMaterialParameterSubmission Submission;
 			Submission.Target = View->FindElementById(TEXT("dynamic-material"));
@@ -804,6 +807,7 @@ bool FWebToUEBenchmarkRunner::CaptureSecondViewEvidence()
 		(Corpus == TEXT("ResourceTextureSmoke") ||
 		 Corpus == TEXT("ResourceMaterialSmoke") ||
 		 Corpus == TEXT("ResourceMaterialParameterSmoke") ||
+		 Corpus == TEXT("CompositingSmoke") ||
 		 Corpus == TEXT("TransformClipSmoke") ||
 		 Corpus == TEXT("TransitionSmoke")))
 	{
@@ -860,6 +864,7 @@ FVector2D FWebToUEBenchmarkRunner::GetTrajectoryScreenPosition() const
 		const FGeometry& Geometry = TargetWidget->GetPaintSpaceGeometry();
 		const FVector2D LocalSize = Geometry.GetLocalSize();
 		if ((Corpus == TEXT("TransformClipSmoke") ||
+			 Corpus == TEXT("CompositingSmoke") ||
 			 Corpus == TEXT("TransitionSmoke")) && Mode == TEXT("WebToUE"))
 		{
 			if ((TrajectoryStep & 1) == 0)
@@ -869,7 +874,9 @@ FVector2D FWebToUEBenchmarkRunner::GetTrajectoryScreenPosition() const
 			if (const UWebToUEView* View = Cast<UWebToUEView>(PrimaryUiObject.Get()))
 			{
 				const FString TargetId = Corpus == TEXT("TransitionSmoke")
-					? TEXT("transition-target") : TEXT("transform-target");
+					? TEXT("transition-target")
+					: Corpus == TEXT("CompositingSmoke")
+					? TEXT("compositing-hit") : TEXT("transform-target");
 				TArray<FWebToUESemanticNode> Semantics;
 				View->GetSemanticNodes(Semantics);
 				if (const FWebToUESemanticNode* Target = Semantics.FindByPredicate(
@@ -925,7 +932,8 @@ void FWebToUEBenchmarkRunner::ApplyTrajectory()
 	PendingInputCycles = FPlatformTime::Cycles64();
 	PendingBackBufferInputCycles.Store(PendingInputCycles);
 	UEngine::SetInputSampleLatencyMarker(GFrameCounter);
-	if (Corpus == TEXT("ResourceMaterialParameterSmoke"))
+	if (Corpus == TEXT("ResourceMaterialParameterSmoke") ||
+		Corpus == TEXT("CompositingSmoke"))
 	{
 		bool& bApplied = Phase == EPhase::Measuring
 			? bDynamicMaterialMeasurementApplied
@@ -954,7 +962,7 @@ void FWebToUEBenchmarkRunner::ApplyTrajectory()
 				}
 			}
 		}
-		return;
+		if (Corpus != TEXT("CompositingSmoke")) return;
 	}
 	if (Corpus == TEXT("HUD"))
 	{
@@ -1246,12 +1254,14 @@ void FWebToUEBenchmarkRunner::Finish()
 	}
 	const bool bSecondViewEvidence = CaptureSecondViewEvidence();
 	const bool bTextureResourceSmoke = Corpus == TEXT("ResourceTextureSmoke");
+	const bool bCompositingSmoke = Corpus == TEXT("CompositingSmoke");
 	const bool bDynamicMaterialParameterSmoke =
-		Corpus == TEXT("ResourceMaterialParameterSmoke");
+		Corpus == TEXT("ResourceMaterialParameterSmoke") || bCompositingSmoke;
 	const bool bMaterialResourceSmoke = Corpus == TEXT("ResourceMaterialSmoke") ||
 		bDynamicMaterialParameterSmoke;
 	const bool bResourceSmoke = bTextureResourceSmoke || bMaterialResourceSmoke;
-	const bool bVisualTransformSmoke = Corpus == TEXT("TransformClipSmoke");
+	const bool bVisualTransformSmoke =
+		Corpus == TEXT("TransformClipSmoke") || bCompositingSmoke;
 	const bool bTransitionSmoke = Corpus == TEXT("TransitionSmoke");
 	bool bResourceIdentityValid = !bResourceSmoke;
 	const FWebToUECompiledResource* SmokeResource = nullptr;
@@ -1312,7 +1322,33 @@ void FWebToUEBenchmarkRunner::Finish()
 			WarmupWorkload.GetCounter(EWebToUEPerformanceCounter::DisplayListBuilds) > 0 &&
 			MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::PaintDrawElements) > 0);
 	bool bHasTrajectoryEvidence = TrajectoryStep > 0;
-	if (bDynamicMaterialParameterSmoke)
+	if (bCompositingSmoke)
+	{
+		bHasTrajectoryEvidence = bDynamicMaterialWarmupApplied &&
+			bDynamicMaterialMeasurementApplied &&
+			bDynamicMaterialSecondViewApplied &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::HitTestCandidates) > 0 &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::HitTestCommandsVisited) > 0 &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::InverseHitTests) > 0 &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::ExactClipTests) >= 2 &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::DisplayCommandsPatched) > 0 &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::DisplaySpatialIndexPatches) > 0 &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::DirtyRectsAdded) > 0 &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::YogaStyleWrites) == 0 &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::YogaNodesDirtied) == 0 &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::YogaLayoutResultsChanged) == 0;
+	}
+	else if (bDynamicMaterialParameterSmoke)
 	{
 		bHasTrajectoryEvidence = bDynamicMaterialWarmupApplied &&
 			bDynamicMaterialMeasurementApplied &&
@@ -1398,9 +1434,10 @@ void FWebToUEBenchmarkRunner::Finish()
 			TArray<FWebToUESemanticNode> Semantics;
 			View->GetSemanticNodes(Semantics);
 			if (const FWebToUESemanticNode* Target = Semantics.FindByPredicate(
-				[](const FWebToUESemanticNode& Node)
+				[bCompositingSmoke](const FWebToUESemanticNode& Node)
 				{
-					return Node.ElementId == TEXT("transform-target");
+					return Node.ElementId == (bCompositingSmoke
+						? TEXT("compositing-hit") : TEXT("transform-target"));
 				}))
 			{
 				TransformSemanticBounds = Target->Bounds;
@@ -1410,7 +1447,8 @@ void FWebToUEBenchmarkRunner::Finish()
 		}
 	}
 	const bool bVisualTransformEvidenceValid = !bVisualTransformSmoke ||
-		(bTransformSemanticFound && CompiledResourceCount == 0 &&
+		(bTransformSemanticFound &&
+			CompiledResourceCount == (bCompositingSmoke ? 1 : 0) &&
 			WarmupWorkload.GetCounter(
 				EWebToUEPerformanceCounter::VisualTransformCommandsResolved) >= 3 &&
 			WarmupWorkload.GetCounter(
@@ -1530,6 +1568,37 @@ void FWebToUEBenchmarkRunner::Finish()
 			bTransitionTransactionsCommitted && TransitionEvaluationCount > 0 &&
 			TransitionMutationCount > 0 && bTransitionBoundsChanged &&
 			bHasTrajectoryEvidence);
+	const uint64 CompositingTier1Decisions =
+		SetupWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingTier1Decisions) +
+		WarmupWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingTier1Decisions);
+	const uint64 CompositingTier2Decisions =
+		SetupWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingTier2Decisions) +
+		WarmupWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingTier2Decisions) +
+		MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingTier2Decisions) +
+		SecondViewWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingTier2Decisions);
+	const uint64 CompositingTier3Decisions =
+		SetupWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingTier3Decisions) +
+		WarmupWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingTier3Decisions) +
+		MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingTier3Decisions) +
+		SecondViewWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingTier3Decisions);
+	const uint64 CompositingPlanRejections =
+		SetupWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingPlanRejections) +
+		WarmupWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingPlanRejections) +
+		MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingPlanRejections) +
+		SecondViewWorkload.GetCounter(EWebToUEPerformanceCounter::CompositingPlanRejections);
+	const bool bCompositingEvidenceValid = !bCompositingSmoke ||
+		(bResourceIdentityValid && bVisualTransformEvidenceValid &&
+			bHasTrajectoryEvidence && CompositingTier1Decisions > 0 &&
+			SecondViewWorkload.GetCounter(
+				EWebToUEPerformanceCounter::CompositingTier1Decisions) > 0 &&
+			CompositingTier2Decisions == 0 && CompositingTier3Decisions == 0 &&
+			CompositingPlanRejections == 0 &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::CompositingRedraws) > 0 &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::CompositingPasses) > 0 &&
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::CompositingCommands) > 0);
 	TArray<FString> ProductPolicyFailures;
 	bool bProductPolicyPass = true;
 	if (Mode == TEXT("WebToUE"))
@@ -1593,6 +1662,7 @@ void FWebToUEBenchmarkRunner::Finish()
 		Evidence.SecondViewResourceCancellations = SecondViewWorkload.GetCounter(
 			EWebToUEPerformanceCounter::ResourceCancellations);
 		Evidence.bDynamicMaterialParameterSmoke = bDynamicMaterialParameterSmoke;
+		Evidence.bCompositingSmoke = bCompositingSmoke;
 		Evidence.WarmupMaterialParameterLookups = WarmupWorkload.GetCounter(
 			EWebToUEPerformanceCounter::MaterialParameterLookups);
 		Evidence.WarmupMaterialParameterEvaluations = WarmupWorkload.GetCounter(
@@ -1642,7 +1712,7 @@ void FWebToUEBenchmarkRunner::Finish()
 		bHasRendererEvidence && bHasInputToDisplay && bHasWebToUERuntimeWork &&
 		bHasTrajectoryEvidence && bSecondViewEvidence && bColdAttributionComplete &&
 		bProductPolicyPass && bResourceIdentityValid && bVisualTransformEvidenceValid &&
-		bTransitionEvidenceValid;
+		bTransitionEvidenceValid && bCompositingEvidenceValid;
 
 	FString Csv(TEXT("frame,gt_ms,rt_ms,gpu_ms,ui_draw_elements,window_slate_batches,"
 		"window_slate_vertices,window_slate_indices,ui_geometric_overdraw_ratio,"
@@ -1827,6 +1897,92 @@ void FWebToUEBenchmarkRunner::Finish()
 		TransformEvidence->SetStringField(TEXT("contract"),
 			TEXT("Semantic bounds consume the transformed full border-box AABB so clipped descendants remain navigable; the 128px broad-phase spatial index consumes transformed/clipped AABBs. Hit testing then evaluates every clip quad and inverse-transforms into the local border box. K=1 hover changes remain paint/hit-only and do not write or dirty Yoga."));
 		Root->SetObjectField(TEXT("visual_transform"), TransformEvidence);
+	}
+	if (bCompositingSmoke)
+	{
+		const auto CounterTotal = [&](EWebToUEPerformanceCounter Counter)
+		{
+			return SetupWorkload.GetCounter(Counter) + WarmupWorkload.GetCounter(Counter) +
+				MeasurementWorkload.GetCounter(Counter) +
+				SecondViewWorkload.GetCounter(Counter);
+		};
+		TSharedRef<FJsonObject> CompositingEvidence = MakeShared<FJsonObject>();
+		CompositingEvidence->SetNumberField(TEXT("evidence_schema_version"), 1);
+		CompositingEvidence->SetBoolField(TEXT("evaluated"), true);
+		CompositingEvidence->SetBoolField(TEXT("passed"), bCompositingEvidenceValid);
+		CompositingEvidence->SetStringField(TEXT("policy"),
+			TEXT("Tier selection consumes sealed requirements during Display rebuild; no frame heuristic or silent fallback is permitted."));
+		CompositingEvidence->SetNumberField(TEXT("tier_decisions"),
+			CounterTotal(EWebToUEPerformanceCounter::CompositingTierDecisions));
+		CompositingEvidence->SetNumberField(TEXT("tier0_decisions"),
+			CounterTotal(EWebToUEPerformanceCounter::CompositingTier0Decisions));
+		CompositingEvidence->SetNumberField(TEXT("tier1_decisions"),
+			CounterTotal(EWebToUEPerformanceCounter::CompositingTier1Decisions));
+		CompositingEvidence->SetNumberField(TEXT("plan_rejections"),
+			CompositingPlanRejections);
+		CompositingEvidence->SetNumberField(TEXT("cache_allocated"),
+			CounterTotal(EWebToUEPerformanceCounter::CompositingCacheAllocated));
+		CompositingEvidence->SetNumberField(TEXT("cache_reused"),
+			CounterTotal(EWebToUEPerformanceCounter::CompositingCacheReused));
+		CompositingEvidence->SetNumberField(TEXT("cache_released"),
+			CounterTotal(EWebToUEPerformanceCounter::CompositingCacheReleased));
+		CompositingEvidence->SetNumberField(TEXT("cache_evicted"),
+			CounterTotal(EWebToUEPerformanceCounter::CompositingCacheEvicted));
+		CompositingEvidence->SetNumberField(TEXT("active_layers"),
+			CounterTotal(EWebToUEPerformanceCounter::CompositingActiveLayers));
+		CompositingEvidence->SetNumberField(TEXT("active_surfaces"),
+			CounterTotal(EWebToUEPerformanceCounter::CompositingActiveSurfaces));
+		CompositingEvidence->SetNumberField(TEXT("allocated_pixels"),
+			CounterTotal(EWebToUEPerformanceCounter::CompositingAllocatedPixels));
+		CompositingEvidence->SetNumberField(TEXT("allocated_bytes"),
+			CounterTotal(EWebToUEPerformanceCounter::CompositingAllocatedBytes));
+		CompositingEvidence->SetNumberField(TEXT("measurement_redraws"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::CompositingRedraws));
+		CompositingEvidence->SetNumberField(TEXT("measurement_passes"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::CompositingPasses));
+		CompositingEvidence->SetNumberField(TEXT("measurement_commands"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::CompositingCommands));
+		CompositingEvidence->SetNumberField(TEXT("measurement_display_patches"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::DisplayCommandsPatched));
+		CompositingEvidence->SetNumberField(TEXT("measurement_spatial_patches"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::DisplaySpatialIndexPatches));
+		CompositingEvidence->SetNumberField(TEXT("measurement_dirty_rects"),
+			MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::DirtyRectsAdded));
+		CompositingEvidence->SetNumberField(TEXT("measurement_yoga_style_writes"),
+			MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::YogaStyleWrites));
+		CompositingEvidence->SetNumberField(TEXT("measurement_yoga_nodes_dirtied"),
+			MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::YogaNodesDirtied));
+		CompositingEvidence->SetNumberField(TEXT("measurement_yoga_results_changed"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::YogaLayoutResultsChanged));
+		CompositingEvidence->SetBoolField(TEXT("shared_parent_material"),
+			bResourceIdentityValid);
+		CompositingEvidence->SetBoolField(TEXT("primary_mid_committed"),
+			bDynamicMaterialMeasurementApplied);
+		CompositingEvidence->SetBoolField(TEXT("second_view_mid_committed"),
+			bDynamicMaterialSecondViewApplied);
+		TSharedRef<FJsonObject> Tier2 = MakeShared<FJsonObject>();
+		Tier2->SetStringField(TEXT("status"), TEXT("N/A"));
+		Tier2->SetBoolField(TEXT("runtime_evaluated"), false);
+		Tier2->SetNumberField(TEXT("decisions"), CompositingTier2Decisions);
+		Tier2->SetStringField(TEXT("reason"),
+			TEXT("The sealed product fixture contains no overlapping descendants under group opacity; the adversarial Automation prototype proves deterministic Tier 2 classification and stable unavailable-backend refusal."));
+		CompositingEvidence->SetObjectField(TEXT("tier2_subtree_layer"), Tier2);
+		TSharedRef<FJsonObject> Tier3 = MakeShared<FJsonObject>();
+		Tier3->SetStringField(TEXT("status"), TEXT("N/A"));
+		Tier3->SetBoolField(TEXT("runtime_evaluated"), false);
+		Tier3->SetNumberField(TEXT("decisions"), CompositingTier3Decisions);
+		Tier3->SetStringField(TEXT("reason"),
+			TEXT("No sealed node samples a composited subtree or requests an independent Surface; reporting zero as measured Render Target cost would be invalid."));
+		CompositingEvidence->SetObjectField(TEXT("tier3_render_target"), Tier3);
+		CompositingEvidence->SetStringField(TEXT("contract"),
+			TEXT("K=1 measurement reports local hit/display/spatial/dirty work, no Yoga mutation, View-isolated MIDs over one parent Material, and renderer-backed redraw/pass/command counts. Active layer/surface pixel and byte fields describe only real offscreen allocations."));
+		Root->SetObjectField(TEXT("compositing"), CompositingEvidence);
 	}
 	if (bTransitionSmoke)
 	{
@@ -2111,6 +2267,9 @@ void FWebToUEBenchmarkRunner::Finish()
 		if (!bTransitionEvidenceValid)
 			Failures.Add(MakeShared<FJsonValueString>(
 				TEXT("compiled Transition/Track/Paint evidence incomplete")));
+		if (!bCompositingEvidenceValid)
+			Failures.Add(MakeShared<FJsonValueString>(
+				TEXT("deterministic compositing evidence incomplete")));
 		for (const FString& Failure : ProductPolicyFailures)
 		{
 			Failures.Add(MakeShared<FJsonValueString>(Failure));

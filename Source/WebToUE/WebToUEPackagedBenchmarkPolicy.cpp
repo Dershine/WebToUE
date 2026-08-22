@@ -143,8 +143,12 @@ bool FWebToUEPackagedBenchmarkPolicy::ValidateResourceSmokeEvidence(
 			TEXT("dynamic Material smoke did not perform one K=1 MID update"),
 			OutFailures);
 		Require(Evidence.MeasurementMaterialBrushPatches == 1 &&
-			Evidence.MeasurementDisplayCommandsPatched == 1,
-			TEXT("dynamic Material smoke did not patch only the affected brush/display command"),
+			(Evidence.bCompositingSmoke
+				? Evidence.MeasurementDisplayCommandsPatched >= 2
+				: Evidence.MeasurementDisplayCommandsPatched == 1),
+			Evidence.bCompositingSmoke
+				? TEXT("compositing smoke did not cover the MID patch plus local hover patch")
+				: TEXT("dynamic Material smoke did not patch only the affected brush/display command"),
 			OutFailures);
 		Require(Evidence.SecondViewMaterialInstancesCreated == 1,
 			TEXT("dynamic Material smoke second View did not create an isolated MID"),
