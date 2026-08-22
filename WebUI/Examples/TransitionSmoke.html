@@ -1,0 +1,77 @@
+<!doctype html>
+<html>
+<head>
+  <style>
+    body {
+      width: 1280px;
+      height: 720px;
+      padding: 72px 120px;
+      background-color: #07111f;
+      color: #dbeeff;
+      font-size: 24px;
+    }
+
+    #heading {
+      width: 880px;
+      height: 54px;
+      margin-bottom: 30px;
+      color: #8fc8ee;
+      font-size: 34px;
+    }
+
+    #stage {
+      width: 920px;
+      height: 430px;
+      padding: 44px;
+      background-color: #102b43;
+      border: 3px solid #315c78;
+      border-radius: 24px;
+    }
+
+    #transition-target {
+      width: 500px;
+      height: 190px;
+      padding: 28px;
+      opacity: 0.72;
+      color: #eaf6ff;
+      background-color: #24506d;
+      border: 6px solid #83c5e8;
+      border-radius: 20px;
+      font-size: 34px;
+      transform: translate(0px, 0px) rotate(0deg) scale(1);
+      transform-origin: left top;
+      transition: opacity 600ms ease-in-out,
+        color 600ms ease-in-out,
+        background-color 600ms ease-in-out,
+        border-color 600ms ease-in-out,
+        transform 600ms ease-in-out 100ms;
+    }
+
+    #transition-target:hover {
+      opacity: 1;
+      color: #261309;
+      background-color: #ff805d;
+      border-color: #ffe08a;
+      transform: translate(180px, 70px) rotate(8deg) scale(1.08, 0.94);
+    }
+
+    #detail {
+      width: 420px;
+      height: 44px;
+      margin-top: 14px;
+      color: #b9ddf3;
+      font-size: 21px;
+    }
+
+  </style>
+</head>
+<body>
+  <div id="heading">Compiled Transition IR → native Session animation</div>
+  <div id="stage">
+    <button id="transition-target">
+      Deterministic visible transition
+      <div id="detail">Pointer entry animates paint and local spatial transform.</div>
+    </button>
+  </div>
+</body>
+</html>

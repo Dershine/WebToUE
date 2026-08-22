@@ -4,8 +4,10 @@
 #include "WebToUEBenchmarkUserWidget.h"
 #include "WebToUEDemoViewModel.h"
 
+#include "WebToUEAnimation.h"
 #include "WebToUEDocument.h"
 #include "WebToUEScreenHost.h"
+#include "WebToUESession.h"
 #include "WebToUEView.h"
 
 #include "DynamicRHI.h"
@@ -446,11 +448,15 @@ bool FWebToUEBenchmarkRunner::Tick(float DeltaSeconds)
 	}
 
 	++LogicalFrame;
-	if ((LogicalFrame == 30 || (LogicalFrame > WarmupFrames && LogicalFrame % 60 == 0)) &&
+	const bool bMeasurementComplete =
+		Phase == EPhase::Measuring && Samples.Num() >= RequestedSamples;
+	if (!bMeasurementComplete &&
+		(LogicalFrame == 30 || (LogicalFrame > WarmupFrames && LogicalFrame % 60 == 0)) &&
 		Phase != EPhase::WaitingForScreenshot)
 	{
 		ApplyTrajectory();
 	}
+	ObserveTransitionState();
 	if (Phase == EPhase::Warmup && LogicalFrame >= WarmupFrames)
 	{
 		Phase = EPhase::Measuring;
@@ -461,7 +467,8 @@ bool FWebToUEBenchmarkRunner::Tick(float DeltaSeconds)
 			PerformanceCapture->Reset();
 		}
 	}
-	if (Phase == EPhase::Measuring && Samples.Num() >= RequestedSamples)
+	if (Phase == EPhase::Measuring && Samples.Num() >= RequestedSamples &&
+		(Corpus != TEXT("TransitionSmoke") || PrepareTransitionScreenshot()))
 	{
 		RequestScreenshot();
 	}
@@ -484,11 +491,13 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 		Corpus == TEXT("ResourceMaterialSmoke") ||
 		Corpus == TEXT("ResourceMaterialParameterSmoke");
 	const bool bVisualTransformSmoke = Corpus == TEXT("TransformClipSmoke");
+	const bool bTransitionSmoke = Corpus == TEXT("TransitionSmoke");
 	if ((Mode != TEXT("WebToUE") && Mode != TEXT("UMG")) ||
 		(Corpus != TEXT("MainMenu") && Corpus != TEXT("HUD") &&
 			Corpus != TEXT("ScrollableSettings") && !bResourceSmoke &&
-			!bVisualTransformSmoke) ||
-		((bResourceSmoke || bVisualTransformSmoke) && Mode != TEXT("WebToUE")))
+			!bVisualTransformSmoke && !bTransitionSmoke) ||
+		((bResourceSmoke || bVisualTransformSmoke || bTransitionSmoke) &&
+			Mode != TEXT("WebToUE")))
 	{
 		FailAndExit(TEXT("Invalid -WTUEBenchmark or -WTUECorpus value"));
 		return false;
@@ -598,6 +607,25 @@ bool FWebToUEBenchmarkRunner::SetupUi()
 	}
 	const uint64 PrepassStartCycles = FPlatformTime::Cycles64();
 	BuiltTargetWidget->SlatePrepass(1.0f);
+	if (bTransitionSmoke)
+	{
+		if (const UWebToUEView* View = Cast<UWebToUEView>(PrimaryUiObject.Get()))
+		{
+			TArray<FWebToUESemanticNode> Semantics;
+			View->GetSemanticNodes(Semantics);
+			if (const FWebToUESemanticNode* Target = Semantics.FindByPredicate(
+				[](const FWebToUESemanticNode& Node)
+				{
+					return Node.ElementId == TEXT("transition-target");
+				}))
+			{
+				InitialTransitionSemanticBounds = Target->Bounds;
+				bInitialTransitionSemanticFound = Target->bVisible &&
+					Target->bEnabled && Target->Bounds.IsValid() &&
+					!Target->Bounds.IsEmpty();
+			}
+		}
+	}
 	ColdPrepassMs = WebToUE::Benchmark::Private::ElapsedMilliseconds(
 		PrepassStartCycles, FPlatformTime::Cycles64());
 	AfterFirstViewMemory = CaptureMemoryPoint();
@@ -776,7 +804,8 @@ bool FWebToUEBenchmarkRunner::CaptureSecondViewEvidence()
 		(Corpus == TEXT("ResourceTextureSmoke") ||
 		 Corpus == TEXT("ResourceMaterialSmoke") ||
 		 Corpus == TEXT("ResourceMaterialParameterSmoke") ||
-		 Corpus == TEXT("TransformClipSmoke")))
+		 Corpus == TEXT("TransformClipSmoke") ||
+		 Corpus == TEXT("TransitionSmoke")))
 	{
 		FHittestGrid HittestGrid;
 		FSlateWindowElementList DrawElements(
@@ -830,7 +859,8 @@ FVector2D FWebToUEBenchmarkRunner::GetTrajectoryScreenPosition() const
 	{
 		const FGeometry& Geometry = TargetWidget->GetPaintSpaceGeometry();
 		const FVector2D LocalSize = Geometry.GetLocalSize();
-		if (Corpus == TEXT("TransformClipSmoke") && Mode == TEXT("WebToUE"))
+		if ((Corpus == TEXT("TransformClipSmoke") ||
+			 Corpus == TEXT("TransitionSmoke")) && Mode == TEXT("WebToUE"))
 		{
 			if ((TrajectoryStep & 1) == 0)
 			{
@@ -838,12 +868,14 @@ FVector2D FWebToUEBenchmarkRunner::GetTrajectoryScreenPosition() const
 			}
 			if (const UWebToUEView* View = Cast<UWebToUEView>(PrimaryUiObject.Get()))
 			{
+				const FString TargetId = Corpus == TEXT("TransitionSmoke")
+					? TEXT("transition-target") : TEXT("transform-target");
 				TArray<FWebToUESemanticNode> Semantics;
 				View->GetSemanticNodes(Semantics);
 				if (const FWebToUESemanticNode* Target = Semantics.FindByPredicate(
-					[](const FWebToUESemanticNode& Node)
+					[&TargetId](const FWebToUESemanticNode& Node)
 					{
-						return Node.ElementId == TEXT("transform-target");
+						return Node.ElementId == TargetId;
 					}))
 				{
 					return Geometry.LocalToAbsolute(FVector2D(
@@ -1026,6 +1058,56 @@ void FWebToUEBenchmarkRunner::ApplyTrajectory()
 	}
 }
 
+int32 FWebToUEBenchmarkRunner::GetTransitionActiveTrackCount() const
+{
+	if (Corpus != TEXT("TransitionSmoke")) return 0;
+	const UWebToUEView* View = Cast<UWebToUEView>(PrimaryUiObject.Get());
+	const TSharedPtr<FWebToUESession> Session = View ? View->GetSession() : nullptr;
+	return Session ? Session->GetAnimationCoordinator()->GetActiveTrackCount() : 0;
+}
+
+void FWebToUEBenchmarkRunner::ObserveTransitionState()
+{
+	if (Corpus != TEXT("TransitionSmoke")) return;
+	const int32 ActiveTracks = GetTransitionActiveTrackCount();
+	MaxTransitionActiveTracks = FMath::Max(MaxTransitionActiveTracks, ActiveTracks);
+	if (ActiveTracks > 0) ++TransitionActiveObservationFrames;
+	if (bInitialTransitionSemanticFound) return;
+	if (const UWebToUEView* View = Cast<UWebToUEView>(PrimaryUiObject.Get()))
+	{
+		TArray<FWebToUESemanticNode> Semantics;
+		View->GetSemanticNodes(Semantics);
+		if (const FWebToUESemanticNode* Target = Semantics.FindByPredicate(
+			[](const FWebToUESemanticNode& Node)
+			{
+				return Node.ElementId == TEXT("transition-target");
+			}))
+		{
+			InitialTransitionSemanticBounds = Target->Bounds;
+			bInitialTransitionSemanticFound = Target->bVisible && Target->bEnabled &&
+				Target->Bounds.IsValid() && !Target->Bounds.IsEmpty();
+		}
+	}
+}
+
+bool FWebToUEBenchmarkRunner::PrepareTransitionScreenshot()
+{
+	if (TransitionScreenshotPhase == 0)
+	{
+		if ((TrajectoryStep & 1) != 0) ApplyTrajectory();
+		TransitionScreenshotPhase = 1;
+		return false;
+	}
+	if (TransitionScreenshotPhase == 1)
+	{
+		if (GetTransitionActiveTrackCount() > 0) return false;
+		ApplyTrajectory();
+		TransitionScreenshotPhase = 2;
+		return false;
+	}
+	return GetTransitionActiveTrackCount() == 0;
+}
+
 bool FWebToUEBenchmarkRunner::IsGameWindow(const SWindow& Window) const
 {
 	if (!GEngine || !GEngine->GameViewport) return false;
@@ -1170,6 +1252,7 @@ void FWebToUEBenchmarkRunner::Finish()
 		bDynamicMaterialParameterSmoke;
 	const bool bResourceSmoke = bTextureResourceSmoke || bMaterialResourceSmoke;
 	const bool bVisualTransformSmoke = Corpus == TEXT("TransformClipSmoke");
+	const bool bTransitionSmoke = Corpus == TEXT("TransitionSmoke");
 	bool bResourceIdentityValid = !bResourceSmoke;
 	const FWebToUECompiledResource* SmokeResource = nullptr;
 	if (bResourceSmoke && BenchmarkDocument.IsValid() &&
@@ -1289,6 +1372,22 @@ void FWebToUEBenchmarkRunner::Finish()
 				MeasurementWorkload.GetCounter(
 					EWebToUEPerformanceCounter::YogaLayoutResultsChanged) == 0;
 		}
+		else if (bTransitionSmoke)
+		{
+			bHasTrajectoryEvidence &=
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::VisualTransformCommandsResolved) > 0 &&
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::DisplaySpatialIndexPatches) > 0 &&
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::YogaStyleWrites) == 0 &&
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::YogaNodesDirtied) == 0 &&
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::YogaLayoutResultsChanged) == 0 &&
+				MeasurementWorkload.GetCounter(
+					EWebToUEPerformanceCounter::ResourceLoadAttempts) == 0;
+		}
 	}
 	FSlateRect TransformSemanticBounds;
 	bool bTransformSemanticFound = false;
@@ -1320,6 +1419,116 @@ void FWebToUEBenchmarkRunner::Finish()
 				EWebToUEPerformanceCounter::VisualTransformCommandsResolved) >= 3 &&
 			SecondViewWorkload.GetCounter(
 				EWebToUEPerformanceCounter::ClipChainZonesResolved) >= 2 &&
+			bHasTrajectoryEvidence);
+	FSlateRect FinalTransitionSemanticBounds;
+	bool bFinalTransitionSemanticFound = false;
+	int32 TransitionTraceCount = 0;
+	int32 TransitionStartedCount = 0;
+	int32 TransitionRetargetedCount = 0;
+	int32 TransitionSampledCount = 0;
+	int32 TransitionCompletedCount = 0;
+	int32 TransitionTransactionCount = 0;
+	int32 TransitionEvaluationCount = 0;
+	int32 TransitionMutationCount = 0;
+	uint64 TransitionTickerInvocations = 0;
+	bool bTransitionTransactionsCommitted = false;
+	bool bTransitionTickerReleased = false;
+	bool bTransitionIrValid = !bTransitionSmoke;
+	if (bTransitionSmoke)
+	{
+		if (const UWebToUEView* View = Cast<UWebToUEView>(PrimaryUiObject.Get()))
+		{
+			TArray<FWebToUESemanticNode> Semantics;
+			View->GetSemanticNodes(Semantics);
+			if (const FWebToUESemanticNode* Target = Semantics.FindByPredicate(
+				[](const FWebToUESemanticNode& Node)
+				{
+					return Node.ElementId == TEXT("transition-target");
+				}))
+			{
+				FinalTransitionSemanticBounds = Target->Bounds;
+				bFinalTransitionSemanticFound = Target->bVisible && Target->bEnabled &&
+					Target->Bounds.IsValid() && !Target->Bounds.IsEmpty();
+			}
+			if (const TSharedPtr<FWebToUESession> Session = View->GetSession())
+			{
+				const TSharedRef<FWebToUEAnimationCoordinator, ESPMode::ThreadSafe>
+					Animation = Session->GetAnimationCoordinator();
+				TransitionTraceCount = Animation->GetTrace().Num();
+				TransitionTickerInvocations = Animation->GetTickerInvocationCount();
+				for (const FWebToUEAnimationTrace& Trace : Animation->GetTrace())
+				{
+					switch (Trace.Outcome)
+					{
+					case EWebToUEAnimationTraceOutcome::Started:
+						++TransitionStartedCount;
+						break;
+					case EWebToUEAnimationTraceOutcome::Retargeted:
+						++TransitionRetargetedCount;
+						break;
+					case EWebToUEAnimationTraceOutcome::Sampled:
+						++TransitionSampledCount;
+						break;
+					case EWebToUEAnimationTraceOutcome::Completed:
+						++TransitionCompletedCount;
+						break;
+					default:
+						break;
+					}
+				}
+				const TConstArrayView<FWebToUEUpdateTrace> UpdateTrace =
+					Session->GetUpdateCoordinator()->GetTrace();
+				TransitionTransactionCount = UpdateTrace.Num();
+				bTransitionTransactionsCommitted = !UpdateTrace.IsEmpty();
+				for (const FWebToUEUpdateTrace& Trace : UpdateTrace)
+				{
+					bTransitionTransactionsCommitted &=
+						Trace.Outcome == EWebToUEUpdateOutcome::Committed;
+					TransitionEvaluationCount += Trace.EvaluationCount;
+					TransitionMutationCount += Trace.StateMutationCount;
+				}
+				bTransitionTickerReleased =
+					Animation->GetActiveTrackCount() == 0 &&
+					!Animation->IsTickerRegistered();
+			}
+		}
+		if (BenchmarkDocument.IsValid())
+		{
+			const FWebToUECompiledAnimationIR& IR =
+				BenchmarkDocument->GetCompiledAnimationIR();
+			TSet<EWebToUECompiledAnimationTargetKind> TargetKinds;
+			for (const FWebToUECompiledTransition& Transition : IR.Transitions)
+			{
+				TargetKinds.Add(Transition.Target.Kind);
+			}
+			bTransitionIrValid =
+				IR.Version.Major == FWebToUECompiledAnimationIR::CurrentMajor &&
+				IR.Version.Minor == FWebToUECompiledAnimationIR::CurrentMinor &&
+				IR.Transitions.Num() == 5 &&
+				TargetKinds.Contains(EWebToUECompiledAnimationTargetKind::Opacity) &&
+				TargetKinds.Contains(EWebToUECompiledAnimationTargetKind::Color) &&
+				TargetKinds.Contains(
+					EWebToUECompiledAnimationTargetKind::BackgroundColor) &&
+				TargetKinds.Contains(
+					EWebToUECompiledAnimationTargetKind::BorderColor) &&
+				TargetKinds.Contains(
+					EWebToUECompiledAnimationTargetKind::VisualTransform);
+		}
+	}
+	const bool bTransitionBoundsChanged = bInitialTransitionSemanticFound &&
+		bFinalTransitionSemanticFound &&
+		(!FMath::IsNearlyEqual(InitialTransitionSemanticBounds.Left,
+			FinalTransitionSemanticBounds.Left, 0.5f) ||
+		 !FMath::IsNearlyEqual(InitialTransitionSemanticBounds.Top,
+			FinalTransitionSemanticBounds.Top, 0.5f));
+	const bool bTransitionEvidenceValid = !bTransitionSmoke ||
+		(bTransitionIrValid && CompiledResourceCount == 0 &&
+			MaxTransitionActiveTracks == 5 && TransitionActiveObservationFrames > 0 &&
+			TransitionTraceCount <= FWebToUEAnimationBudget().MaxTraceEntries &&
+			TransitionSampledCount >= 5 && TransitionCompletedCount >= 5 &&
+			TransitionTickerInvocations > 0 && bTransitionTickerReleased &&
+			bTransitionTransactionsCommitted && TransitionEvaluationCount > 0 &&
+			TransitionMutationCount > 0 && bTransitionBoundsChanged &&
 			bHasTrajectoryEvidence);
 	TArray<FString> ProductPolicyFailures;
 	bool bProductPolicyPass = true;
@@ -1432,7 +1641,8 @@ void FWebToUEBenchmarkRunner::Finish()
 	const bool bSuccess = Samples.Num() == RequestedSamples && bScreenshotExists &&
 		bHasRendererEvidence && bHasInputToDisplay && bHasWebToUERuntimeWork &&
 		bHasTrajectoryEvidence && bSecondViewEvidence && bColdAttributionComplete &&
-		bProductPolicyPass && bResourceIdentityValid && bVisualTransformEvidenceValid;
+		bProductPolicyPass && bResourceIdentityValid && bVisualTransformEvidenceValid &&
+		bTransitionEvidenceValid;
 
 	FString Csv(TEXT("frame,gt_ms,rt_ms,gpu_ms,ui_draw_elements,window_slate_batches,"
 		"window_slate_vertices,window_slate_indices,ui_geometric_overdraw_ratio,"
@@ -1471,6 +1681,8 @@ void FWebToUEBenchmarkRunner::Finish()
 			? TEXT("one typed Vector parameter update after MID warmup")
 		: bVisualTransformSmoke
 			? TEXT("pointer alternates across a transformed target to patch hover transform")
+		: bTransitionSmoke
+			? TEXT("pointer alternates across a five-property Transition target, then settles in the hovered completion state")
 		: bResourceSmoke ? TEXT("packaged visible-resource observation")
 		: TEXT("pointer hover plus bidirectional wheel scroll"));
 	TSharedRef<FJsonObject> TrajectoryEvidence = MakeShared<FJsonObject>();
@@ -1484,6 +1696,8 @@ void FWebToUEBenchmarkRunner::Finish()
 			? TEXT("Warmup creates one View-owned MID; measurement commits one typed Vector update and patches only its Material brush/display command; the second View creates an isolated MID.")
 		: bVisualTransformSmoke
 			? TEXT("Measurement alternates pointer entry/exit over transformed semantic bounds and records inverse hit, exact nested-clip tests, transform/display/spatial patches, dirty regions, and zero Yoga mutation.")
+		: bTransitionSmoke
+			? TEXT("Measurement drives the persisted Transition IR through the Session-owned coordinator, observes five concurrent typed Tracks, waits for deterministic completion, and records Paint/spatial/dirty work with zero Yoga or resource load.")
 		: Corpus == TEXT("HUD")
 			? TEXT("Measurement window records binding field reads, executed ops, and updated nodes.")
 			: Corpus == TEXT("MainMenu")
@@ -1613,6 +1827,84 @@ void FWebToUEBenchmarkRunner::Finish()
 		TransformEvidence->SetStringField(TEXT("contract"),
 			TEXT("Semantic bounds consume the transformed full border-box AABB so clipped descendants remain navigable; the 128px broad-phase spatial index consumes transformed/clipped AABBs. Hit testing then evaluates every clip quad and inverse-transforms into the local border box. K=1 hover changes remain paint/hit-only and do not write or dirty Yoga."));
 		Root->SetObjectField(TEXT("visual_transform"), TransformEvidence);
+	}
+	if (bTransitionSmoke)
+	{
+		TSharedRef<FJsonObject> TransitionEvidence = MakeShared<FJsonObject>();
+		TransitionEvidence->SetNumberField(TEXT("evidence_schema_version"), 1);
+		TransitionEvidence->SetBoolField(TEXT("evaluated"), true);
+		TransitionEvidence->SetBoolField(TEXT("passed"), bTransitionEvidenceValid);
+		TransitionEvidence->SetBoolField(TEXT("compiled_ir_valid"), bTransitionIrValid);
+		TransitionEvidence->SetNumberField(TEXT("compiled_transition_count"),
+			BenchmarkDocument.IsValid()
+				? BenchmarkDocument->GetCompiledAnimationIR().Transitions.Num() : 0);
+		TransitionEvidence->SetNumberField(TEXT("maximum_active_tracks"),
+			MaxTransitionActiveTracks);
+		TransitionEvidence->SetNumberField(TEXT("active_observation_frames"),
+			TransitionActiveObservationFrames);
+		TransitionEvidence->SetNumberField(TEXT("trace_count"), TransitionTraceCount);
+		TransitionEvidence->SetNumberField(TEXT("trace_budget"),
+			FWebToUEAnimationBudget().MaxTraceEntries);
+		TransitionEvidence->SetNumberField(TEXT("started_count"),
+			TransitionStartedCount);
+		TransitionEvidence->SetNumberField(TEXT("retargeted_count"),
+			TransitionRetargetedCount);
+		TransitionEvidence->SetNumberField(TEXT("sampled_count"),
+			TransitionSampledCount);
+		TransitionEvidence->SetNumberField(TEXT("completed_count"),
+			TransitionCompletedCount);
+		TransitionEvidence->SetNumberField(TEXT("ticker_invocations"),
+			static_cast<double>(TransitionTickerInvocations));
+		TransitionEvidence->SetBoolField(TEXT("active_tracks_and_ticker_released"),
+			bTransitionTickerReleased);
+		TransitionEvidence->SetNumberField(TEXT("transaction_count"),
+			TransitionTransactionCount);
+		TransitionEvidence->SetNumberField(TEXT("property_evaluation_count"),
+			TransitionEvaluationCount);
+		TransitionEvidence->SetNumberField(TEXT("state_mutation_count"),
+			TransitionMutationCount);
+		TransitionEvidence->SetBoolField(TEXT("all_transactions_committed"),
+			bTransitionTransactionsCommitted);
+		TransitionEvidence->SetBoolField(TEXT("initial_semantic_target_found"),
+			bInitialTransitionSemanticFound);
+		TransitionEvidence->SetBoolField(TEXT("final_semantic_target_found"),
+			bFinalTransitionSemanticFound);
+		TransitionEvidence->SetBoolField(TEXT("semantic_bounds_changed"),
+			bTransitionBoundsChanged);
+		const auto BoundsObject = [](const FSlateRect& Bounds)
+		{
+			TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+			Result->SetNumberField(TEXT("left"), Bounds.Left);
+			Result->SetNumberField(TEXT("top"), Bounds.Top);
+			Result->SetNumberField(TEXT("right"), Bounds.Right);
+			Result->SetNumberField(TEXT("bottom"), Bounds.Bottom);
+			return Result;
+		};
+		TransitionEvidence->SetObjectField(TEXT("initial_semantic_bounds"),
+			BoundsObject(InitialTransitionSemanticBounds));
+		TransitionEvidence->SetObjectField(TEXT("final_semantic_bounds"),
+			BoundsObject(FinalTransitionSemanticBounds));
+		TransitionEvidence->SetNumberField(TEXT("display_commands_patched"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::DisplayCommandsPatched));
+		TransitionEvidence->SetNumberField(TEXT("spatial_index_patches"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::DisplaySpatialIndexPatches));
+		TransitionEvidence->SetNumberField(TEXT("dirty_rects_added"),
+			MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::DirtyRectsAdded));
+		TransitionEvidence->SetNumberField(TEXT("yoga_style_writes"),
+			MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::YogaStyleWrites));
+		TransitionEvidence->SetNumberField(TEXT("yoga_nodes_dirtied"),
+			MeasurementWorkload.GetCounter(EWebToUEPerformanceCounter::YogaNodesDirtied));
+		TransitionEvidence->SetNumberField(TEXT("yoga_results_changed"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::YogaLayoutResultsChanged));
+		TransitionEvidence->SetNumberField(TEXT("resource_load_attempts"),
+			MeasurementWorkload.GetCounter(
+				EWebToUEPerformanceCounter::ResourceLoadAttempts));
+		TransitionEvidence->SetStringField(TEXT("contract"),
+			TEXT("Numeric Track/Clock/transaction evidence, sampled Paint/spatial/dirty workload, renderer-backed frame distributions, and the screenshot are independent layers. The screenshot is requested only after a forced exit completion followed by a forced hover completion. K=5 is one legal five-address set on one target; the default sample budget 256 covers it in one Pump. This does not prove Portal/compositing, input-to-pixel causality, or WTUE-to-UMG performance equivalence."));
+		Root->SetObjectField(TEXT("transition"), TransitionEvidence);
 	}
 	if (bDynamicMaterialParameterSmoke)
 	{
@@ -1816,6 +2108,9 @@ void FWebToUEBenchmarkRunner::Finish()
 		if (!bVisualTransformEvidenceValid)
 			Failures.Add(MakeShared<FJsonValueString>(
 				TEXT("visual transform/clip evidence incomplete")));
+		if (!bTransitionEvidenceValid)
+			Failures.Add(MakeShared<FJsonValueString>(
+				TEXT("compiled Transition/Track/Paint evidence incomplete")));
 		for (const FString& Failure : ProductPolicyFailures)
 		{
 			Failures.Add(MakeShared<FJsonValueString>(Failure));

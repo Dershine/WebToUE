@@ -4,6 +4,7 @@
 #include "WebToUEBenchmarkRunner.h"
 #include "WebToUEPackagedBenchmarkPolicy.h"
 
+#include "WebToUEAnimation.h"
 #include "WebToUEDocument.h"
 #include "WebToUEPerformance.h"
 #include "WebToUEView.h"
@@ -52,6 +53,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUEResourceMaterialParameterSmokeContractT
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETransformClipSmokeContractTest,
 	"WebToUE.Benchmark.TransformClipSmokeContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUETransitionSmokeContractTest,
+	"WebToUE.Benchmark.TransitionSmokeContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FWebToUEBenchmarkCorpusContractTest::RunTest(const FString& Parameters)
@@ -633,6 +638,54 @@ bool FWebToUETransformClipSmokeContractTest::RunTest(const FString& Parameters)
 			Target->bVisible && Target->bEnabled && Target->Bounds.IsValid() &&
 			!Target->Bounds.IsEmpty());
 	}
+	return true;
+}
+
+bool FWebToUETransitionSmokeContractTest::RunTest(const FString& Parameters)
+{
+	UWebToUEDocument* Document = LoadObject<UWebToUEDocument>(nullptr,
+		TEXT("/Game/WebToUEExamples/TransitionSmoke.TransitionSmoke"));
+	if (!TestNotNull(TEXT("The packaged Transition smoke document loads"), Document))
+	{
+		return false;
+	}
+	TestFalse(TEXT("The Transition fixture is persisted at the current version"),
+		Document->NeedsRecompile());
+	TestEqual(TEXT("Transition Paint/Transform introduces no Runtime resource"),
+		Document->GetResourceManifest().Num(), 0);
+	const FWebToUECompiledAnimationIR& IR = Document->GetCompiledAnimationIR();
+	TestEqual(TEXT("The persistent fixture uses Animation IR major 1"),
+		IR.Version.Major, FWebToUECompiledAnimationIR::CurrentMajor);
+	TestEqual(TEXT("The persistent fixture uses Transition-capable IR minor 1"),
+		IR.Version.Minor, FWebToUECompiledAnimationIR::CurrentMinor);
+	TestEqual(TEXT("The visible fixture lowers one legal five-address set"),
+		IR.Transitions.Num(), 5);
+	TSet<EWebToUECompiledAnimationTargetKind> TargetKinds;
+	for (const FWebToUECompiledTransition& Transition : IR.Transitions)
+	{
+		TargetKinds.Add(Transition.Target.Kind);
+		TestTrue(TEXT("Every packaged Transition has positive duration"),
+			Transition.DurationSeconds > 0.0);
+		TestEqual(TEXT("Every packaged Transition uses retarget-from-current"),
+			Transition.ReverseMode,
+			EWebToUETransitionReverseMode::RetargetFromCurrent);
+		TestEqual(TEXT("Every packaged Transition releases to latest underlying"),
+			Transition.FillMode,
+			EWebToUETransitionFillMode::UnderlyingAfterCompletion);
+	}
+	TestTrue(TEXT("The fixture lowers Opacity"),
+		TargetKinds.Contains(EWebToUECompiledAnimationTargetKind::Opacity));
+	TestTrue(TEXT("The fixture lowers inherited Color"),
+		TargetKinds.Contains(EWebToUECompiledAnimationTargetKind::Color));
+	TestTrue(TEXT("The fixture lowers BackgroundColor"),
+		TargetKinds.Contains(EWebToUECompiledAnimationTargetKind::BackgroundColor));
+	TestTrue(TEXT("The fixture lowers BorderColor"),
+		TargetKinds.Contains(EWebToUECompiledAnimationTargetKind::BorderColor));
+	TestTrue(TEXT("The fixture lowers VisualTransform"),
+		TargetKinds.Contains(EWebToUECompiledAnimationTargetKind::VisualTransform));
+	TArray<FWebToUEAnimationDiagnostic> Diagnostics;
+	TestTrue(TEXT("The persisted Transition IR remains sealed and valid"),
+		IR.Validate(Document->GetCompiledNodes().Num(), Diagnostics));
 	return true;
 }
 

@@ -93,6 +93,11 @@ private:
 	bool bDynamicMaterialWarmupApplied = false;
 	bool bDynamicMaterialMeasurementApplied = false;
 	bool bDynamicMaterialSecondViewApplied = false;
+	int32 TransitionScreenshotPhase = 0;
+	int32 MaxTransitionActiveTracks = 0;
+	int32 TransitionActiveObservationFrames = 0;
+	FSlateRect InitialTransitionSemanticBounds;
+	bool bInitialTransitionSemanticFound = false;
 	int32 ScreenshotWaitFrames = 0;
 	EPhase Phase = EPhase::WaitingForViewport;
 	uint64 UiSetupCycles = 0;
@@ -162,6 +167,9 @@ private:
 	bool CaptureSecondViewEvidence();
 	FMemoryPoint CaptureMemoryPoint() const;
 	void ApplyTrajectory();
+	int32 GetTransitionActiveTrackCount() const;
+	void ObserveTransitionState();
+	bool PrepareTransitionScreenshot();
 	void OnSlateWindowRendered(SWindow& Window);
 	void OnBackBufferReady(SWindow& Window, ISlateViewportProvider& ViewportProvider);
 	void RequestScreenshot();
