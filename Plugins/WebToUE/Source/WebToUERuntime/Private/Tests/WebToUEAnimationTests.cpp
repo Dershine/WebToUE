@@ -137,7 +137,16 @@ bool FWebToUEAnimationIRContractTest::RunTest(const FString& Parameters)
 	Track.ClockDomain = EWebToUEClockDomain::Test;
 	IR.Tracks.Add(Track);
 	TArray<FWebToUEAnimationDiagnostic> Diagnostics;
-	TestTrue(TEXT("Animation IR 1.0 accepts a finite typed opacity Track"),
+	FWebToUECompiledTransition Transition;
+	Transition.TransitionId = TEXT("transition.00000000.opacity");
+	Transition.Target.TargetNodeIndex = 0;
+	Transition.Target.Kind = EWebToUECompiledAnimationTargetKind::Opacity;
+	Transition.DurationSeconds = 0.2;
+	Transition.DelaySeconds = 0.05;
+	Transition.Easing = EWebToUETransitionEasing::EaseOut;
+	Transition.ClockDomain = EWebToUEClockDomain::Game;
+	IR.Transitions.Add(Transition);
+	TestTrue(TEXT("Animation IR 1.1 accepts a finite typed Track and Transition"),
 		IR.Validate(1, Diagnostics));
 	TestEqual(TEXT("Animation IR declares its independent major version"),
 		IR.Version.Major, uint16(1));
@@ -156,6 +165,20 @@ bool FWebToUEAnimationIRContractTest::RunTest(const FString& Parameters)
 		HasCode(Diagnostics, TEXT("WTUE-ANI-002")));
 	TestTrue(TEXT("Value and duration failures use the stable Animation code"),
 		HasCode(Diagnostics, TEXT("WTUE-ANI-003")));
+	FWebToUECompiledAnimationIR InvalidTransition = IR;
+	InvalidTransition.Transitions.Add(Transition);
+	InvalidTransition.Transitions[1].Target.TargetNodeIndex = 3;
+	InvalidTransition.Transitions[1].DurationSeconds = 0.0;
+	InvalidTransition.Transitions[1].ReverseMode =
+		static_cast<EWebToUETransitionReverseMode>(255);
+	TestFalse(TEXT("Transition IR fails closed on identity, target, timing, and semantics"),
+		InvalidTransition.Validate(1, Diagnostics));
+	TestTrue(TEXT("Transition target failures use the stable target code"),
+		HasCode(Diagnostics, TEXT("WTUE-TRN-001")));
+	TestTrue(TEXT("Transition timing failures use the stable timing code"),
+		HasCode(Diagnostics, TEXT("WTUE-TRN-002")));
+	TestTrue(TEXT("Transition semantics failures use the stable semantics code"),
+		HasCode(Diagnostics, TEXT("WTUE-TRN-003")));
 	FWebToUEAnimationBudget StarvingBudget;
 	StarvingBudget.MaxActiveTracks = 2;
 	StarvingBudget.MaxSamplesPerPump = 1;

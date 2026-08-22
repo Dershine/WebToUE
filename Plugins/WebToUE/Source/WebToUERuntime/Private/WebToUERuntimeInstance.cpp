@@ -11,7 +11,8 @@ namespace WebToUE::RuntimeInstance::Private
 {
 	static uint64 GetStyleValueOwnedBytes(const FWebToUEStyleValue& Value)
 	{
-		return Value.String.GetAllocatedSize();
+		return Value.String.GetAllocatedSize() +
+			Value.Transition.Items.GetAllocatedSize();
 	}
 
 	static uint64 GetDeclarationOwnedBytes(const FWebToUEStyleDeclaration& Declaration)
@@ -26,7 +27,8 @@ namespace WebToUE::RuntimeInstance::Private
 			Style.AlignItems.GetAllocatedSize() + Style.AlignSelf.GetAllocatedSize() +
 			Style.FontFamily.GetAllocatedSize() + Style.FontWeight.GetAllocatedSize() +
 			Style.TextAlign.GetAllocatedSize() + Style.WhiteSpace.GetAllocatedSize() +
-			Style.ObjectFit.GetAllocatedSize();
+			Style.ObjectFit.GetAllocatedSize() +
+			Style.Transition.Items.GetAllocatedSize();
 	}
 
 	static uint64 GetSelectorIndexOwnedBytes(const FWebToUESelectorIndex& Index)

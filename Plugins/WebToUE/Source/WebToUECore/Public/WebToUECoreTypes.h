@@ -156,7 +156,8 @@ enum class EWebToUECssProperty : uint8
 	ObjectFit,
 	ZIndex,
 	Transform,
-	TransformOrigin
+	TransformOrigin,
+	Transition
 };
 
 UENUM()
@@ -173,7 +174,50 @@ enum class EWebToUEStyleValueType : uint8
 	Flex,
 	Border,
 	Transform,
-	TransformOrigin
+	TransformOrigin,
+	Transition
+};
+
+UENUM()
+enum class EWebToUETransitionEasing : uint8
+{
+	Linear,
+	Ease,
+	EaseIn,
+	EaseOut,
+	EaseInOut
+};
+
+USTRUCT()
+struct WEBTOUECORE_API FWebToUETransitionItem
+{
+	GENERATED_BODY()
+
+	UPROPERTY() EWebToUECssProperty Property = EWebToUECssProperty::Invalid;
+	UPROPERTY() float DurationSeconds = 0.0f;
+	UPROPERTY() float DelaySeconds = 0.0f;
+	UPROPERTY() EWebToUETransitionEasing Easing = EWebToUETransitionEasing::Ease;
+
+	bool operator==(const FWebToUETransitionItem& Other) const
+	{
+		return Property == Other.Property &&
+			FMath::IsNearlyEqual(DurationSeconds, Other.DurationSeconds) &&
+			FMath::IsNearlyEqual(DelaySeconds, Other.DelaySeconds) &&
+			Easing == Other.Easing;
+	}
+};
+
+USTRUCT()
+struct WEBTOUECORE_API FWebToUETransitionValue
+{
+	GENERATED_BODY()
+
+	UPROPERTY() TArray<FWebToUETransitionItem> Items;
+
+	bool operator==(const FWebToUETransitionValue& Other) const
+	{
+		return Items == Other.Items;
+	}
 };
 
 UENUM()
@@ -288,6 +332,7 @@ struct WEBTOUECORE_API FWebToUEStyleValue
 	UPROPERTY() FWebToUEBorderValue Border;
 	UPROPERTY() FWebToUEVisualTransformValue Transform;
 	UPROPERTY() FWebToUETransformOriginValue TransformOrigin;
+	UPROPERTY() FWebToUETransitionValue Transition;
 };
 
 struct WEBTOUECORE_API FWebToUEStyleDeclaration
@@ -340,6 +385,7 @@ struct WEBTOUECORE_API FWebToUEComputedStyle
 	int32 ZIndex = 0;
 	FWebToUEVisualTransformValue Transform;
 	FWebToUETransformOriginValue TransformOrigin;
+	FWebToUETransitionValue Transition;
 };
 
 struct WEBTOUECORE_API FWebToUERuntimeNodeState

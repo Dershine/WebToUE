@@ -76,6 +76,34 @@ struct WEBTOUERUNTIME_API FWebToUECompiledAnimationTrack
 	UPROPERTY() EWebToUEClockDomain ClockDomain = EWebToUEClockDomain::Game;
 };
 
+UENUM()
+enum class EWebToUETransitionReverseMode : uint8
+{
+	RetargetFromCurrent
+};
+
+UENUM()
+enum class EWebToUETransitionFillMode : uint8
+{
+	UnderlyingAfterCompletion
+};
+
+USTRUCT()
+struct WEBTOUERUNTIME_API FWebToUECompiledTransition
+{
+	GENERATED_BODY()
+	UPROPERTY() FName TransitionId;
+	UPROPERTY() FWebToUECompiledAnimationTarget Target;
+	UPROPERTY() double DurationSeconds = 0.0;
+	UPROPERTY() double DelaySeconds = 0.0;
+	UPROPERTY() EWebToUETransitionEasing Easing = EWebToUETransitionEasing::Ease;
+	UPROPERTY() EWebToUETransitionReverseMode ReverseMode =
+		EWebToUETransitionReverseMode::RetargetFromCurrent;
+	UPROPERTY() EWebToUETransitionFillMode FillMode =
+		EWebToUETransitionFillMode::UnderlyingAfterCompletion;
+	UPROPERTY() EWebToUEClockDomain ClockDomain = EWebToUEClockDomain::Game;
+};
+
 struct WEBTOUERUNTIME_API FWebToUEAnimationDiagnostic
 {
 	FString Code;
@@ -88,9 +116,10 @@ struct WEBTOUERUNTIME_API FWebToUECompiledAnimationIR
 {
 	GENERATED_BODY()
 	static constexpr uint16 CurrentMajor = 1;
-	static constexpr uint16 CurrentMinor = 0;
+	static constexpr uint16 CurrentMinor = 1;
 	UPROPERTY() FWebToUEArtifactLayerVersion Version{ CurrentMajor, CurrentMinor };
 	UPROPERTY() TArray<FWebToUECompiledAnimationTrack> Tracks;
+	UPROPERTY() TArray<FWebToUECompiledTransition> Transitions;
 
 	bool Validate(int32 CompiledNodeCount,
 		TArray<FWebToUEAnimationDiagnostic>& OutDiagnostics) const;

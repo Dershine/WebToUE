@@ -49,6 +49,8 @@ bool FWebToUEAssetVersionTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Assets without versioned Animation IR require recompilation"),
 		FWebToUEAssetVersion::RequiresRecompile(
 			FWebToUEAssetVersion::VisualTransformAndClip));
+	TestTrue(TEXT("Assets without Transition lowering require recompilation"),
+		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::AnimationIR));
 	TestFalse(TEXT("Assets at the latest version do not require recompilation"),
 		FWebToUEAssetVersion::RequiresRecompile(FWebToUEAssetVersion::LatestVersion));
 	return true;

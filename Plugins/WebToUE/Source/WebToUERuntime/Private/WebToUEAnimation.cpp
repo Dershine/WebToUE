@@ -178,7 +178,7 @@ bool FWebToUECompiledAnimationIR::Validate(
 	if (Version != FWebToUEArtifactLayerVersion{ CurrentMajor, CurrentMinor })
 	{
 		OutDiagnostics.Add({ TEXT("WTUE-ANI-001"), TEXT("animation.version"),
-			TEXT("Compiled Animation IR requires the supported 1.0 layer version.") });
+			TEXT("Compiled Animation IR requires the supported 1.1 layer version.") });
 	}
 	TSet<FName> TrackIds;
 	for (int32 Index = 0; Index < Tracks.Num(); ++Index)
@@ -209,6 +209,48 @@ bool FWebToUECompiledAnimationIR::Validate(
 		{
 			OutDiagnostics.Add({ TEXT("WTUE-ANI-003"), Path + TEXT(".duration"),
 				TEXT("Animation duration must be finite and greater than zero.") });
+		}
+	}
+	TSet<FName> TransitionIds;
+	TSet<FString> TransitionTargets;
+	for (int32 Index = 0; Index < Transitions.Num(); ++Index)
+	{
+		const FWebToUECompiledTransition& Transition = Transitions[Index];
+		const FString Path = FString::Printf(TEXT("animation.transitions[%d]"), Index);
+		const FWebToUEPropertyAddress Address = Transition.Target.ToPropertyAddress();
+		if (Transition.TransitionId.IsNone() ||
+			TransitionIds.Contains(Transition.TransitionId))
+		{
+			OutDiagnostics.Add({ TEXT("WTUE-TRN-001"), Path + TEXT(".id"),
+				TEXT("Transition IDs must be present and unique within the IR revision.") });
+		}
+		TransitionIds.Add(Transition.TransitionId);
+		const FString TargetKey = FString::Printf(TEXT("%d:%s"),
+			Transition.Target.TargetNodeIndex, *Address.ToString());
+		if (Transition.Target.TargetNodeIndex < 0 ||
+			Transition.Target.TargetNodeIndex >= CompiledNodeCount ||
+			!Address.IsValid() ||
+			Transition.Target.Kind == EWebToUECompiledAnimationTargetKind::MaterialScalar ||
+			Transition.Target.Kind == EWebToUECompiledAnimationTargetKind::MaterialVector ||
+			TransitionTargets.Contains(TargetKey))
+		{
+			OutDiagnostics.Add({ TEXT("WTUE-TRN-001"), Path + TEXT(".target"),
+				TEXT("Transition target must be a unique compiled-node CSS/transform address.") });
+		}
+		TransitionTargets.Add(TargetKey);
+		if (!FMath::IsFinite(Transition.DurationSeconds) ||
+			Transition.DurationSeconds <= 0.0 ||
+			!FMath::IsFinite(Transition.DelaySeconds) ||
+			Transition.DelaySeconds < 0.0)
+		{
+			OutDiagnostics.Add({ TEXT("WTUE-TRN-002"), Path + TEXT(".timing"),
+				TEXT("Transition duration must be positive and delay must be non-negative.") });
+		}
+		if (Transition.ReverseMode != EWebToUETransitionReverseMode::RetargetFromCurrent ||
+			Transition.FillMode != EWebToUETransitionFillMode::UnderlyingAfterCompletion)
+		{
+			OutDiagnostics.Add({ TEXT("WTUE-TRN-003"), Path + TEXT(".semantics"),
+				TEXT("Transition must use controlled retarget-from-current and underlying-after-completion semantics.") });
 		}
 	}
 	OutDiagnostics.Sort([](const FWebToUEAnimationDiagnostic& A,

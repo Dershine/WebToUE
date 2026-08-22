@@ -435,7 +435,7 @@ namespace WebToUE::ResourceImport::Private
 
 	static FString CompilerFingerprint()
 	{
-		return HashUtf8(TEXT("WebToUE.Editor.ResourceImporter/4;UI-IR/1.0;Resource-IR/1.2;Animation-IR/1.0;StaticMaterialBrush/1"));
+		return HashUtf8(TEXT("WebToUE.Editor.ResourceImporter/5;UI-IR/1.0;Resource-IR/1.2;Animation-IR/1.1;StaticMaterialBrush/1;TransitionLowering/1"));
 	}
 
 	static bool ResolveDocumentTextures(const FWebToUEDocument& Source,
@@ -600,6 +600,7 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 	{
 		return ResolvedMaterials.Find(AuthorReference);
 	};
+	TMap<const FWebToUENode*, int32> CompiledNodeIndices;
 
 	TFunction<int32(const TSharedPtr<FWebToUENode>&, int32, const FString&, int32)> AddNode =
 		[&](const TSharedPtr<FWebToUENode>& Node, int32 ParentIndex, const FString& ParentIdentity, int32 SiblingOrdinal)
@@ -682,6 +683,7 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 			}
 		}
 		const int32 NodeIndex = Result.Nodes.Add(MoveTemp(Serialized));
+		CompiledNodeIndices.Add(Node.Get(), NodeIndex);
 		const auto AddBindingOp = [&](const TCHAR* AttributeName, EWebToUEBindingKind Kind)
 		{
 			const FString RootField = Node->GetAttribute(AttributeName);
@@ -729,6 +731,58 @@ static FWebToUECompiledDocumentData BuildCompiledDocument(const FWebToUEDocument
 			SerializedDeclaration.TypedValue = Declaration.TypedValue;
 		}
 	}
+
+	const auto ToTransitionTargetKind = [](EWebToUECssProperty Property)
+	{
+		switch (Property)
+		{
+		case EWebToUECssProperty::Opacity:
+			return EWebToUECompiledAnimationTargetKind::Opacity;
+		case EWebToUECssProperty::Color:
+			return EWebToUECompiledAnimationTargetKind::Color;
+		case EWebToUECssProperty::BackgroundColor:
+			return EWebToUECompiledAnimationTargetKind::BackgroundColor;
+		case EWebToUECssProperty::BorderColor:
+			return EWebToUECompiledAnimationTargetKind::BorderColor;
+		case EWebToUECssProperty::Transform:
+			return EWebToUECompiledAnimationTargetKind::VisualTransform;
+		default:
+			return EWebToUECompiledAnimationTargetKind::Invalid;
+		}
+	};
+	Source.ForEachNode([&](FWebToUENode& Node)
+	{
+		const int32* NodeIndex = CompiledNodeIndices.Find(&Node);
+		if (!NodeIndex) return;
+		for (const FWebToUETransitionItem& Item :
+			Source.GetComputedStyle(Node).Transition.Items)
+		{
+			const EWebToUECompiledAnimationTargetKind Kind =
+				ToTransitionTargetKind(Item.Property);
+			if (Kind == EWebToUECompiledAnimationTargetKind::Invalid) continue;
+			FWebToUECompiledTransition& Transition =
+				Result.AnimationIR.Transitions.AddDefaulted_GetRef();
+			Transition.TransitionId = FName(*FString::Printf(
+				TEXT("transition.%08d.%s"), *NodeIndex,
+				WebToUE::Private::LexToString(Item.Property)));
+			Transition.Target.TargetNodeIndex = *NodeIndex;
+			Transition.Target.Kind = Kind;
+			Transition.DurationSeconds = Item.DurationSeconds;
+			Transition.DelaySeconds = Item.DelaySeconds;
+			Transition.Easing = Item.Easing;
+		}
+	});
+	Result.AnimationIR.Transitions.Sort([](
+		const FWebToUECompiledTransition& A,
+		const FWebToUECompiledTransition& B)
+	{
+		if (A.Target.TargetNodeIndex != B.Target.TargetNodeIndex)
+		{
+			return A.Target.TargetNodeIndex < B.Target.TargetNodeIndex;
+		}
+		return static_cast<uint8>(A.Target.Kind) <
+			static_cast<uint8>(B.Target.Kind);
+	});
 
 	const auto AddResource = [&Result, &FindResolvedTexture, &FindResolvedMaterial](
 		EWebToUEResourceKind Kind,

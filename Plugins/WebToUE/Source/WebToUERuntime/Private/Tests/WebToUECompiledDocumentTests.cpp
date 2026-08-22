@@ -122,7 +122,7 @@ bool FWebToUEResourceContractHydrationTest::RunTest(const FString& Parameters)
 	FWebToUECompiledDocumentData AnimationSealMismatchData =
 		MakeCompiledDocument();
 	AnimationSealMismatchData.ResourceFreshness.ArtifactVersions.AnimationIr =
-		{ 1, 1 };
+		{ 1, 0 };
 	AnimationSealMismatch->CommitCompiledDocument(
 		MoveTemp(AnimationSealMismatchData));
 	TestFalse(TEXT("Animation IR payload and sealed artifact versions must match"),

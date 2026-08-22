@@ -71,11 +71,12 @@ namespace WebToUE::Private
 			{ EWebToUECssProperty::ObjectFit, TEXT("object-fit"), false, Paint },
 			{ EWebToUECssProperty::ZIndex, TEXT("z-index"), false, PaintHitTest },
 			{ EWebToUECssProperty::Transform, TEXT("transform"), false, PaintHitTest },
-			{ EWebToUECssProperty::TransformOrigin, TEXT("transform-origin"), false, PaintHitTest }
+			{ EWebToUECssProperty::TransformOrigin, TEXT("transform-origin"), false, PaintHitTest },
+			{ EWebToUECssProperty::Transition, TEXT("transition"), false, StyleImpact }
 		};
 
 		static_assert(UE_ARRAY_COUNT(PropertyMetadata) ==
-			static_cast<uint8>(EWebToUECssProperty::TransformOrigin) + 1,
+			static_cast<uint8>(EWebToUECssProperty::Transition) + 1,
 			"Every serialized CSS property ID must have exactly one metadata entry.");
 	}
 
@@ -156,6 +157,107 @@ namespace WebToUE::Private
 	static bool TryParseInteger(const FString& Raw, int32& OutInteger)
 	{
 		return LexTryParseString(OutInteger, *Raw.TrimStartAndEnd());
+	}
+
+	static bool TryParseTransitionTime(const FString& Raw, float& OutSeconds)
+	{
+		const FString Value = Raw.TrimStartAndEnd().ToLower();
+		float Scale = 0.0f;
+		FString Number;
+		if (Value.EndsWith(TEXT("ms")))
+		{
+			Scale = 0.001f;
+			Number = Value.LeftChop(2);
+		}
+		else if (Value.EndsWith(TEXT("s")))
+		{
+			Scale = 1.0f;
+			Number = Value.LeftChop(1);
+		}
+		else
+		{
+			return false;
+		}
+		float Parsed = 0.0f;
+		if (!TryParseNumber(Number, Parsed) || Parsed < 0.0f)
+		{
+			return false;
+		}
+		OutSeconds = Parsed * Scale;
+		return FMath::IsFinite(OutSeconds);
+	}
+
+	static bool TryParseTransitionProperty(const FString& Raw,
+		EWebToUECssProperty& OutProperty)
+	{
+		const FString Value = Raw.TrimStartAndEnd().ToLower();
+		if (!TryGetCssProperty(Value, OutProperty)) return false;
+		return OutProperty == EWebToUECssProperty::Opacity ||
+			OutProperty == EWebToUECssProperty::Color ||
+			OutProperty == EWebToUECssProperty::BackgroundColor ||
+			OutProperty == EWebToUECssProperty::BorderColor ||
+			OutProperty == EWebToUECssProperty::Transform;
+	}
+
+	static bool TryParseTransitionEasing(const FString& Raw,
+		EWebToUETransitionEasing& OutEasing)
+	{
+		const FString Value = Raw.TrimStartAndEnd().ToLower();
+		if (Value == TEXT("linear")) OutEasing = EWebToUETransitionEasing::Linear;
+		else if (Value == TEXT("ease")) OutEasing = EWebToUETransitionEasing::Ease;
+		else if (Value == TEXT("ease-in")) OutEasing = EWebToUETransitionEasing::EaseIn;
+		else if (Value == TEXT("ease-out")) OutEasing = EWebToUETransitionEasing::EaseOut;
+		else if (Value == TEXT("ease-in-out")) OutEasing = EWebToUETransitionEasing::EaseInOut;
+		else return false;
+		return true;
+	}
+
+	static bool TryParseTransition(const FString& Raw,
+		FWebToUETransitionValue& OutTransition)
+	{
+		OutTransition.Items.Reset();
+		TArray<FString> Items;
+		Raw.ParseIntoArray(Items, TEXT(","), false);
+		if (Items.IsEmpty()) return false;
+		TSet<EWebToUECssProperty> Properties;
+		for (const FString& RawItem : Items)
+		{
+			TArray<FString> Tokens;
+			RawItem.ParseIntoArrayWS(Tokens);
+			if (Tokens.Num() < 2 || Tokens.Num() > 4) return false;
+			FWebToUETransitionItem Item;
+			if (!TryParseTransitionProperty(Tokens[0], Item.Property) ||
+				Properties.Contains(Item.Property) ||
+				!TryParseTransitionTime(Tokens[1], Item.DurationSeconds) ||
+				Item.DurationSeconds <= 0.0f)
+			{
+				return false;
+			}
+			Properties.Add(Item.Property);
+			bool bHaveEasing = false;
+			bool bHaveDelay = false;
+			for (int32 TokenIndex = 2; TokenIndex < Tokens.Num(); ++TokenIndex)
+			{
+				float Delay = 0.0f;
+				EWebToUETransitionEasing Easing = EWebToUETransitionEasing::Ease;
+				if (!bHaveEasing && TryParseTransitionEasing(Tokens[TokenIndex], Easing))
+				{
+					Item.Easing = Easing;
+					bHaveEasing = true;
+				}
+				else if (!bHaveDelay && TryParseTransitionTime(Tokens[TokenIndex], Delay))
+				{
+					Item.DelaySeconds = Delay;
+					bHaveDelay = true;
+				}
+				else
+				{
+					return false;
+				}
+			}
+			OutTransition.Items.Add(Item);
+		}
+		return true;
 	}
 
 	static bool TryParseKeyword(FString Raw,
@@ -586,6 +688,9 @@ namespace WebToUE::Private
 		case EWebToUECssProperty::TransformOrigin:
 			OutValue.Type = EWebToUEStyleValueType::TransformOrigin;
 			return TryParseTransformOrigin(Value, OutValue.TransformOrigin);
+		case EWebToUECssProperty::Transition:
+			OutValue.Type = EWebToUEStyleValueType::Transition;
+			return TryParseTransition(Value, OutValue.Transition);
 		case EWebToUECssProperty::Color:
 		case EWebToUECssProperty::Background:
 		case EWebToUECssProperty::BackgroundColor:
@@ -732,6 +837,7 @@ namespace WebToUE::Private
 		case EWebToUECssProperty::ZIndex: Style.ZIndex = Value.Integer; break;
 		case EWebToUECssProperty::Transform: Style.Transform = Value.Transform; break;
 		case EWebToUECssProperty::TransformOrigin: Style.TransformOrigin = Value.TransformOrigin; break;
+		case EWebToUECssProperty::Transition: Style.Transition = Value.Transition; break;
 		default: break;
 		}
 	}
@@ -870,6 +976,7 @@ namespace WebToUE::Private
 		case EWebToUECssProperty::TransformOrigin:
 			return EqualLength(A.TransformOrigin.X, B.TransformOrigin.X) &&
 				EqualLength(A.TransformOrigin.Y, B.TransformOrigin.Y);
+		case EWebToUECssProperty::Transition: return A.Transition == B.Transition;
 		default: return true;
 		}
 	}

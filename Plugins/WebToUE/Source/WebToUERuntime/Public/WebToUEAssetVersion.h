@@ -20,8 +20,9 @@ struct WEBTOUERUNTIME_API FWebToUEAssetVersion
 		StaticMaterialBrushes = 11,
 		VisualTransformAndClip = 12,
 		AnimationIR = 13,
+		TransitionLowering = 14,
 
-		LatestVersion = AnimationIR
+		LatestVersion = TransitionLowering
 	};
 
 	static const FGuid GUID;

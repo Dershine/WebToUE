@@ -9,7 +9,7 @@
 namespace WebToUE::Private
 {
 	static constexpr int32 CascadeSlotCount =
-		static_cast<int32>(EWebToUECssProperty::TransformOrigin) + 1;
+		static_cast<int32>(EWebToUECssProperty::Transition) + 1;
 
 	struct FCascadePriority
 	{

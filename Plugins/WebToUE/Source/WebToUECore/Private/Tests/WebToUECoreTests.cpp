@@ -381,7 +381,9 @@ bool FWebToUETypedPropertiesTest::RunTest(const FString& Parameters)
 		{TEXT("transform"), TEXT("translate(25%, 10px) rotate(90deg) scale(2, 0.5)"),
 			EWebToUECssProperty::Transform, EWebToUEStyleValueType::Transform},
 		{TEXT("transform-origin"), TEXT("left 25%"),
-			EWebToUECssProperty::TransformOrigin, EWebToUEStyleValueType::TransformOrigin}
+			EWebToUECssProperty::TransformOrigin, EWebToUEStyleValueType::TransformOrigin},
+		{TEXT("transition"), TEXT("opacity 200ms ease-out, transform 0.4s ease-in-out 50ms"),
+			EWebToUECssProperty::Transition, EWebToUEStyleValueType::Transition}
 	};
 
 	TSet<uint8> SeenPropertyIds;
@@ -431,6 +433,32 @@ bool FWebToUETypedPropertiesTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Unsupported transform-origin units fail closed"),
 		WebToUE::Private::TryParseCssDeclaration(TEXT("transform-origin"),
 			TEXT("1em 2px"), InvalidDeclaration));
+	FWebToUEStyleDeclaration Transition;
+	TestTrue(TEXT("The controlled Transition shorthand compiles into typed items"),
+		WebToUE::Private::TryParseCssDeclaration(TEXT("transition"),
+			TEXT("opacity 200ms ease-out, transform 0.4s ease-in-out 50ms"),
+			Transition));
+	TestEqual(TEXT("Transition shorthand keeps deterministic author order"),
+		Transition.TypedValue.Transition.Items.Num(), 2);
+	if (Transition.TypedValue.Transition.Items.Num() == 2)
+	{
+		TestEqual(TEXT("Opacity duration converts milliseconds to seconds"),
+			Transition.TypedValue.Transition.Items[0].DurationSeconds, 0.2f);
+		TestEqual(TEXT("Transform delay converts milliseconds to seconds"),
+			Transition.TypedValue.Transition.Items[1].DelaySeconds, 0.05f);
+		TestEqual(TEXT("Transform easing is typed"),
+			Transition.TypedValue.Transition.Items[1].Easing,
+			EWebToUETransitionEasing::EaseInOut);
+	}
+	TestFalse(TEXT("Transition rejects Layout targets"),
+		WebToUE::Private::TryParseCssDeclaration(TEXT("transition"),
+			TEXT("width 200ms linear"), InvalidDeclaration));
+	TestFalse(TEXT("Transition rejects duplicate target addresses"),
+		WebToUE::Private::TryParseCssDeclaration(TEXT("transition"),
+			TEXT("opacity 100ms, opacity 200ms"), InvalidDeclaration));
+	TestFalse(TEXT("Transition rejects unitless and zero duration"),
+		WebToUE::Private::TryParseCssDeclaration(TEXT("transition"),
+			TEXT("opacity 0s"), InvalidDeclaration));
 	TestFalse(TEXT("Unsupported properties do not receive an ID"),
 		WebToUE::Private::TryParseCssDeclaration(TEXT("made-up-property"), TEXT("1px"), InvalidDeclaration));
 	TestFalse(TEXT("Invalid values do not produce typed declarations"),
@@ -442,7 +470,7 @@ bool FWebToUEPropertyMetadataTest::RunTest(const FString& Parameters)
 {
 	using namespace WebToUE::Private;
 	const TConstArrayView<FWebToUECssPropertyMetadata> Metadata = GetAllCssPropertyMetadata();
-	TestEqual(TEXT("All 54 supported properties have metadata"), Metadata.Num(), 54);
+	TestEqual(TEXT("All 55 supported properties have metadata"), Metadata.Num(), 55);
 	TSet<FString> Names;
 	TSet<EWebToUECssProperty> InheritedProperties;
 	for (int32 Index = 0; Index < Metadata.Num(); ++Index)
@@ -491,12 +519,14 @@ bool FWebToUEPropertyMetadataTest::RunTest(const FString& Parameters)
 	const EWebToUEStyleImpact Layout = PaintHitTest | EWebToUEStyleImpact::Layout;
 	const EWebToUEStyleImpact Measure = Layout | EWebToUEStyleImpact::Measure;
 	const EWebToUEStyleImpact MeasureResource = Measure | EWebToUEStyleImpact::Resource;
+	const EWebToUEStyleImpact Style = EWebToUEStyleImpact::Style;
 	struct FImpactGroup
 	{
 		EWebToUEStyleImpact Impact;
 		TArray<EWebToUECssProperty> Properties;
 	};
 	const FImpactGroup ImpactGroups[] = {
+		{ Style, TArray<EWebToUECssProperty>{ EWebToUECssProperty::Transition } },
 		{ Layout, TArray<EWebToUECssProperty>{
 			EWebToUECssProperty::Display, EWebToUECssProperty::Position,
 			EWebToUECssProperty::Overflow, EWebToUECssProperty::Width,
