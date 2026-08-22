@@ -270,8 +270,8 @@ bool FWebToUETextCacheKeyAndDirtyPathTest::RunTest(const FString& Parameters)
 		View->PrepareTextLayoutForTesting(TargetText, ColorStyle, Constraint);
 		StyleSnapshot = Capture.GetSnapshot();
 	}
-	TestEqual(TEXT("A text style change invalidates the cache key"),
-		StyleSnapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(1));
+	TestEqual(TEXT("A paint-only text color change reuses the layout cache key"),
+		StyleSnapshot.GetCounter(EWebToUEPerformanceCounter::TextLayoutComputes), uint64(0));
 	FWebToUEComputedStyle FontStyle = ColorStyle;
 	FontStyle.FontSize += 2.0f;
 	FWebToUEPerformanceSnapshot FontSnapshot;

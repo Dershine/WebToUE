@@ -76,7 +76,7 @@ namespace WebToUE::Runtime::Presentation::Private
 		Style.SetFont(Settings->ResolveFont(
 			ComputedStyle.FontFamily, ComputedStyle.FontSize, ComputedStyle.FontWeight,
 			ResolvedFontObject));
-		Style.SetColorAndOpacity(ComputedStyle.Color);
+		Style.SetColorAndOpacity(FLinearColor::White);
 		return Style;
 	}
 
@@ -127,14 +127,15 @@ namespace WebToUE::Runtime::Presentation::Private
 	}
 
 	static FTransform2D ResolveLocalTransform(
-		const FWebToUEComputedStyle& Style, const FVector2f& Size)
+		const FWebToUEVisualTransformValue& Value,
+		const FWebToUETransformOriginValue& OriginValue,
+		const FVector2f& Size)
 	{
-		const FWebToUEVisualTransformValue& Value = Style.Transform;
 		const FVector2f Translation = Value.TranslationPixels +
 			Value.TranslationByWidth * Size.X + Value.TranslationByHeight * Size.Y;
 		const FVector2f Origin(
-			ResolveTransformLength(Style.TransformOrigin.X, Size.X),
-			ResolveTransformLength(Style.TransformOrigin.Y, Size.Y));
+			ResolveTransformLength(OriginValue.X, Size.X),
+			ResolveTransformLength(OriginValue.Y, Size.Y));
 		const FTransform2D Affine(
 			FMatrix2x2(Value.M00, Value.M01, Value.M10, Value.M11), Translation);
 		return FTransform2D(-Origin).Concatenate(Affine).Concatenate(FTransform2D(Origin));
@@ -960,14 +961,21 @@ void FWebToUERuntimePresentation::ApplyStyleUpdates(
 		{
 			bRebuildPaintOrder = true;
 		}
-		const bool bBrushChanged = Update.Changes.ChangedProperties.ContainsByPredicate(
-			[](EWebToUECssProperty Property)
-			{
-				return Property == EWebToUECssProperty::BackgroundColor ||
-					Property == EWebToUECssProperty::BorderColor ||
-					Property == EWebToUECssProperty::BorderWidth ||
-					Property == EWebToUECssProperty::BorderRadius;
-			});
+		const auto HasAnimationOverlay = [this, Target = Update.Target](
+			EWebToUECssProperty Property)
+		{
+			return OwnerWidget.FindAnimationOverlay(
+				Target, FWebToUEPropertyAddress::Css(Property)) != nullptr;
+		};
+		const bool bBrushChanged =
+			Update.Changes.ChangedProperties.Contains(EWebToUECssProperty::BorderWidth) ||
+			Update.Changes.ChangedProperties.Contains(EWebToUECssProperty::BorderRadius) ||
+			(Update.Changes.ChangedProperties.Contains(
+				EWebToUECssProperty::BackgroundColor) &&
+				!HasAnimationOverlay(EWebToUECssProperty::BackgroundColor)) ||
+			(Update.Changes.ChangedProperties.Contains(
+				EWebToUECssProperty::BorderColor) &&
+				!HasAnimationOverlay(EWebToUECssProperty::BorderColor));
 		if (bBrushChanged && Node->Type == EWebToUENodeType::Element)
 		{
 			RebuildBrush(*Node);
@@ -1023,7 +1031,17 @@ bool FWebToUERuntimePresentation::ApplyAnimationOverlayChange(
 	FWebToUEInstanceHandle Target,
 	const FWebToUEPropertyAddress& Address) const
 {
-	if (Address != FWebToUEPropertyAddress::Css(EWebToUECssProperty::Opacity))
+	const bool bOpacity =
+		Address == FWebToUEPropertyAddress::Css(EWebToUECssProperty::Opacity);
+	const bool bColor =
+		Address == FWebToUEPropertyAddress::Css(EWebToUECssProperty::Color);
+	const bool bBackground =
+		Address == FWebToUEPropertyAddress::Css(EWebToUECssProperty::BackgroundColor);
+	const bool bBorder =
+		Address == FWebToUEPropertyAddress::Css(EWebToUECssProperty::BorderColor);
+	const bool bTransform =
+		Address == FWebToUEPropertyAddress::VisualTransform();
+	if (!bOpacity && !bColor && !bBackground && !bBorder && !bTransform)
 	{
 		return false;
 	}
@@ -1036,7 +1054,8 @@ bool FWebToUERuntimePresentation::ApplyAnimationOverlayChange(
 	{
 		return true;
 	}
-	const int32 PatchedCommandCount = PatchDisplaySubtree(*Node, true);
+	const int32 PatchedCommandCount = PatchDisplaySubtree(
+		*Node, bOpacity || bColor || bTransform);
 	if (PatchedCommandCount > 0)
 	{
 		FWebToUEPerformanceCapture::RecordCounter(
@@ -1082,7 +1101,6 @@ FSlateTextBlockLayout& FWebToUERuntimePresentation::PrepareTextLayoutInCache(
 	Key.TextAlign = Style.TextAlign;
 	Key.WhiteSpace = Style.WhiteSpace;
 	Key.CultureName = FInternationalization::Get().GetCurrentCulture()->GetName();
-	Key.Color = Style.Color;
 	Key.FontSize = Style.FontSize;
 	Key.WrapWidth = EffectiveWrapWidth;
 	Key.bRichText = bRichText;
@@ -1091,7 +1109,7 @@ FSlateTextBlockLayout& FWebToUERuntimePresentation::PrepareTextLayoutInCache(
 		Cache->Key.bRichText != bRichText ||
 		(bRichText && (Cache->Key.FontFamily != Key.FontFamily ||
 			Cache->Key.FontWeight != Key.FontWeight ||
-			Cache->Key.FontSize != Key.FontSize || Cache->Key.Color != Key.Color));
+			Cache->Key.FontSize != Key.FontSize));
 	if (!Cache || bRichLayoutChanged)
 	{
 		FWebToUEPerformanceCapture::RecordCounter(EWebToUEPerformanceCounter::TextLayoutBuilds);
@@ -1336,14 +1354,26 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 	using namespace WebToUE::Runtime::Presentation::Private;
 	const FWebToUEComputedStyle& Style = GetStyle(Node);
 	const FWebToUERuntimeLayoutResult& LayoutResult = GetLayout(Node);
+	const FWebToUEInstanceHandle NodeHandle = RuntimeInstance.GetHandle(&Node);
+	const auto FindOwnOverlay = [this, NodeHandle](
+		const FWebToUEPropertyAddress& Address)
+	{
+		return OwnerWidget.FindAnimationOverlay(NodeHandle, Address);
+	};
+	const FWebToUEAnimationValue* TransformOverlay = FindOwnOverlay(
+		FWebToUEPropertyAddress::VisualTransform());
+	const FWebToUEVisualTransformValue& EffectiveTransform = TransformOverlay &&
+		TransformOverlay->Type == EWebToUEAnimationValueType::Transform
+		? TransformOverlay->Transform : Style.Transform;
 	const FVector2f Position = LayoutResult.Position - InheritedScrollOffset;
 	const FVector2f Size = LayoutResult.Size;
-	const FTransform2D LocalTransform = ResolveLocalTransform(Style, Size);
+	const FTransform2D LocalTransform = ResolveLocalTransform(
+		EffectiveTransform, Style.TransformOrigin, Size);
 	const FTransform2D NodeSpaceTransform = FTransform2D(-Position)
 		.Concatenate(LocalTransform)
 		.Concatenate(FTransform2D(Position))
 		.Concatenate(InheritedVisualTransform);
-	Command.Owner = RuntimeInstance.GetHandle(&Node);
+	Command.Owner = NodeHandle;
 	Command.Type = Node.Type == EWebToUENodeType::Text
 		? EWebToUEPaintCommandType::Text : EWebToUEPaintCommandType::Box;
 	Command.LocalSize = Size;
@@ -1356,16 +1386,40 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 	Command.Bounds = TransformRectBounds(Command.LocalToView, Size);
 	Command.Depth = Depth;
 	const FWebToUEAnimationValue* OpacityOverlay = OwnerWidget.FindAnimationOverlay(
-		RuntimeInstance.GetHandle(&Node),
+		NodeHandle,
 		FWebToUEPropertyAddress::Css(EWebToUECssProperty::Opacity));
 	const float LocalOpacity = OpacityOverlay &&
 		OpacityOverlay->Type == EWebToUEAnimationValueType::Scalar
 		? FMath::Clamp(OpacityOverlay->Scalar, 0.0f, 1.0f) : Style.Opacity;
 	Command.Opacity = ParentOpacity * LocalOpacity;
+	Command.Color = Style.Color;
+	for (const FWebToUENode* ColorNode = &Node; ColorNode;
+		ColorNode = ColorNode->Parent)
+	{
+		const FWebToUEAnimationValue* ColorOverlay =
+			OwnerWidget.FindAnimationOverlay(
+				RuntimeInstance.GetHandle(ColorNode),
+				FWebToUEPropertyAddress::Css(EWebToUECssProperty::Color));
+		if (ColorOverlay && ColorOverlay->Type == EWebToUEAnimationValueType::Color)
+		{
+			Command.Color = ColorOverlay->Color;
+			break;
+		}
+	}
+	const FWebToUEAnimationValue* BackgroundOverlay = FindOwnOverlay(
+		FWebToUEPropertyAddress::Css(EWebToUECssProperty::BackgroundColor));
+	Command.BackgroundColor = BackgroundOverlay &&
+		BackgroundOverlay->Type == EWebToUEAnimationValueType::Color
+		? BackgroundOverlay->Color : Style.BackgroundColor;
+	const FWebToUEAnimationValue* BorderOverlay = FindOwnOverlay(
+		FWebToUEPropertyAddress::Css(EWebToUECssProperty::BorderColor));
+	Command.BorderColor = BorderOverlay &&
+		BorderOverlay->Type == EWebToUEAnimationValueType::Color
+		? BorderOverlay->Color : Style.BorderColor;
 	Command.bDisplayed = bParentDisplayed && RuntimeDocument.IsDisplayed(Node);
 	Command.ClipChain.Reset(InheritedClipChain.Num());
 	Command.ClipChain.Append(InheritedClipChain);
-	if (!Style.Transform.IsIdentity())
+	if (!EffectiveTransform.IsIdentity())
 	{
 		FWebToUEPerformanceCapture::RecordCounter(
 			EWebToUEPerformanceCounter::VisualTransformCommandsResolved);
@@ -1400,8 +1454,13 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 	if (Node.Type == EWebToUENodeType::Element)
 	{
 		const TSharedPtr<FSlateBrush>* Brush = Brushes.Find(Command.Owner);
+		if (Brush && Brush->IsValid() && Node.ResourceId.IsEmpty())
+		{
+			(*Brush)->TintColor = Command.BackgroundColor;
+			(*Brush)->OutlineSettings.Color = Command.BorderColor;
+		}
 		Command.bDrawable = Brush && Brush->IsValid() &&
-			(!Node.ResourceId.IsEmpty() || Style.BackgroundColor.A > 0.0f ||
+			(!Node.ResourceId.IsEmpty() || Command.BackgroundColor.A > 0.0f ||
 				Style.BorderWidth > 0.0f);
 	}
 	Command.BatchKey.Type = Command.Type;
@@ -1895,8 +1954,10 @@ int32 FWebToUERuntimePresentation::PaintCommand(
 			Size, FSlateLayoutTransform(), Command.LocalToView,
 			FVector2f::ZeroVector);
 		FWidgetStyle TextWidgetStyle = WidgetStyle;
+		FLinearColor TextTint = Command.Color;
+		TextTint.A *= Command.Opacity;
 		TextWidgetStyle.BlendColorAndOpacityTint(
-			FLinearColor(1.0f, 1.0f, 1.0f, Command.Opacity));
+			TextTint);
 		LayerId = TextLayout.OnPaint(Args, TextGeometry, CullingRect, Out, LayerId,
 			TextWidgetStyle, bParentEnabled && Command.bEnabled) + 1;
 		FWebToUEPerformanceCapture::RecordCounter(

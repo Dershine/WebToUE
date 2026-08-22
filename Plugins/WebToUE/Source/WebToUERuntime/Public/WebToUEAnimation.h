@@ -176,6 +176,8 @@ struct WEBTOUERUNTIME_API FWebToUEAnimationTrackRequest
 	FWebToUEAnimationValue From;
 	FWebToUEAnimationValue To;
 	double DurationSeconds = 0.0;
+	double DelaySeconds = 0.0;
+	EWebToUETransitionEasing Easing = EWebToUETransitionEasing::Linear;
 	EWebToUEClockDomain ClockDomain = EWebToUEClockDomain::Game;
 	TWeakPtr<IWebToUEAnimationTarget> TargetAdapter;
 };
@@ -297,6 +299,7 @@ private:
 		FWebToUEAnimationValue To;
 		double StartTimeSeconds = 0.0;
 		double DurationSeconds = 0.0;
+		EWebToUETransitionEasing Easing = EWebToUETransitionEasing::Linear;
 		EWebToUEClockDomain ClockDomain = EWebToUEClockDomain::Game;
 		TWeakPtr<IWebToUEAnimationTarget> TargetAdapter;
 	};

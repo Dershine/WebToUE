@@ -95,7 +95,9 @@ namespace WebToUE::Animation::Tests
 		}
 
 		FWebToUEAnimationTrackRequest Request(
-			float From, float To, double Duration, FName Name = TEXT("test.opacity"))
+			float From, float To, double Duration, FName Name = TEXT("test.opacity"),
+			double Delay = 0.0,
+			EWebToUETransitionEasing Easing = EWebToUETransitionEasing::Linear)
 		{
 			FWebToUEAnimationTrackRequest Result;
 			Result.DebugName = Name;
@@ -105,6 +107,8 @@ namespace WebToUE::Animation::Tests
 			Result.From = FWebToUEAnimationValue::MakeScalar(From);
 			Result.To = FWebToUEAnimationValue::MakeScalar(To);
 			Result.DurationSeconds = Duration;
+			Result.DelaySeconds = Delay;
+			Result.Easing = Easing;
 			Result.ClockDomain = EWebToUEClockDomain::Test;
 			Result.TargetAdapter = Target;
 			return Result;
@@ -228,6 +232,33 @@ bool FWebToUEAnimationTrackClockTest::RunTest(const FString& Parameters)
 		!Fixture.Animation->IsTickerRegistered());
 	TestEqual(TEXT("Explicit virtual Pumps do not invent frame ticker work"),
 		Fixture.Animation->GetTickerInvocationCount(), uint64(0));
+
+	const FWebToUEAnimationStartOutcome Delayed = Fixture.Animation->StartTrack(
+		Fixture.Request(0.0f, 10.0f, 2.0, TEXT("delayed-ease-in-out"), 1.0,
+			EWebToUETransitionEasing::EaseInOut),
+		EWebToUEAnimationConflictPolicy::Reject);
+	Fixture.Clock->Advance(EWebToUEClockDomain::Test, 0.5, Error);
+	Fixture.Animation->Pump();
+	TestTrue(TEXT("Positive delay holds the exact From overlay"),
+		Delayed.IsAccepted() && Fixture.Target->Overlay.IsSet() &&
+		FMath::IsNearlyEqual(Fixture.Target->Overlay.GetValue(), 0.0f));
+	Fixture.Clock->Advance(EWebToUEClockDomain::Test, 1.5, Error);
+	Fixture.Animation->Pump();
+	TestTrue(TEXT("Ease-in-out has an exact symmetric midpoint after delay"),
+		Fixture.Target->Overlay.IsSet() &&
+		FMath::IsNearlyEqual(Fixture.Target->Overlay.GetValue(), 5.0f, 0.001f));
+	Fixture.Clock->Advance(EWebToUEClockDomain::Test, 1.0, Error);
+	Fixture.Animation->Pump();
+	TestFalse(TEXT("Delayed eased completion still releases its overlay"),
+		Fixture.Target->Overlay.IsSet());
+
+	FWebToUEAnimationTrackRequest InvalidEasing = Fixture.Request(
+		0.0f, 1.0f, 1.0, TEXT("invalid-easing"));
+	InvalidEasing.Easing = static_cast<EWebToUETransitionEasing>(255);
+	TestEqual(TEXT("Unknown easing fails closed before lease acquisition"),
+		Fixture.Animation->StartTrack(
+			InvalidEasing, EWebToUEAnimationConflictPolicy::Reject).Result,
+		EWebToUEAnimationStartResult::RejectedInvalidRequest);
 	return true;
 }
 

@@ -30,7 +30,6 @@ struct FWebToUETextLayoutCache
 		FString TextAlign;
 		FString WhiteSpace;
 		FString CultureName;
-		FLinearColor Color = FLinearColor::White;
 		float FontSize = 0.0f;
 		float WrapWidth = 0.0f;
 		bool bRichText = false;
@@ -40,7 +39,7 @@ struct FWebToUETextLayoutCache
 			return Text == Other.Text && FontFamily == Other.FontFamily &&
 				FontWeight == Other.FontWeight && TextAlign == Other.TextAlign &&
 				WhiteSpace == Other.WhiteSpace && CultureName == Other.CultureName &&
-				Color == Other.Color && FontSize == Other.FontSize &&
+				FontSize == Other.FontSize &&
 				WrapWidth == Other.WrapWidth && bRichText == Other.bRichText;
 		}
 	};
@@ -126,6 +125,9 @@ struct FWebToUEPaintCommand
 	FWebToUEPaintBatchKey BatchKey;
 	FWebToUESpatialCellRange SpatialCells;
 	float Opacity = 1.0f;
+	FLinearColor Color = FLinearColor::White;
+	FLinearColor BackgroundColor = FLinearColor::Transparent;
+	FLinearColor BorderColor = FLinearColor::Transparent;
 	int32 Depth = 0;
 	bool bDisplayed = false;
 	bool bDrawable = false;

@@ -4,6 +4,56 @@
 
 namespace WebToUE::Animation::Private
 {
+	static float CubicBezierCoordinate(float T, float P1, float P2)
+	{
+		const float OneMinusT = 1.0f - T;
+		return 3.0f * OneMinusT * OneMinusT * T * P1 +
+			3.0f * OneMinusT * T * T * P2 + T * T * T;
+	}
+
+	static float CubicBezierDerivative(float T, float P1, float P2)
+	{
+		const float OneMinusT = 1.0f - T;
+		return 3.0f * OneMinusT * OneMinusT * P1 +
+			6.0f * OneMinusT * T * (P2 - P1) +
+			3.0f * T * T * (1.0f - P2);
+	}
+
+	static float EvaluateCubicBezier(float X, float X1, float Y1,
+		float X2, float Y2)
+	{
+		X = FMath::Clamp(X, 0.0f, 1.0f);
+		float T = X;
+		for (int32 Iteration = 0; Iteration < 8; ++Iteration)
+		{
+			const float Error = CubicBezierCoordinate(T, X1, X2) - X;
+			const float Derivative = CubicBezierDerivative(T, X1, X2);
+			if (FMath::Abs(Error) <= 0.00001f || FMath::Abs(Derivative) <= 0.00001f)
+			{
+				break;
+			}
+			T = FMath::Clamp(T - Error / Derivative, 0.0f, 1.0f);
+		}
+		return CubicBezierCoordinate(T, Y1, Y2);
+	}
+
+	static float ApplyEasing(float Alpha, EWebToUETransitionEasing Easing)
+	{
+		switch (Easing)
+		{
+		case EWebToUETransitionEasing::Linear: return FMath::Clamp(Alpha, 0.0f, 1.0f);
+		case EWebToUETransitionEasing::Ease:
+			return EvaluateCubicBezier(Alpha, 0.25f, 0.1f, 0.25f, 1.0f);
+		case EWebToUETransitionEasing::EaseIn:
+			return EvaluateCubicBezier(Alpha, 0.42f, 0.0f, 1.0f, 1.0f);
+		case EWebToUETransitionEasing::EaseOut:
+			return EvaluateCubicBezier(Alpha, 0.0f, 0.0f, 0.58f, 1.0f);
+		case EWebToUETransitionEasing::EaseInOut:
+			return EvaluateCubicBezier(Alpha, 0.42f, 0.0f, 0.58f, 1.0f);
+		default: return FMath::Clamp(Alpha, 0.0f, 1.0f);
+		}
+	}
+
 	static bool IsFiniteColor(const FLinearColor& Color)
 	{
 		return FMath::IsFinite(Color.R) && FMath::IsFinite(Color.G) &&
@@ -325,6 +375,8 @@ FWebToUEAnimationStartOutcome FWebToUEAnimationCoordinator::StartTrack(
 	if (!Request.Target.IsValid() || !Request.Address.IsValid() || !Target ||
 		!Clock->SupportsDomain(Request.ClockDomain) ||
 		!FMath::IsFinite(Request.DurationSeconds) || Request.DurationSeconds <= 0.0 ||
+		!FMath::IsFinite(Request.DelaySeconds) || Request.DelaySeconds < 0.0 ||
+		Request.Easing > EWebToUETransitionEasing::EaseInOut ||
 		Request.From.Type != Request.To.Type ||
 		!Request.From.IsCompatibleWith(Request.Address) ||
 		!Request.To.IsCompatibleWith(Request.Address))
@@ -424,8 +476,10 @@ FWebToUEAnimationStartOutcome FWebToUEAnimationCoordinator::StartTrack(
 					Track.From = EffectiveFrom;
 					Track.To = Captured.To;
 					Track.StartTimeSeconds =
-						Commit->Clock->GetTimeSeconds(Captured.ClockDomain);
+						Commit->Clock->GetTimeSeconds(Captured.ClockDomain) +
+						Captured.DelaySeconds;
 					Track.DurationSeconds = Captured.DurationSeconds;
+					Track.Easing = Captured.Easing;
 					Track.ClockDomain = Captured.ClockDomain;
 					Track.TargetAdapter = Captured.TargetAdapter;
 					if (const FActiveTrack* Superseded =
@@ -692,9 +746,11 @@ void FWebToUEAnimationCoordinator::AddTrace(
 FWebToUEAnimationValue FWebToUEAnimationCoordinator::Sample(
 	const FActiveTrack& Track, double TimeSeconds, float& OutAlpha)
 {
-	OutAlpha = static_cast<float>(FMath::Clamp(
+	const float LinearAlpha = static_cast<float>(FMath::Clamp(
 		(TimeSeconds - Track.StartTimeSeconds) / Track.DurationSeconds,
 		0.0, 1.0));
+	OutAlpha = WebToUE::Animation::Private::ApplyEasing(
+		LinearAlpha, Track.Easing);
 	return FWebToUEAnimationValue::Interpolate(
 		Track.From, Track.To, OutAlpha);
 }

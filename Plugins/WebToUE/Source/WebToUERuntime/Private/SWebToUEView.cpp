@@ -128,11 +128,18 @@ bool SWebToUEView::ValidateAnimationTarget(
 		OutError = TEXT("Transition target no longer belongs to this Runtime View.");
 		return false;
 	}
-	if (Address != FWebToUEPropertyAddress::Css(EWebToUECssProperty::Opacity) ||
-		ValueType != EWebToUEAnimationValueType::Scalar ||
-		!RuntimeInstance->FindTransition(Target, Address))
+	const bool bTypedTarget =
+		(Address == FWebToUEPropertyAddress::Css(EWebToUECssProperty::Opacity) &&
+			ValueType == EWebToUEAnimationValueType::Scalar) ||
+		((Address == FWebToUEPropertyAddress::Css(EWebToUECssProperty::Color) ||
+			Address == FWebToUEPropertyAddress::Css(EWebToUECssProperty::BackgroundColor) ||
+			Address == FWebToUEPropertyAddress::Css(EWebToUECssProperty::BorderColor)) &&
+			ValueType == EWebToUEAnimationValueType::Color) ||
+		(Address == FWebToUEPropertyAddress::VisualTransform() &&
+			ValueType == EWebToUEAnimationValueType::Transform);
+	if (!bTypedTarget || !RuntimeInstance->FindTransition(Target, Address))
 	{
-		OutError = TEXT("The Runtime View currently accepts only compiled scalar Opacity transitions.");
+		OutError = TEXT("The Runtime View rejected an uncompiled or incompatibly typed Transition target.");
 		return false;
 	}
 	return true;
@@ -214,43 +221,76 @@ void SWebToUEView::StartStyleTransitions(
 	AnimationCoordinator = Coordinator;
 	const TSharedRef<IWebToUEAnimationTarget> TargetAdapter =
 		StaticCastSharedRef<IWebToUEAnimationTarget>(SharedThis(this));
-	const FWebToUEPropertyAddress OpacityAddress =
-		FWebToUEPropertyAddress::Css(EWebToUECssProperty::Opacity);
 	for (const FWebToUEStyleUpdate& Update : Updates)
 	{
-		if (!Update.Changes.ChangedProperties.Contains(EWebToUECssProperty::Opacity))
-		{
-			continue;
-		}
-		const FWebToUERuntimeTransition* Transition =
-			RuntimeInstance->FindTransition(Update.Target, OpacityAddress);
 		const FWebToUENode* Node = RuntimeInstance->ResolveNode(Update.Target);
-		if (!Transition || !Node || Transition->DelaySeconds != 0.0 ||
-			Transition->Easing != EWebToUETransitionEasing::Linear)
+		if (!Node)
 		{
 			continue;
 		}
-		const float ToOpacity = GetComputedStyle(*Node).Opacity;
-		if (FMath::IsNearlyEqual(Update.PreviousAnimatableStyle.Opacity, ToOpacity))
+		const FWebToUEComputedStyle& CurrentStyle = GetComputedStyle(*Node);
+		for (const EWebToUECssProperty Property :
+			Update.Changes.ChangedProperties)
 		{
-			continue;
-		}
-		FWebToUEAnimationTrackRequest Request;
-		Request.DebugName = Transition->TransitionId;
-		Request.Target = Update.Target;
-		Request.Address = OpacityAddress;
-		Request.From = FWebToUEAnimationValue::MakeScalar(
-			Update.PreviousAnimatableStyle.Opacity);
-		Request.To = FWebToUEAnimationValue::MakeScalar(ToOpacity);
-		Request.DurationSeconds = Transition->DurationSeconds;
-		Request.ClockDomain = Transition->ClockDomain;
-		Request.TargetAdapter = TargetAdapter;
-		const FWebToUEAnimationStartOutcome Outcome = Coordinator->StartTrack(
-			Request, EWebToUEAnimationConflictPolicy::Retarget);
-		if (Outcome.IsAccepted())
-		{
-			AnimationTracks.FindOrAdd(Update.Target).Add(
-				OpacityAddress, Outcome.Handle);
+			FWebToUEPropertyAddress Address;
+			FWebToUEAnimationValue From;
+			FWebToUEAnimationValue To;
+			switch (Property)
+			{
+			case EWebToUECssProperty::Opacity:
+				Address = FWebToUEPropertyAddress::Css(Property);
+				From = FWebToUEAnimationValue::MakeScalar(
+					Update.PreviousAnimatableStyle.Opacity);
+				To = FWebToUEAnimationValue::MakeScalar(CurrentStyle.Opacity);
+				break;
+			case EWebToUECssProperty::Color:
+				Address = FWebToUEPropertyAddress::Css(Property);
+				From = FWebToUEAnimationValue::MakeColor(
+					Update.PreviousAnimatableStyle.Color);
+				To = FWebToUEAnimationValue::MakeColor(CurrentStyle.Color);
+				break;
+			case EWebToUECssProperty::BackgroundColor:
+				Address = FWebToUEPropertyAddress::Css(Property);
+				From = FWebToUEAnimationValue::MakeColor(
+					Update.PreviousAnimatableStyle.BackgroundColor);
+				To = FWebToUEAnimationValue::MakeColor(CurrentStyle.BackgroundColor);
+				break;
+			case EWebToUECssProperty::BorderColor:
+				Address = FWebToUEPropertyAddress::Css(Property);
+				From = FWebToUEAnimationValue::MakeColor(
+					Update.PreviousAnimatableStyle.BorderColor);
+				To = FWebToUEAnimationValue::MakeColor(CurrentStyle.BorderColor);
+				break;
+			case EWebToUECssProperty::Transform:
+				Address = FWebToUEPropertyAddress::VisualTransform();
+				From = FWebToUEAnimationValue::MakeTransform(
+					Update.PreviousAnimatableStyle.Transform);
+				To = FWebToUEAnimationValue::MakeTransform(CurrentStyle.Transform);
+				break;
+			default:
+				continue;
+			}
+			const FWebToUERuntimeTransition* Transition =
+				RuntimeInstance->FindTransition(Update.Target, Address);
+			if (!Transition) continue;
+			FWebToUEAnimationTrackRequest Request;
+			Request.DebugName = Transition->TransitionId;
+			Request.Target = Update.Target;
+			Request.Address = Address;
+			Request.From = From;
+			Request.To = To;
+			Request.DurationSeconds = Transition->DurationSeconds;
+			Request.DelaySeconds = Transition->DelaySeconds;
+			Request.Easing = Transition->Easing;
+			Request.ClockDomain = Transition->ClockDomain;
+			Request.TargetAdapter = TargetAdapter;
+			const FWebToUEAnimationStartOutcome Outcome = Coordinator->StartTrack(
+				Request, EWebToUEAnimationConflictPolicy::Retarget);
+			if (Outcome.IsAccepted())
+			{
+				AnimationTracks.FindOrAdd(Update.Target).Add(
+					Address, Outcome.Handle);
+			}
 		}
 	}
 }
