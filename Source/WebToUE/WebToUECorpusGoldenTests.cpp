@@ -5,6 +5,7 @@
 #include "Dom/JsonObject.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Hash/Blake3.h"
 #include "ImageUtils.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
@@ -150,6 +151,55 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUECorpusOptionalInputContractTest,
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUECorpusSurfaceContractTest,
 	"WebToUE.Benchmark.CorpusSurfaceContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWebToUECompositingCorpusContractTest,
+	"WebToUE.Benchmark.CompositingCorpusContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FWebToUECompositingCorpusContractTest::RunTest(const FString& Parameters)
+{
+	const FName Corpora[] = {
+		TEXT("MainMenu"), TEXT("HUD"), TEXT("ScrollableSettings")
+	};
+	const FString SourceDirectory = FPaths::Combine(
+		FPaths::ProjectDir(), TEXT("WebUI/Examples"));
+	for (const FName Corpus : Corpora)
+	{
+		const FString CorpusName = Corpus.ToString();
+		FString Html;
+		FString Css;
+		const bool bReadHtml = FFileHelper::LoadFileToString(Html,
+			*FPaths::Combine(SourceDirectory, CorpusName + TEXT(".html")));
+		const bool bReadCss = FFileHelper::LoadFileToString(Css,
+			*FPaths::Combine(SourceDirectory, CorpusName + TEXT(".css")));
+		TestTrue(*FString::Printf(TEXT("%s frozen HTML source is readable"),
+			*CorpusName), bReadHtml);
+		TestTrue(*FString::Printf(TEXT("%s frozen CSS source is readable"),
+			*CorpusName), bReadCss);
+		if (!bReadHtml || !bReadCss) continue;
+		const FString Source = Html + TEXT("\n") + Css;
+		const FString Contract = Source.ToLower();
+		const TCHAR* UnsupportedEffects[] = {
+			TEXT("linear-gradient("), TEXT("radial-gradient("),
+			TEXT("box-shadow"), TEXT("text-shadow"), TEXT("mask"),
+			TEXT("nine-slice"), TEXT("border-image"), TEXT("@keyframes"),
+			TEXT("animation:")
+		};
+		for (const TCHAR* Effect : UnsupportedEffects)
+		{
+			TestFalse(*FString::Printf(TEXT("%s does not use selective effect '%s'"),
+				*CorpusName, Effect), Contract.Contains(Effect));
+		}
+		FTCHARToUTF8 Utf8(*Source);
+		const FString Hash = LexToString(
+			FBlake3::HashBuffer(Utf8.Get(), Utf8.Length())).ToLower();
+		AddInfo(FString::Printf(TEXT("COMPOSITING_CORPUS corpus=%s blake3=%s "
+			"gradient=0 shadow=0 nine_slice=0 mask=0 keyframes=0"),
+			*CorpusName, *Hash));
+	}
+	AddInfo(TEXT("P0_5_IF_USED gradient=N/A shadow=N/A nine_slice=N/A mask=N/A keyframes=N/A corpus=MainMenu,HUD,ScrollableSettings reason=frozen-corpus-source-scan"));
+	return true;
+}
 
 bool FWebToUECorpusSurfaceContractTest::RunTest(const FString& Parameters)
 {
