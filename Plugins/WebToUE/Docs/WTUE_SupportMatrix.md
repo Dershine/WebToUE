@@ -2,7 +2,7 @@
 
 > 文档职责：记录 WTUE Web Subset、绑定、输入、UI Feedback、资源、诊断与资产行为的精确当前边界。
 >
-> 当前基线：2026-08-22，M4.6 Animation Kernel 产品闭环。
+> 当前基线：2026-08-22，M4.8 Tiered Compositing 产品闭环。
 >
 > 2026-08-17 的 M3.0 只建立实验性的 Native Component C++ 注册/实例合同；Native Component 作者声明/Compiler/Runtime 挂接仍未支持。
 >
@@ -35,6 +35,8 @@
 > 2026-08-22 的 M4.6 已支持 native Animation IR 1.0/Track Kernel：资产版本 13、Session-owned active-only ticker、注入式 Game/Unscaled/Real/Test Clock、单地址 lease、Retarget/Replace/Cancel、transactional sample、Generation/Session cleanup、bounded trace 与 `WTUE-ANI-001..006` 均有 Automation 和双配置 Packaged kernel 证据。
 >
 > 2026-08-22 的 M4.7 已支持基础 CSS Transition 产品链：资产版本 14/Animation IR 1.1 把 Opacity/Color/BackgroundColor/BorderColor/VisualTransform、duration/delay 与 linear/ease/ease-in/ease-out/ease-in-out 降低到同一 Session Track/Clock；View/Paint adapter 支持 Retarget-from-current、反向、结束显露 latest underlying、Generation/Session 清理与 0 Yoga/resource work。Automation 和 Development/Shipping 独立 Packaged 数值/Paint/Renderer/PNG gate 已通过。MID adapter、Keyframes/Layout animation、step/cubic-bezier 自定义 easing、Portal/离屏合成仍未支持。
+>
+> 2026-08-22 的 M4.8 已支持 sealed requirements 驱动的确定性四档 Compositing 分类。Tier0 Direct Paint 与 Tier1 static Material/View-owned MID Brush 是当前产品路径；Tier2 Subtree Layer 与 Tier3 Render Target 只完成分类、所有权、生命周期和稳定拒绝合同，后端未激活。`CompositingSmoke` 的 Development/Shipping packaged 数值/视觉/Renderer gate 已通过；这不等于 Portal/Filter/Backdrop/独立 Surface 或离屏 GPU/VRAM 支持。
 >
 > 工程状态与路线入口：[WTUE_TechnicalSummary.md](WTUE_TechnicalSummary.md)
 
@@ -157,13 +159,15 @@ Runtime 绘制与命中：
 
 - `UWebToUEView` 以 UE 原生 `SSafeZone` 包裹唯一的 `SWebToUEView` Leaf；默认尊重平台 Safe Zone，可显式关闭。Slate 的宿主几何同时承接 UE DPI 与 Safe Zone 缩放，内部逻辑坐标/布局没有第二套设备缩放。
 - 一个 `SWebToUEView` Leaf 持有 View-owned、Instance Handle 寻址的 Display List；每个命令记录 Owner、节点/子树 Command Range、Bounds、Visible Bounds、Clip、Depth、交互/滚动状态与 Batch Key。文本命令以 Owner Handle 引用 View-owned Text Layout/Run Cache，不在 Display List 内复制文本或创建独立 Slate Widget。
+- Display rebuild 通过独立 `FWebToUECompositingPolicy` 生成确定性 Plan，再由 View/Surface-generation cache 持有节点 tier handle；输入顺序不改变选择结果。普通 Draw Element 为 Tier0，静态 Material/View-owned MID Brush 为 Tier1；需要隔离重叠后代 group opacity/clip/order 的请求分类为 Tier2，采样已合成子树/backdrop/独立 Surface 的请求分类为 Tier3。当前 backend 只支持 Tier0/1，Tier2/3 以稳定 `COMP001..004` 失败关闭整个 View 的 Paint/Hit，不静默近似或保留旧命令。tier/projection change、节点删除、generation advance、Host/Surface detach 与 Session shutdown 均释放 cache entry；没有 per-node UObject/UWidget/Slate Widget 或第二 z-order 源。
 - Style、Binding、Focus/Pseudo 和 Scroll 的局部变化 patch 对应命令/子树，记录旧/新 Dirty Rect 与 Dirty Command；`WebToUE.Debug.DisplayList=1/2/3` 分别可视化 Dirty Rect、Dirty Command 和全部命令边界。布局或文档结构改变仍可合法重建完整 Display List。
 - 128px 空间网格索引 drawable/interactive/scrollable 命令；单命令跨越超过 256 个 Cell 时进入独立 large-entry 列表。Paint 先以 Culling Rect 查候选，Hit Test/Scroll 以点查询候选，再做 Visible Bounds/Clip/Depth 精确判断；该索引只承诺当前固定命令集合的候选缩减，不是 M3 虚拟列表实现。
 - 相邻 Rounded Box 只有在 Type、Resource/Shader、Clip、Draw Effect 和圆角/边框几何兼容时才复用 LayerId；颜色不进入 Slate Rounded Box 的几何兼容键。文本和不兼容 Clip/Geometry 会断开 run，保留 Slate 最终 batching 的正确性。
-- Packaged benchmark schema `6` 在既有 probe-child Draw Elements/几何覆盖率、全窗口 Slate Batches/Vertices、GT/RT/GPU、RSS、VRAM 与 input-to-backbuffer-ready 上，增加 Asset Load/UI Object Construction/TakeWidget/Prepass/Attach/Renderer Wait 冷启动归因、首/第二 View 进程内存点、Development known-owned Runtime/Presentation 与共享 Style Template census，以及 K=1 Style/Selector/Binding/Resource 工作量政策。`Tools/Invoke-WebToUEPackagedExitGate.ps1` 固定 1920×1080、120 warmup/600 samples、三次冷启动中位数、WTUE/UMG `≤2×`、Batch/Vertex 上限、Development LLM `≤64 MiB` 和同进程第二 View 门。独立进程原始 RSS 只报告；Development 可记录 LLM，UE 默认 Shipping 未编译 LLM 时显式输出 `llm_compiled_in=false`/`not_compiled_for_configuration`，不得把 0 当成已测内存。
+- Packaged benchmark schema `6` 在既有 probe-child Draw Elements/几何覆盖率、全窗口 Slate Batches/Vertices、GT/RT/GPU、RSS、VRAM 与 input-to-backbuffer-ready 上，增加 Asset Load/UI Object Construction/TakeWidget/Prepass/Attach/Renderer Wait 冷启动归因、首/第二 View 进程内存点、Development known-owned Runtime/Presentation 与共享 Style Template census，以及 K=1 Style/Selector/Binding/Resource 工作量政策。Runtime Telemetry schema `15` 另记录 plan build/tier decision/rejection、cache allocate/reuse/release/evict、active layer/surface、allocated pixels/bytes 与 redraw/pass/command；未激活 Tier2/3 必须报告 `N/A`，0 像素/字节只表示没有真实离屏分配。`Tools/Invoke-WebToUEPackagedExitGate.ps1` 固定 1920×1080、120 warmup/600 samples、三次冷启动中位数、WTUE/UMG `≤2×`、Batch/Vertex 上限、Development LLM `≤64 MiB` 和同进程第二 View 门。独立进程原始 RSS 只报告；Development 可记录 LLM，UE 默认 Shipping 未编译 LLM 时显式输出 `llm_compiled_in=false`/`not_compiled_for_configuration`，不得把 0 当成已测内存。
 - `Tools/Invoke-WebToUEResourceSmoke.ps1` 是独立的 M4.1 Packaged 正确性/视觉门，不改变冻结三页 `maximum_compiled_resources=0` 的 M2 policy；它只接受 `ResourceTextureSmoke` 的 1 个 Resource、主 View恰好 1 次消费、第二 View 1 次 resident cache hit、全阶段 0 sync load/failure/cancellation 与实际 screenshot。它不是 WTUE↔UMG 性能比较门。
 - `Tools/Invoke-WebToUEMaterialSmoke.ps1` 是独立的 M4.3a Packaged 正确性/视觉门；它只接受 `ResourceMaterialSmoke` 的精确 Material ResourceId/path、静态对象、主 View 1 次 async request、第二 View 1 次 cache hit、全阶段 0 sync load/failure/cancellation 与实际 screenshot。它不替代 M2 性能门或 GPU/PSO 分析。
 - `Tools/Invoke-WebToUETransitionSmoke.ps1` 是独立的 M4.7 Packaged 数值/Paint/视觉门；它只接受 `TransitionSmoke` 的 Animation IR 1.1、五个 typed Transition、最大五条 concurrent Track、全部事务 committed、完成后 ticker/lease 释放、真实 Display/空间/dirty patch、0 Yoga/resource load、Renderer/RT/GPU 分布与完成态 screenshot。Development/Shipping 的该受控 K=5 fixture 不替代 M2 WTUE↔UMG 门，也不证明 Portal/离屏合成、硬件 input-to-pixel 因果或一般产品性能。
+- `Tools/Invoke-WebToUECompositingSmoke.ps1` 是独立的 M4.8 Packaged 数值/Paint/视觉门；它只接受 `CompositingSmoke` 的 Tier0/1、共享 parent Material 与跨 View MID 隔离、重叠顺序、嵌套 transform/clip、局部 opacity、K=1 exact hit/Display/空间/dirty、0 Yoga/sync load、Renderer/RT/GPU 与 screenshot。结构化 manifest 固定 candidate HEAD、Corpus SHA-256、tier operation IDs、工作量、资源、截图/hash 和证据边界。Tier2/3 在该 sealed fixture 明确为 `N/A`，不是零成本实测或 backend 支持。
 - 目标专用 Golden 覆盖 MainMenu/HUD/ScrollableSettings 的 1280×720 逻辑视口，在 1x/2x 分别渲染实际 framebuffer PNG，并以规范化 32×18 RGBA 签名守住跨 DPI 视觉；这是冻结 Corpus 的回归门，不是通用 Screenshot/Golden 工具链。
 
 ## 4. 诊断与资产行为
@@ -178,6 +182,7 @@ Runtime 绘制与命中：
 - 属性所有权的 invalid/untyped target（`WTUE-OWN-001`）、writer 不允许（`WTUE-OWN-002`）与 Binding/Behavior durable owner 冲突（`WTUE-OWN-003`）；后两类未来作者语法接入前主要由 C++ Policy/Automation 使用。
 - 动态 Material Parameter 的无效/不匹配 typed value（`WTUE-MID-001`）、target/resource/residency（`WTUE-MID-002`）、参数存在性或 durable owner（`WTUE-MID-003`），以及线程、代次、Session/事务生命周期（`WTUE-MID-004`）；当前 C++ submission、Automation 与 Packaged gate 已实际消费。
 - Animation IR/Transition/Track 的非法版本或值（`WTUE-ANI-001`）、target/type/作者声明不匹配（`WTUE-ANI-002`）、无效 Session/Generation/token（`WTUE-ANI-003`）、地址 lease 冲突（`WTUE-ANI-004`）、Clock/sample/预算失败（`WTUE-ANI-005`）与 adapter/transaction 生命周期失败（`WTUE-ANI-006`）；当前 importer、native coordinator、View adapter、Automation 与 Packaged gates 已实际消费。
+- Compositing 的非法/冲突需求（`COMP001`）、Tier2 backend 不可用（`COMP002`）、Tier3 backend 不可用（`COMP003`）与预算/生命周期拒绝（`COMP004`）；当前 Policy/Plan、View fail-close、Automation 与 Packaged Tier0/1 gate 已消费，Tier2/3 没有被伪装成可见 fallback。
 - 树投影的无效/跨代节点域（`WTUE-TREE-001`）、父链/注册顺序（`WTUE-TREE-002`）、Anchor Session/Surface/父投影（`WTUE-TREE-003`）、Portal 挂载/cycle/Modal（`WTUE-TREE-004`）与 Focus Restore token/候选链（`WTUE-TREE-005`）；当前主要由 C++ Policy/Automation 使用。
 - Stable Semantic Identity 的无效 Owner/Generation/Component/provenance/node/state domain（`WTUE-ID-001`）、同 Component 重复 Key（`WTUE-ID-002`）、Kind/State Contract 不兼容重置（`WTUE-ID-003`）和 unkeyed retention 请求（`WTUE-ID-004`）；当前只由 C++ Policy/Automation 使用。
 - Interop Schema 的无效 Schema/version/identifier（`WTUE-SCHEMA-001`）、UE 大小写语义重复/enum wire value 冲突（`WTUE-SCHEMA-002`）、未知/递归类型与非法 Command shape（`WTUE-SCHEMA-003`）、版本倒退/同版本漂移/Minor breaking evolution（`WTUE-SCHEMA-004`）；当前只由 C++/Editor Policy Automation 使用。
@@ -196,7 +201,7 @@ WTUE Document 使用自定义版本 GUID，当前版本 `TransitionIR`（14）�
 - Material Parameter 的 HTML/CSS/TS 作者声明、Compiled Behavior Op、字符串/反射写入、Texture 参数、MID animation adapter、Material `Time` 的 WTUE Clock 保证，以及 PSO/Shader Compile、GPU 成本和大型资源页性能；当前支持 C++ typed Scalar/Vector transaction submission、View-owned MID，以及基础 CSS Transition 的非 MID View targets。
 - World Surface Host、WidgetComponent/RT、3D Feedback Scope、世界输入与独立性能门；当前冻结 Corpus 的裁决是有证据的 `N/A`，不是产品支持。
 - Native Component 的 UI Source 声明、Compiler lowering、Compiled IR、Runtime Tree/Host 实例化和真实专用组件；当前只有实验性 C++ Registry/Factory/Instance 合同。
-- Portal/Overlay/Anchor 的 UI Source 声明、Compiler lowering、Compiled IR、现有 Runtime Tree/Yoga/Display List/Semantic Focus 挂载、真实 Anchor geometry 与跨投影 Transform/Clip/Hit、视觉/输入/性能与 Packaged 证据；普通现有树的 Visual Transform/Clip 已支持，但当前仍只有 Portal 多树投影与 Focus Restore C++ Policy。
+- Portal/Overlay/Anchor 的 UI Source 声明、Compiler lowering、Compiled IR、现有 Runtime Tree/Yoga/Display List/Semantic Focus 挂载、真实 Anchor geometry 与跨投影 Transform/Clip/Hit、视觉/输入/性能与 Packaged 证据；普通现有树的 Visual Transform/Clip 已支持，Compositing Policy 也证明同 Session/Surface projection 本身不自动升档，但当前仍只有 Portal 多树投影/Focus Restore C++ Policy，没有真实 Portal 产品挂载或离屏 backend。
 - Stable Semantic Key、Component Instance/provenance 的 UI Source/TSX 声明与 Compiler/IR lowering、状态快照/事务化应用、跨重导入 Focus/Scroll 和状态保留式热重载；当前只有 C++ 匹配/重置规划 Policy。
 - 项目实际 C++ Data/Command Schema provider、Data/Command Context 验证 Adapter、Compiled Binding/Behavior/Command payload 接入、MVVM Adapter、`.d.ts` 磁盘生成/freshness 和作者可用类型化协议；当前只有规范 snapshot/version/evolution 与 Editor 内存投影 Policy。
 - 嵌套属性路径、Converter、双向绑定、类型化事件载荷。

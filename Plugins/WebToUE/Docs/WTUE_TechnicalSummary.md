@@ -6,11 +6,11 @@
 >
 > 引擎/平台：Unreal Engine 5.8 / Win64
 >
-> 当前里程碑：M4——UE 原生表现与合成 7 / 9；M4.8 Tiered Compositing 规划已激活，实现尚未开始
+> 当前里程碑：M4——UE 原生表现与合成 8 / 9；M4.8 Tiered Compositing 已完成，M4.9 尚未激活
 >
 > 当前交付 Profile：PersonalGame-ready 0.5——Win64 项目内生产使用；通用商业 1.0 延后
 >
-> 最近核验：2026-08-22 `ff9087c`～`e3e08a0` 完成 CSS Transition→Animation IR 1.1 lowering、Opacity/Color/Background/Border/VisualTransform View adapter、受控 easing/retarget/reverse/fill/lifecycle 与确定性可见 fixture；121 / 121 Automation、UE 5.8 Win64 Editor Development 5 / 5、Development/Shipping BuildCookRun Operations `a719b45201554d888cb97c11bdb81a6b` / `f24257f5cdbd4bfdb8e696fa410986f8` 与双配置独立 Packaged Transition gate 全部通过
+> 最近核验：2026-08-22 `f7f6666`～`aa597fa` 完成四档确定性 Compositing Policy/Plan/Cache、View/Surface lifecycle、Tier0 Direct Paint/Tier1 Material Brush 产品路径及 `CompositingSmoke`；127 / 127 Automation、strict UE 5.8 Win64 Editor Development、Development/Shipping BuildCookRun、双配置独立 Packaged Compositing gate 与冻结三 Corpus Shipping 性能回归全部通过
 >
 > 统一术语：[CONTEXT.md](../../../CONTEXT.md) · 历史证据：[WTUE_EvidenceLedger.md](WTUE_EvidenceLedger.md) · 精确支持边界：[WTUE_SupportMatrix.md](WTUE_SupportMatrix.md)
 
@@ -58,18 +58,18 @@
 | 生命周期 | Compiled IR、Runtime State、持久 Yoga/Layout、Text/Resource Handle 与 View-owned Display List/空间索引已分离 | ✅ |
 | 功能成熟度 | 可覆盖固定 MainMenu/HUD/ScrollableSettings 原型，具备局部 Display patch、语义焦点/手柄导航、DPI/Safe Zone、重导入恢复和跨 DPI Golden；尚非完整生产 UI 框架 | 🟡 |
 | 性能成熟度 | 无默认 Tick；局部更新、K=1 工作量、Packaged Development/Shipping GT/RT/GPU/input、Batch/Vertex、冷启动、Development LLM 与第二 View 硬门已建立并通过 | ✅ |
-| 当前最大风险 | M2 风险已降至当前 Win64 项目内 0.5 可接受等级；M3 基础合同及 M4.1～M4.7 的 Resource/Material/Feedback/Transform/Animation/Transition 已收口。M4 剩余最大架构风险为真实 Portal/离屏 Compositing 与相应 GPU/资源成本；Behavior/FieldNotify/Command Adapter、Stable Identity 接入和真实双 LocalPlayer/CommonUI Modal 仍开放 | 🟡 |
-| 当前策略 | 保持 M2 出口门、M3/ADR-0007 合同边界和已完成的 M4.1～M4.7 纵向闭环；M4.8 先执行不改资产/公共接口的有界敌意原型与档位裁决，只实现语义所需的最低 Compositing 档位。冻结 Corpus 未使用的高级效果继续 N/A，不把 Render Target 当作默认终点 | ✅ |
+| 当前最大风险 | M2 风险已降至当前 Win64 项目内 0.5 可接受等级；M3 基础合同及 M4.1～M4.8 的 Resource/Material/Feedback/Transform/Animation/Transition/Compositing 已收口。M4 剩余风险集中于 M4.9 的大型资源页、首帧/常驻成本与可选 Surface 出口；Behavior/FieldNotify/Command Adapter、Stable Identity 接入和真实双 LocalPlayer/CommonUI Modal 仍开放 | 🟡 |
+| 当前策略 | 保持 M2 出口门、M3/ADR-0007 合同边界和已完成的 M4.1～M4.8 纵向闭环；Tier0/1 作为当前产品路径，Tier2/3 在后端不可用时稳定失败关闭。冻结 Corpus 未使用的高级效果与 World Surface 继续 N/A；M4.9 仅作为下一建议，尚未激活 | ✅ |
 
 ### 2.2 验证快照
 
 | 项目 | 当前值 |
 | --- | --- |
-| 自动化测试 | 121 / 121 通过、0 failed、0 skipped、0 warnings（13.386 秒；2026-08-22，M4.7；`StartsWith:WebToUE`）；持久 fixture/Transition import 最终聚焦 2 / 2（0.020 秒） |
-| 当前编译 | M4.7 最终 C++ 的 UE 5.8 Win64 Editor Development Operation `17039af285f24ff4a5e235e4f9440cdc` 完成 5 / 5 actions、warnings-as-errors并启动 PID `8316`；最终 Shipping 发布门恢复 Editor PID `36168`，VibeUE 5.0 readiness/MCP HTTP 200 健康 |
-| 当前发布 | tracked Win64 Development/Shipping BuildCookRun Operations `a719b45201554d888cb97c11bdb81a6b` / `f24257f5cdbd4bfdb8e696fa410986f8` 均通过，各 599 packages、2,268 WebToUE content chunks（含 global 2,269）、251.98 MiB、AutomationTool 最终 ExitCode 0；独立 Packaged Transition gates `Development-20260822T081634Z` / `Shipping-20260822T082251Z` 均 `success=true`，记录 5 条 concurrent Track、0 Yoga/resource work、真实 Paint/空间 patch、RT/GPU 分布与人工核验 PNG；不外推 Portal/离屏合成、硬件 input-to-pixel 因果或 WTUE↔UMG 性能等价 |
+| 自动化测试 | 127 / 127 通过、0 failed、0 skipped（12.657 秒；2026-08-22，M4.8；`StartsWith:WebToUE`）；`CompositingSmokeContract` 聚焦 1 / 1、0 warning（0.018 秒） |
+| 当前编译 | M4.8 最终候选 `aa597fa` 的 strict UE 5.8 Win64 Editor Development Operation `f4b6adaccc8c4a49905e1aa5f9b114e5` 完成 70 / 70 actions、warnings-as-errors并启动 PID `11704`；最终 Shipping 发布门恢复 Editor PID `14616`，VibeUE 5.0 readiness/MCP HTTP 200 健康 |
+| 当前发布 | tracked Win64 Development/Shipping BuildCookRun Operations `e71b1d1db50e44379c907b3f50ed978b` / `30e4c48987644af394c9cfa9320e66fd` 均通过，各 600 packages、2,269 WebToUE content chunks（含 global 2,270）、251.99 MiB、AutomationTool 最终 ExitCode 0；双配置独立 `CompositingSmoke` gate 与 Shipping 三 Corpus PackagedExitGate 均 `success=true`。受控 fixture 只证明 Tier0/1、K=1、MID/Hit/Clip/Renderer；Tier2/3 明确为 N/A，不外推真实 Portal/离屏成本 |
 | 历史发布 | Win64 Game Development/Shipping、BuildCookRun、BuildPlugin 曾通过；发布前须在当前提交重跑 |
-| Git 基线 | M2.9 检查点为 `8d26643`、`36fc522`、`e8ac686`、`e524997`、`64c2f7e`、`7df6832`；M3.0 为 `66ada22`、`ecb094c`；M3.1 为 `1fc2a20`、`5342bf6`、`3f1bf20`；M3.2 为 `7be0f8e`；M3.3 为 `692ffeb`、`048a676`、`a7c1db4`；M3.4 为 `9c33768`、`d3e1b80`、`2e0f1c3`；M3.5 为 `4001b08`、`4bdf63c`；M3.6 为 `f05ce52`、`0ae3ac4`；M3.7 为 `21f2933`、`f1c2e01`；M3.8 为 `c3383c6`、`9b666b3`；M3.9 为 `f60b94d`；M4.1 为 `6903e34`、`ccddf69`、`99ad868`、`507c616`、`394cb94`；M4.2 为 `3cce712`、`9449bee`、`be4e728`、`2184640`、`4eacabc`；M4.3a 为 `a046603`、`1df1704`；M4.3b 为 `e4d4ba4`；M4.4 为 `b1a95df`、`ac6314b`、`5730cd3`、`05359ee`；M4.5 实现与门修复为 `f55d4ec`、`b0ad573`、`f6a825c`；M4.6 实现为 `2d2be76`；M4.7 为 `ff9087c`、`1b69e40`、`556bebd`、`b309628`、`96b9eae`、`e3e08a0` |
+| Git 基线 | M2.9 检查点为 `8d26643`、`36fc522`、`e8ac686`、`e524997`、`64c2f7e`、`7df6832`；M3.0 为 `66ada22`、`ecb094c`；M3.1 为 `1fc2a20`、`5342bf6`、`3f1bf20`；M3.2 为 `7be0f8e`；M3.3 为 `692ffeb`、`048a676`、`a7c1db4`；M3.4 为 `9c33768`、`d3e1b80`、`2e0f1c3`；M3.5 为 `4001b08`、`4bdf63c`；M3.6 为 `f05ce52`、`0ae3ac4`；M3.7 为 `21f2933`、`f1c2e01`；M3.8 为 `c3383c6`、`9b666b3`；M3.9 为 `f60b94d`；M4.1 为 `6903e34`、`ccddf69`、`99ad868`、`507c616`、`394cb94`；M4.2 为 `3cce712`、`9449bee`、`be4e728`、`2184640`、`4eacabc`；M4.3a 为 `a046603`、`1df1704`；M4.3b 为 `e4d4ba4`；M4.4 为 `b1a95df`、`ac6314b`、`5730cd3`、`05359ee`；M4.5 实现与门修复为 `f55d4ec`、`b0ad573`、`f6a825c`；M4.6 实现为 `2d2be76`；M4.7 为 `ff9087c`、`1b69e40`、`556bebd`、`b309628`、`96b9eae`、`e3e08a0`；M4.8 为 `f7f6666`、`34265c8`、`1501759`、`5faef14`、`aa597fa` |
 | 发布级别 | Developer Preview |
 
 ### 2.3 宏观里程碑
@@ -80,7 +80,7 @@
 | M1 UI 基础语义 | ✅ | 10 / 10 | 受控菜单/HUD 原型的排版、交互、本地化和诊断基础 |
 | M2 增量原生运行时 | ✅ | 9 / 9 退出门 | 可度量、共享样式模板、稳定身份、持久 Layout/Resource、局部失效、真实渲染与 Win64 0.5 Go/No-Go 已完成 |
 | M3 Runtime Semantics、Host 与原生互操作 | ✅ | 11 / 11 | Native Component、Session/Host、事务/事件/异步、属性所有权、多树/Portal、Stable Identity、Feedback、C++ Data/Command Schema 与 Resource provenance/residency/freshness 基础合同完成 |
-| M4 UE 原生表现与合成 | 🚧 | 7 / 9 | Texture、静态 Material Brush、动态 MID 参数、Feedback Profile/Router、Visual Transform/Clip、Animation Kernel 与 Transition Lowering 已完成；之后为 Compositing 与性能出口门 |
+| M4 UE 原生表现与合成 | 🚧 | 8 / 9 | Texture、Material/MID、Feedback、Transform/Clip、Animation/Transition 与 Tiered Compositing 已完成；剩余 M4.9 性能与 Surface 出口门 |
 | M5 Dynamic UI 与 Compiled Behavior | ⬜ | 0 / 10 | Typed Mutation、动态结构、受限 Behavior TS、Feedback Cue 和原生事件驱动 Executor |
 | M6 现代作者工具链与 Inspector | ⬜ | 0 / 8 | Component/TSX/Tailwind 子集、Source Map、原生预览、Inspector 与确定性构建 |
 | M7 1.0 产品化 | ⬜ | 0 / 8 | 长期兼容、完整宿主/文本/无障碍、跨平台、外部分发与安全收口 |
@@ -303,9 +303,9 @@ M2 不以模糊的“达到 Gameface”作为验收。性能合同分为三类�
 | R-02 | Yoga Tree 每次布局重建 | Medium | 500 节点暖布局 0 Yoga build/write/result change、P95 `0.017401 ms`；2,000 节点单点 Layout 0 build、P95 `0.913102 ms`；M2.9 Packaged K=1 不重建 Yoga Tree | M2.6 Persistent Yoga、局部 Dirty 与 M2.9 出口门持续守门 | ✅ Mitigated |
 | R-03 | Compiled 数据与 Runtime 生命周期混合 | Medium | 四项边界/双实例专项通过 | 后续 IR/Dirty/Cache 保持边界 | ✅ Mitigated |
 | R-04 | 状态变化可能同步加载纹理 | Medium | 版本 7 Resource Manifest；View 创建边界 resolve/async request，Presentation 只查稳定槽位；schema 6 六个 WTUE 完整样本的测量期资源加载与失败均为 0 | `ResourceLifecycle`、`PaintOnlyPseudoResourceSafety` 与 PackagedExitPolicy 持续守门 | ✅ Mitigated |
-| R-05 | Compiler/View 职责集中 | Low | Core 服务、Runtime Presentation、Semantic/Focus/Schema/Animation 接口、Editor-only `.d.ts` emitter、Game-owned Packaged Runner 与独立出口门脚本已拆分；当前精确发现 121 项 Automation | M4.8 的分类、Plan/Cache、Layer/RT 生命周期与预算不得同时堆入 `SWebToUEView`；敌意原型先证明普通 C++、View/Surface-owned 边界，若需改变长期所有权则先更新 ADR | ✅ Mitigated |
-| R-06 | 性能证据和硬门仍不完整 | Medium | 第 6.2 节全部 Enforce 门通过；schema 6 + gate schema 1 覆盖两配置三 Corpus 的 GT/RT/GPU/input、Batch/Vertex、冷启动归因、Development LLM、第二 View 与 K=1 工作量，关键比较最大 `1.366×` | 0.5 维持现有硬门；Shipping LLM、硬件扫描延迟和 Gameface 保持明确不可用/Unknown，不伪装为已测 | ✅ Mitigated |
-| R-07 | Map 声明丢失重复属性顺序 | Medium | Core、Compiled IR 与 Hydration 已使用有序声明；当前 121/121 Automation 与 M4.7 Win64 Development/Shipping BuildCookRun 通过 | 保持 Ordered Declaration 专项与资产版本门 | ✅ Mitigated |
+| R-05 | Compiler/View 职责集中 | Low | Core 服务、Runtime Presentation、Semantic/Focus/Schema/Animation/Compositing Policy/Plan/Cache、Editor-only `.d.ts` emitter、Game-owned Packaged Runner 与独立出口门脚本已拆分；当前精确发现 127 项 Automation | `SWebToUEView` 继续只编排 Session/Projection/Paint；后续 Surface/Behavior/Component 不得把政策、资源分配和预算重新堆入 Leaf | ✅ Mitigated |
+| R-06 | 性能证据和硬门仍不完整 | Medium | 第 6.2 节全部 Enforce 门通过；schema 6 + gate schema 1 覆盖两配置三 Corpus 的 GT/RT/GPU/input、Batch/Vertex、冷启动归因、Development LLM、第二 View 与 K=1 工作量；M4.8 Shipping 回归关键比较最大 `1.496×` | 0.5 维持现有硬门；Shipping LLM、硬件扫描延迟和 Gameface 保持明确不可用/Unknown，不伪装为已测 | ✅ Mitigated |
+| R-07 | Map 声明丢失重复属性顺序 | Medium | Core、Compiled IR 与 Hydration 已使用有序声明；当前 127/127 Automation 与 M4.8 Win64 Development/Shipping BuildCookRun 通过 | 保持 Ordered Declaration 专项与资产版本门 | ✅ Mitigated |
 | R-08 | 仅 Win64 | Medium | `.uplugin` 平台限制；PersonalGame-ready 0.5 明确采用 Win64-first | `P1.0` 第二平台可行性 Spike 与完整构建矩阵 | ⬜ M7 |
 | R-09 | MCP Experimental 且通用 Python 权限高 | Medium | 本地 Editor 环境已验证 | 回环/受信任/Editor-only/最小权限 | ⬜ M6 |
 | R-10 | Sandbox 或宿主超时可使 UE 子进程脱离观察 | High | Preflight、互斥、进程树/日志/持久状态和 Pester 6/6；包装器解析最终 AutomationTool ExitCode，已覆盖宿主假 0 | 生命周期 Skill 与 [ADR-0001](ADRs/ADR-0001-Editor-Lifecycle-Execution-Boundary.md) | ✅ Mitigated |
@@ -314,7 +314,7 @@ M2 不以模糊的“达到 Gameface”作为验收。性能合同分为三类�
 | R-13 | 同步 Presentation Resource 不只包含纹理 | Medium | Texture/Font/String Table 类型化 Manifest；生产 Runtime 无同步加载，schema 6 六个 WTUE 完整样本均为 0 compiled resources、0 测量期加载/失败，冷启动分阶段对账 | PackagedExitPolicy 维持资源上限与热路径零同步加载 | ✅ Mitigated |
 | R-14 | 单 Slate Leaf 内部语义节点对焦点/IME/无障碍不可见 | Medium | Generation-safe Semantic/Focus Node 公开 Handle/ID/Label/Role/Bounds/状态并支持 request/activate；Tab/空间手柄导航、Accept、scroll-into-view 与 CommonUI 边界逃逸均有专项 | M2.8 的 `P0.5` 接口和手柄焦点已完成；M3 冻结 Semantic Tree/Native Component 合同，完整 IME/无障碍适配属于 M7 | ✅ Mitigated |
 | R-15 | Behavior、FieldNotify、Command 与异步回调产生重入、循环或过期节点访问 | High | 事务/事件/Clock/异步/属性 owner 已收口；`c3383c6` 又冻结类型化 Data/Command snapshot 与 Command response/result/cancel shape，但现有 FieldNotify、Command payload/dispatch 与未来 Behavior 尚未接入 | M5 让真实 Adapter/Behavior 消费 Schema、事务与 Generation Cancellation；见 ADR-0004/0006/0009 | 🚧 M5 |
-| R-16 | Transform、Opacity、Material、Clip 与 Filter 需要 Stacking/Compositing，而扁平 Display List 语义不足 | High | `f05ce52` + ADR-0007 冻结投影；M4.3a/M4.3b 已证明 Material/MID，M4.5 已证明 Transform/Clip；M4.7 又以双配置 Packaged gate 证明同一 Animation IR/Track/Clock 上的 Transition 作者 lowering、Opacity/Color/Background/Border/VisualTransform adapter、真实 Paint/空间 patch 与完成态 PNG。Portal 合成、MID animation 和离屏层仍无证据 | M4.8 先用普通子树与同 Session/Surface Overlay 投影的敌意原型选择最低可行档位，再按 Direct Paint→Material Brush→Subtree Layer→Render Target 单向升级；高档不可用时失败关闭，不允许静默近似，也禁止把受控 fixture 外推为 Portal 作者能力或产品性能等价 | 🚧 M4 |
+| R-16 | Transform、Opacity、Material、Clip 与 Filter 需要 Stacking/Compositing，而扁平 Display List 语义不足 | Medium | `f7f6666`～`aa597fa` 建立 Direct Paint→Material Brush→Subtree Layer→Render Target 的 sealed、确定性单向分类；普通/投影敌意原型、完整 teardown、Tier0/1 双配置 packaged fixture、K=1/Renderer/截图均通过。Tier2/3 后端未激活且稳定失败关闭；Portal 作者链、MID animation、Filter/Backdrop 与离屏成本仍无产品证据 | 当前 Profile 只承诺 Tier0/1；Tier2/3、Portal 或独立 Surface 一旦进入冻结 Corpus，必须重新激活实现与 RT/VRAM/输入门，不得把 N/A 或零计数外推为支持 | ✅ Mitigated |
 | R-17 | 全局 View/Focus 无法正确表达 LocalPlayer、Slate User、多指针、关卡生命周期和世界空间 Surface | Medium | `1fc2a20` + `5342bf6` 已建立 Screen UI Session/per-LocalPlayer Host；`048a676` 证明 per-user/pointer 身份隔离；`f05ce52` 冻结同 Session/Surface Anchor、最高 Modal scope、背景 inert 与同代 Focus Restore。真实双 LocalPlayer、CommonUI Modal 与 Packaged 多指针仍未验证；冻结 Corpus 不使用 World Surface | M7 完整 Screen/CommonUI/LocalPlayer 宿主矩阵补真实多用户、Modal 与 Packaged 输入；World Host 仅在冻结 Corpus 使用时提前升级为阻断门 | 🚧 M7 |
 | R-18 | 大型组件文档在 View 创建时预载完整 Manifest，形成 I/O、首帧与常驻内存悬崖 | High | M4.1/M4.2 Texture 与 M4.3 Material/MID 已按 ResourceId 消费 Document residency；M4.4 Profile 只异步预取 Critical 组，双配置 Packaged smoke 均证明 6 个 sealed dependency 在交互前从 pending 到 ready、首次派发无同步加载。冻结 Corpus 仍没有大型资源页/音频集，Route、批量释放与内存压力尚无证据 | M4.9 加入大型 Corpus、释放、首帧、PSO/Glyph、音频/图像内存与 Chunk 门 | 🚧 M4 |
 | R-19 | TS/资源依赖和 last-good 可能造成不可复现构建或陈旧 IR 进入 Cook | High | M4.1～M4.4 已密封 Unreal/relative/generated Texture、Material 与 Feedback SoundWave/SoundCue/MetaSound/Concurrency 的 Source/saved-package 传递 BLAKE3 closure；Cook freshness 以 `WTUE-RES-004` 拒绝 package drift/stale seal，跨进程专项与双配置真实 Cook 通过 | M5/M6 补 Behavior/Schema、Lockfile/DDC Key、跨机 Incremental/DDC 与 CI | 🚧 M5/M6 |
@@ -370,12 +370,12 @@ M0/M1/M2 已完成，详细验收项保存在 [Evidence Ledger](WTUE_EvidenceLed
 - [x] `P0.5` 实现 Translate/Scale/Rotate/Origin 的 Visual Transform、Clip Chain、transformed bounds、逆变换 Hit Test、Semantic Bounds 和空间索引更新。
 - [x] `P0.5` 建立原生 Animation IR/Track 与 Active-only Clock；无 Track 时零 Tick，Virtual UI Clock 可在精确时间点验证。
 - [x] `P0.5` 将 Opacity/Color/Transform Typed Transition 降低到同一 Animation IR/Track，提供受控 easing、Retarget/Reverse/Cancel/Fill 语义；没有建立独立临时执行器。
-- [ ] `P0.5` 建立 Direct Paint、复用 M4.3 Material Brush、子树 Compositing Layer、Render Target Effect 四档选择合同；`P0.5-if-used` 只实现冻结 Corpus 使用的 Gradient、Shadow、Nine-slice、Mask/Keyframes，任意 Material `Time` 明确为不受 WTUE 时钟保证的 escape hatch。
+- [x] `P0.5` 建立 Direct Paint、复用 M4.3 Material Brush、子树 Compositing Layer、Render Target Effect 四档选择合同；`P0.5-if-used` 只实现冻结 Corpus 使用的 Gradient、Shadow、Nine-slice、Mask/Keyframes，任意 Material `Time` 明确为不受 WTUE 时钟保证的 escape hatch。
 - [ ] `P0.5` 屏幕 Corpus 保持 M2 的 GT/RT/GPU/Batch/Vertex/内存门；使用世界空间时另建 WidgetComponent RT、Redraw、Gamma、VRAM、输入和可见性门。
 
 #### M4 后续微观路线顺序（2026-08-22 更新）
 
-2026-08-21 的顺序调整不改变 PersonalGame-ready 0.5 Profile、M4 的 9 项宏观验收或跨里程碑前置关系；它只降低单个工作包的跨边界宽度，并让 Animation Kernel 先于 Transition Lowering。2026-08-22 又根据 M4.6/M4.7 的跨进程 freshness、协调器预算、可见失败和门禁成本，把 M4.8 收窄为“Corpus 裁决→有界敌意原型→最低档产品切片→一次候选出口门”。M4.3a/M4.3b、M4.4、M4.5、M4.6 与 M4.7 均已完成，宏观 M4 为 `7 / 9`；M4.8 仅激活规划，源码、资产与产品支持边界尚未变化。
+2026-08-21 的顺序调整不改变 PersonalGame-ready 0.5 Profile、M4 的 9 项宏观验收或跨里程碑前置关系；它只降低单个工作包的跨边界宽度，并让 Animation Kernel 先于 Transition Lowering。2026-08-22 又根据 M4.6/M4.7 的跨进程 freshness、协调器预算、可见失败和门禁成本，把 M4.8 收窄为“Corpus 裁决→有界敌意原型→最低档产品切片→一次候选出口门”。M4.3a/M4.3b、M4.4、M4.5、M4.6、M4.7 与 M4.8 均已完成，宏观 M4 为 `8 / 9`；M4.9 仅为下一建议，尚未激活。
 
 | 顺序 | 微观路线 | 最小纵向退出边界 |
 | --- | --- | --- |
@@ -403,7 +403,7 @@ M4.7 从第一个 Opacity 切片开始记录 active Track、clock/sample、trans
 
 持久资产迁移按依赖拓扑执行：先稳定并保存 Source/generated/resource 上游，等待 AssetRegistry 可解析已保存依赖，再重编译和 seal 下游 Document，最后以跨 Editor 或新进程 freshness 专项复读；同一 Editor 会话中的成功不算跨进程 freshness 证据。新资源类型继续采用渐进式门禁：资产版本、dependency closure 与 Cook validator 成形后先过持久 fixture freshness，Runtime/视觉候选冻结后才统一执行完整 Automation、Editor Development、适用的双配置 BuildCookRun 与独立 Packaged/视觉门。不得因早期 freshness 门增加每个源码检查点的完整发布构建，也不得把 M6 的完整 DDC/Lockfile/跨机 Incremental/CI 提前搬入 M4；只有第二个真实资源消费者证明结构相同后，才抽取共享 closure adapter。
 
-##### M4.8 执行检查点（🚧 0 / 6；规划已激活，实现未开始）
+##### M4.8 执行检查点（✅ 6 / 6；已完成）
 
 M4.8 的无条件 `P0.5` 是确定性的 Compositing 分类、所有权、生命周期、失败和预算合同，以及至少一条真实 Slate/Packaged 最低档产品切片；不是预先实现浏览器级合成器。冻结 MainMenu/HUD/ScrollableSettings 继续不使用 Gradient、Shadow、Nine-slice、Mask 或 Keyframes，这些 `P0.5-if-used` 当前均为有证据的 `N/A`；只有 Corpus 事实变化才重新激活，不能用占位 IR、空接口或无消费者 Render Target 冒充进度。
 
@@ -415,6 +415,10 @@ M4.8 的无条件 `P0.5` 是确定性的 Compositing 分类、所有权、生命
 6. **验证阶梯与证据清单**：原型阶段只运行修改前红灯、聚焦 Automation、静态/diff 检查与一次必要增量 Editor build，不运行 BCR。产品候选冻结后一次性执行 `git diff --check`、完整 WebToUE Automation、strict UE 5.8 Win64 Editor Development、受影响的 Development/Shipping BuildCookRun、独立 Packaged 数值/视觉/Renderer gate，以及 MainMenu/HUD/ScrollableSettings 既有 ScreenHost/Golden/性能回归。Gate 输出必须生成一个包含 candidate HEAD、Corpus/tier 裁决、Operation ID、工作量、资源、截图/hash 和证据边界的结构化 manifest，Evidence Ledger 只引用该事实，不重复手工转录所有原始日志。
 
 退出时必须分别证明：四档选择与拒绝语义、最低档真实产品路径、Projection/Hit/Clip 正确性、Layer/Surface 生命周期、K=1 局部传播、Packaged 可见结果和 Renderer/资源原始数据。BuildCookRun、Automation、单张截图和 Editor 微基准仍不能互相替代；M4.8 完成后停止，不自动进入 M4.9。
+
+完成证据：冻结三 Corpus 的 Source SHA-256 与能力扫描确认 Gradient/Shadow/Nine-slice/Mask/Keyframes 仍未使用；普通敌意子树和同 Session/Surface projection 原型分别验证 Tier2 分类与投影不自动升档。Policy/Plan/Cache 独立于 View 编排，四档按 sealed requirements 确定性选择；Tier2/3 后端不可用时以 `COMP001..004` 稳定拒绝且不保留旧 Paint/Hit。View/Surface generation、tier/projection change、节点删除、detach/shutdown 的 cache teardown 矩阵通过。
+
+受控 `CompositingSmoke` 为 12 nodes/11 rules/1 Material resource；Development/Shipping 独立 packaged gate 均在 K=1 measurement 记录 1 hit candidate/visit、1 inverse hit、2 exact clip、3 Display patch、3 spatial patch、3 dirty rect、1 MID reuse，Yoga write/dirty/result 与同步 Resource load 均为 0。两配置各记录 22 次 Tier0、2 次 Tier1、0 rejection，Tier2/Tier3 明确输出 `N/A`；124 redraw/pass、1,364 commands，0 active offscreen layer/surface/pixel/byte。两张 PNG SHA-256 均为 `512b94898e1167ed3de084ca7757cc07d6e872b37ba456b037bd4647b9d0b22d` 并已人工核验。Shipping 冻结三 Corpus gate 的 steady/cold 全部比较通过，最大比率为 HUD cold `1.496×`。原始日志与 manifest 见 Evidence Ledger；M4.9 未激活。
 
 ### M5——Dynamic UI 与 Compiled Behavior ⬜ 0 / 10
 
@@ -839,13 +843,13 @@ M2 先建设与传输协议无关的 Compiler、Diagnostics、Inspection 和 Ben
 
 ## 11. 测试与发布门禁
 
-### 11.1 当前 Automation（121 / 121）
+### 11.1 当前 Automation（127 / 127）
 
 | 层 | 测试 |
 | --- | --- |
 | Core | `HtmlCss`、`OrderedDeclarations`、`TypedProperties`、`PropertyMetadata`、`PropertyOwnershipLayers`、`PropertyOwnershipConflicts`、`PropertyOwnershipMaterialParameters`、`PropertyOwnershipDeterminism`、`InteropSchemaCanonicalization`、`InteropSchemaEvolution`、`SelectorIndex`、`PseudoInvalidationDependencies`、`TypedCascade`、`TypedCascadeChangeSet`、`FlexLayout`、`ConstrainedMeasure`、`RichTextCompile`、`ScrollLayout`、`CssDiagnostics` |
-| Runtime | `AssetVersion`、`BindingIndex`、`CompiledDocumentBoundary`、`OrderedDeclarationHydration`、`RuntimeIdentity`、`RuntimeInstanceIsolation`、`RuntimeCacheSeparation`、`RuntimePresentationIsolation`、`SemanticIdentityPlan`、`SemanticIdentityFailures`、`ResourceContractCanonicalization`、`ResourceContractFailures`、`ResourceContractHydration`、`AnimationIRContract`、`AnimationTrackClock`、`AnimationLeaseLifecycle`、`TransitionOpacityAdapter`、`TransitionPaintTransformAdapter`、`PseudoInvalidationPath`、`PaintOnlyPseudoResourceSafety`、`TypedCascadeSlateOutput`、`TextCacheKeyAndDirtyPath`、`PersistentLayoutState`、`PersistentLayoutDependencies`、`ResourceLifecycle`、`ResourceResidency`、`ResourceIntrinsicSize`、`StaticMaterialLifecycle`、`DynamicMaterialParameterLifecycle`、`FeedbackProfileContract`、`FeedbackProfileFailures`、`FeedbackRouterPolicy`、`FeedbackRouterScopeLifecycle`、`FeedbackRouterLocalPlayerIsolation`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`SemanticFocus`、`EventPathSafety`、`EventRouting`、`InteractionIdentity`、`TreeProjection`、`PortalFocusRestore`、`NativeComponentRegistry`、`SessionFeedback`、`ScreenHostFeedbackProfile`、`UpdateTransaction`、`UpdateQueue`、`ClockDomains`、`AsyncTimer`、`AsyncCommand`、`AsyncLifecycle`、`ScreenHost`、`GamepadNavigation`、`DpiSafeZone`、`PerformanceInstrumentation`、`PaintOrderCache`、`DisplayListOwnership`、`SpatialPaintHitWorkload`、`DisplayListDebugOverlay`、`DisplayListDebugImage`、`SlateBatchCompatibility`、`VisualTransformClip`、`VisualTransformPatchWorkload` |
-| Benchmark | `CorpusContract`、`CorpusSlateOutput`、`CorpusDpiGolden`、`CorpusOptionalInputContract`、`CorpusSurfaceContract`、`PackagedExitPolicy`、`ResourceTextureSmokeContract`、`ResourceMaterialSmokeContract`、`ResourceMaterialParameterSmokeContract`、`TransformClipSmokeContract`、`TransitionSmokeContract` |
+| Runtime | `AssetVersion`、`BindingIndex`、`CompiledDocumentBoundary`、`OrderedDeclarationHydration`、`RuntimeIdentity`、`RuntimeInstanceIsolation`、`RuntimeCacheSeparation`、`RuntimePresentationIsolation`、`SemanticIdentityPlan`、`SemanticIdentityFailures`、`ResourceContractCanonicalization`、`ResourceContractFailures`、`ResourceContractHydration`、`AnimationIRContract`、`AnimationTrackClock`、`AnimationLeaseLifecycle`、`TransitionOpacityAdapter`、`TransitionPaintTransformAdapter`、`CompositingTierPolicyPrototype`、`CompositingAdversarialSubtreePrototype`、`CompositingProjectedSubtreePrototype`、`CompositingPlanLifecycle`、`PseudoInvalidationPath`、`PaintOnlyPseudoResourceSafety`、`TypedCascadeSlateOutput`、`TextCacheKeyAndDirtyPath`、`PersistentLayoutState`、`PersistentLayoutDependencies`、`ResourceLifecycle`、`ResourceResidency`、`ResourceIntrinsicSize`、`StaticMaterialLifecycle`、`DynamicMaterialParameterLifecycle`、`FeedbackProfileContract`、`FeedbackProfileFailures`、`FeedbackRouterPolicy`、`FeedbackRouterScopeLifecycle`、`FeedbackRouterLocalPlayerIsolation`、`TextWrapping`、`LocalizedRichText`、`ScrollInteraction`、`SemanticFocus`、`EventPathSafety`、`EventRouting`、`InteractionIdentity`、`TreeProjection`、`PortalFocusRestore`、`NativeComponentRegistry`、`SessionFeedback`、`ScreenHostFeedbackProfile`、`UpdateTransaction`、`UpdateQueue`、`ClockDomains`、`AsyncTimer`、`AsyncCommand`、`AsyncLifecycle`、`ScreenHost`、`GamepadNavigation`、`DpiSafeZone`、`PerformanceInstrumentation`、`PaintOrderCache`、`DisplayListOwnership`、`SpatialPaintHitWorkload`、`DisplayListDebugOverlay`、`DisplayListDebugImage`、`SlateBatchCompatibility`、`VisualTransformClip`、`VisualTransformPatchWorkload` |
+| Benchmark | `CompositingCorpusContract`、`CompositingSmokeContract`、`CorpusContract`、`CorpusSlateOutput`、`CorpusDpiGolden`、`CorpusOptionalInputContract`、`CorpusSurfaceContract`、`PackagedExitPolicy`、`ResourceTextureSmokeContract`、`ResourceMaterialSmokeContract`、`ResourceMaterialParameterSmokeContract`、`TransformClipSmokeContract`、`TransitionSmokeContract` |
 | Editor | `BenchmarkScenarios`、`BenchmarkStatistics`、`RuntimeHoverBenchmark`、`RuntimeFieldNotifyBenchmark`、`RuntimeHydrationBenchmark`、`RuntimeWarmLayoutBenchmark`、`RuntimeStressLayoutBenchmark`、`RuntimeUnchangedPaintBenchmark`、`BindingImport`、`FieldNotifyInvalidation`、`PropertyOwnershipIntegration`、`TransitionImport`、`InteropSchemaTypeScript`、`LocalizationImport`、`OrderedDeclarationImport`、`ResourceManifest`、`RelativeTextureSource`、`RelativeTextureFailures`、`RelativeTextureWatcher`、`RelativeTextureCookFreshness`、`StaticMaterialSource`、`StaticMaterialFailures`、`StaticMaterialCookFreshness`、`StaticMaterialPackageDrift`、`FeedbackProfileCookFreshness`、`FeedbackProfilePackageDrift`、`ReimportRecovery` |
 
 Editor 生命周期另有 Pester 6 / 6，Packaged 出口门脚本另有 Pester 5 / 5，均不计入 UE Automation；发布包装器会解析 AutomationTool 日志中的最终 ExitCode，避免 `RunUAT.bat` 宿主假 0；当前 Development/Shipping 操作、原始矩阵与日志路径见 Evidence Ledger。
