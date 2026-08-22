@@ -19,6 +19,16 @@ struct FWebToUEMaterialParameterRuntimeState
 	EWebToUEPropertyWriter DurableOwner = EWebToUEPropertyWriter::Binding;
 };
 
+struct FWebToUERuntimeTransition
+{
+	FName TransitionId;
+	FWebToUEPropertyAddress Address;
+	double DurationSeconds = 0.0;
+	double DelaySeconds = 0.0;
+	EWebToUETransitionEasing Easing = EWebToUETransitionEasing::Ease;
+	EWebToUEClockDomain ClockDomain = EWebToUEClockDomain::Game;
+};
+
 class FWebToUERuntimeInstance
 {
 public:
@@ -44,6 +54,9 @@ public:
 		return BindingOpsByField;
 	}
 	TConstArrayView<FWebToUERuntimeBindingOp> GetBindingOps(FName RootField) const;
+	const FWebToUERuntimeTransition* FindTransition(
+		FWebToUEInstanceHandle Target,
+		const FWebToUEPropertyAddress& Address) const;
 	TConstArrayView<FWebToUECompiledResource> GetResourceManifest() const
 	{
 		return ResourceManifest;
@@ -77,5 +90,7 @@ private:
 	TMap<FWebToUEInstanceHandle,
 		TMap<FWebToUEPropertyAddress, FWebToUEMaterialParameterRuntimeState>>
 		MaterialParameterStates;
+	TMap<FWebToUEInstanceHandle,
+		TMap<FWebToUEPropertyAddress, FWebToUERuntimeTransition>> TransitionsByTarget;
 	TUniquePtr<FWebToUELayoutEngine> LayoutEngine;
 };

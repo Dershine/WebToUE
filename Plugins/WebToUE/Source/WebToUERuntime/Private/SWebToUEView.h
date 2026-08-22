@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WebToUEAnimation.h"
 #include "WebToUEEvents.h"
 #include "WebToUEMaterialParameters.h"
 #include "WebToUERuntimeInstance.h"
@@ -14,11 +15,12 @@ class UMaterialInstanceDynamic;
 class FWebToUERuntimePresentation;
 struct FWebToUEPaintCommand;
 struct FWebToUEDisplayCommandRange;
+struct FWebToUEStyleUpdate;
 #if WITH_DEV_AUTOMATION_TESTS
 struct FWebToUERuntimeMemoryCensus;
 #endif
 
-class SWebToUEView final : public SLeafWidget
+class SWebToUEView final : public SLeafWidget, public IWebToUEAnimationTarget
 {
 public:
 	SLATE_BEGIN_ARGS(SWebToUEView) {}
@@ -150,6 +152,7 @@ public:
 #endif
 
 private:
+	friend class FWebToUERuntimePresentation;
 	TWeakObjectPtr<UWebToUEView> Owner;
 	TWeakObjectPtr<UWebToUEDocument> DocumentAsset;
 	TUniquePtr<FWebToUERuntimeInstance> RuntimeInstance;
@@ -157,6 +160,11 @@ private:
 	TSet<FString> LoggedBindingErrors;
 	FString LastPseudoInvalidationReport;
 	TSharedPtr<FWebToUEUpdateCoordinator, ESPMode::ThreadSafe> StandaloneUpdateCoordinator;
+	TMap<FWebToUEInstanceHandle,
+		TMap<FWebToUEPropertyAddress, FWebToUEAnimationValue>> AnimationOverlays;
+	TMap<FWebToUEInstanceHandle,
+		TMap<FWebToUEPropertyAddress, FWebToUEAnimationTrackHandle>> AnimationTracks;
+	TWeakPtr<FWebToUEAnimationCoordinator, ESPMode::ThreadSafe> AnimationCoordinator;
 
 	struct FRegisteredEventListener
 	{
@@ -192,6 +200,23 @@ private:
 	const FWebToUEComputedStyle& GetComputedStyle(const FWebToUENode& Node) const;
 	FWebToUERuntimeLayoutResult& GetLayoutResult(FWebToUENode& Node);
 	const FWebToUERuntimeLayoutResult& GetLayoutResult(const FWebToUENode& Node) const;
+	const FWebToUEAnimationValue* FindAnimationOverlay(
+		FWebToUEInstanceHandle Target,
+		const FWebToUEPropertyAddress& Address) const;
+	void StartStyleTransitions(TConstArrayView<FWebToUEStyleUpdate> Updates);
+	void CancelAnimationTracks();
+	virtual bool ValidateAnimationTarget(
+		FWebToUEInstanceHandle Target,
+		const FWebToUEPropertyAddress& Address,
+		EWebToUEAnimationValueType ValueType,
+		FString& OutError) const override;
+	virtual void ApplyAnimationOverlay(
+		FWebToUEInstanceHandle Target,
+		const FWebToUEPropertyAddress& Address,
+		const FWebToUEAnimationValue& Value) override;
+	virtual void ReleaseAnimationOverlay(
+		FWebToUEInstanceHandle Target,
+		const FWebToUEPropertyAddress& Address) override;
 
 	void RebuildStylesAndBrushes(
 		EWebToUEStyleImpact Impacts = EWebToUEStyleImpact::Resource);

@@ -1019,6 +1019,36 @@ void FWebToUERuntimePresentation::ApplyRuntimeStateChanges(
 		FMath::Max(0, DisplayCommands.Num() - PatchedCommandCount));
 }
 
+bool FWebToUERuntimePresentation::ApplyAnimationOverlayChange(
+	FWebToUEInstanceHandle Target,
+	const FWebToUEPropertyAddress& Address) const
+{
+	if (Address != FWebToUEPropertyAddress::Css(EWebToUECssProperty::Opacity))
+	{
+		return false;
+	}
+	const FWebToUENode* Node = RuntimeInstance.ResolveNode(Target);
+	if (!Node)
+	{
+		return false;
+	}
+	if (bDisplayListDirty)
+	{
+		return true;
+	}
+	const int32 PatchedCommandCount = PatchDisplaySubtree(*Node, true);
+	if (PatchedCommandCount > 0)
+	{
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::DisplayCommandsPatched,
+			PatchedCommandCount);
+		FWebToUEPerformanceCapture::RecordCounter(
+			EWebToUEPerformanceCounter::DisplayCommandsReused,
+			FMath::Max(0, DisplayCommands.Num() - PatchedCommandCount));
+	}
+	return true;
+}
+
 FText FWebToUERuntimePresentation::GetDisplayText(const FWebToUENode& Node) const
 {
 	if (const FWebToUERuntimeNodeState* State = FindState(Node); State && State->bHasBoundText)
@@ -1325,7 +1355,13 @@ void FWebToUERuntimePresentation::UpdateDisplayCommand(
 		Command.LocalToView, Command.ViewToLocal);
 	Command.Bounds = TransformRectBounds(Command.LocalToView, Size);
 	Command.Depth = Depth;
-	Command.Opacity = ParentOpacity * Style.Opacity;
+	const FWebToUEAnimationValue* OpacityOverlay = OwnerWidget.FindAnimationOverlay(
+		RuntimeInstance.GetHandle(&Node),
+		FWebToUEPropertyAddress::Css(EWebToUECssProperty::Opacity));
+	const float LocalOpacity = OpacityOverlay &&
+		OpacityOverlay->Type == EWebToUEAnimationValueType::Scalar
+		? FMath::Clamp(OpacityOverlay->Scalar, 0.0f, 1.0f) : Style.Opacity;
+	Command.Opacity = ParentOpacity * LocalOpacity;
 	Command.bDisplayed = bParentDisplayed && RuntimeDocument.IsDisplayed(Node);
 	Command.ClipChain.Reset(InheritedClipChain.Num());
 	Command.ClipChain.Append(InheritedClipChain);

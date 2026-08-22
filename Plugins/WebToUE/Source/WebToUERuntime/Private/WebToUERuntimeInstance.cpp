@@ -151,6 +151,13 @@ uint64 FWebToUERuntimeInstance::GetKnownOwnedBytesForTesting() const
 	{
 		Bytes += Pair.Value.GetAllocatedSize();
 	}
+	Bytes += TransitionsByTarget.GetAllocatedSize();
+	for (const TPair<FWebToUEInstanceHandle,
+		TMap<FWebToUEPropertyAddress, FWebToUERuntimeTransition>>& Pair :
+		TransitionsByTarget)
+	{
+		Bytes += Pair.Value.GetAllocatedSize();
+	}
 	Bytes += GetSelectorIndexOwnedBytes(RuntimeDocument->SelectorIndex);
 	Bytes += GetSelectorTargetIndexOwnedBytes(RuntimeDocument->RuntimeSelectorTargets);
 
@@ -277,6 +284,15 @@ TConstArrayView<FWebToUERuntimeBindingOp> FWebToUERuntimeInstance::GetBindingOps
 	return {};
 }
 
+const FWebToUERuntimeTransition* FWebToUERuntimeInstance::FindTransition(
+	FWebToUEInstanceHandle Target,
+	const FWebToUEPropertyAddress& Address) const
+{
+	const TMap<FWebToUEPropertyAddress, FWebToUERuntimeTransition>* Definitions =
+		TransitionsByTarget.Find(Target);
+	return Definitions ? Definitions->Find(Address) : nullptr;
+}
+
 void FWebToUERuntimeInstance::Reset()
 {
 	LayoutEngine->Reset();
@@ -289,6 +305,7 @@ void FWebToUERuntimeInstance::Reset()
 	BindingOpsByField.Reset();
 	ResourceManifest.Reset();
 	MaterialParameterStates.Reset();
+	TransitionsByTarget.Reset();
 }
 
 const FWebToUEMaterialParameterRuntimeState*
@@ -419,6 +436,26 @@ bool FWebToUERuntimeInstance::Hydrate(const UWebToUEDocument& CompiledDocument)
 	RuntimeDocument->Root = Nodes[CompiledDocument.GetRootNodeIndex()];
 
 	RuntimeDocument->InitializeRuntimeData(OwnerId, Generation);
+	for (const FWebToUECompiledTransition& CompiledTransition :
+		CompiledDocument.GetCompiledAnimationIR().Transitions)
+	{
+		if (!Nodes.IsValidIndex(CompiledTransition.Target.TargetNodeIndex))
+		{
+			Reset();
+			return false;
+		}
+		const FWebToUEPropertyAddress Address =
+			CompiledTransition.Target.ToPropertyAddress();
+		FWebToUERuntimeTransition& RuntimeTransition = TransitionsByTarget
+			.FindOrAdd(Nodes[CompiledTransition.Target.TargetNodeIndex]->InstanceHandle)
+			.FindOrAdd(Address);
+		RuntimeTransition.TransitionId = CompiledTransition.TransitionId;
+		RuntimeTransition.Address = Address;
+		RuntimeTransition.DurationSeconds = CompiledTransition.DurationSeconds;
+		RuntimeTransition.DelaySeconds = CompiledTransition.DelaySeconds;
+		RuntimeTransition.Easing = CompiledTransition.Easing;
+		RuntimeTransition.ClockDomain = CompiledTransition.ClockDomain;
+	}
 	for (const FWebToUECompiledBindingOp& CompiledOp : CompiledDocument.GetCompiledBindingOps())
 	{
 		if (CompiledOp.RootField.IsNone() || !Nodes.IsValidIndex(CompiledOp.TargetNodeIndex))

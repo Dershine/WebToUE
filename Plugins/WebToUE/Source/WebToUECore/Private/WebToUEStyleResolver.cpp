@@ -316,6 +316,11 @@ void FWebToUEStyleResolver::ResolveIncremental(FWebToUEDocument& Document,
 		FWebToUEStyleUpdate& Update = OutUpdates.AddDefaulted_GetRef();
 		Update.Target = Node->InstanceHandle;
 		Update.Changes = MoveTemp(Changes);
+		Update.PreviousAnimatableStyle.Opacity = OldStyle.Opacity;
+		Update.PreviousAnimatableStyle.Color = OldStyle.Color;
+		Update.PreviousAnimatableStyle.BackgroundColor = OldStyle.BackgroundColor;
+		Update.PreviousAnimatableStyle.BorderColor = OldStyle.BorderColor;
+		Update.PreviousAnimatableStyle.Transform = OldStyle.Transform;
 		if (bPropagateInherited)
 		{
 			for (const TSharedPtr<FWebToUENode>& Child : Node->Children)

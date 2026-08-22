@@ -178,6 +178,9 @@ public:
 	bool ApplyMaterialParameterChange(
 		FWebToUEInstanceHandle Target,
 		const FWebToUEPropertyAddress& Address) const;
+	bool ApplyAnimationOverlayChange(
+		FWebToUEInstanceHandle Target,
+		const FWebToUEPropertyAddress& Address) const;
 
 #if WITH_DEV_AUTOMATION_TESTS
 	FVector2f MeasureTextForTesting(const FString& Text, float Width, bool bWrap) const;

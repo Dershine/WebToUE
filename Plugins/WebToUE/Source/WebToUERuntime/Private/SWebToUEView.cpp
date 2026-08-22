@@ -21,6 +21,7 @@ SWebToUEView::SWebToUEView() = default;
 
 SWebToUEView::~SWebToUEView()
 {
+	CancelAnimationTracks();
 	if (StandaloneUpdateCoordinator && StandaloneUpdateCoordinator->IsActive())
 	{
 		StandaloneUpdateCoordinator->Shutdown();
@@ -81,6 +82,9 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 	SCOPE_CYCLE_COUNTER(STAT_WebToUE_Hydrate);
 	TRACE_CPUPROFILER_EVENT_SCOPE(WebToUE_Hydrate);
 	FWebToUEPerformanceScope PerformanceScope(EWebToUEPerformancePhase::Hydrate);
+	CancelAnimationTracks();
+	AnimationOverlays.Reset();
+	AnimationTracks.Reset();
 	ResetInteractionState();
 	DocumentAsset = InDocument;
 	Presentation->Reset();
@@ -101,6 +105,154 @@ void SWebToUEView::SetDocument(UWebToUEDocument* InDocument)
 		RuntimeInstance->Reset();
 	}
 	RebuildStylesAndBrushes();
+}
+
+const FWebToUEAnimationValue* SWebToUEView::FindAnimationOverlay(
+	FWebToUEInstanceHandle Target,
+	const FWebToUEPropertyAddress& Address) const
+{
+	const TMap<FWebToUEPropertyAddress, FWebToUEAnimationValue>* TargetOverlays =
+		AnimationOverlays.Find(Target);
+	return TargetOverlays ? TargetOverlays->Find(Address) : nullptr;
+}
+
+bool SWebToUEView::ValidateAnimationTarget(
+	FWebToUEInstanceHandle Target,
+	const FWebToUEPropertyAddress& Address,
+	EWebToUEAnimationValueType ValueType,
+	FString& OutError) const
+{
+	OutError.Reset();
+	if (!RuntimeInstance->ResolveNode(Target))
+	{
+		OutError = TEXT("Transition target no longer belongs to this Runtime View.");
+		return false;
+	}
+	if (Address != FWebToUEPropertyAddress::Css(EWebToUECssProperty::Opacity) ||
+		ValueType != EWebToUEAnimationValueType::Scalar ||
+		!RuntimeInstance->FindTransition(Target, Address))
+	{
+		OutError = TEXT("The Runtime View currently accepts only compiled scalar Opacity transitions.");
+		return false;
+	}
+	return true;
+}
+
+void SWebToUEView::ApplyAnimationOverlay(
+	FWebToUEInstanceHandle Target,
+	const FWebToUEPropertyAddress& Address,
+	const FWebToUEAnimationValue& Value)
+{
+	check(IsInGameThread());
+	AnimationOverlays.FindOrAdd(Target).Add(Address, Value);
+	if (Presentation->ApplyAnimationOverlayChange(Target, Address))
+	{
+		Invalidate(EInvalidateWidgetReason::Paint);
+	}
+}
+
+void SWebToUEView::ReleaseAnimationOverlay(
+	FWebToUEInstanceHandle Target,
+	const FWebToUEPropertyAddress& Address)
+{
+	check(IsInGameThread());
+	if (TMap<FWebToUEPropertyAddress, FWebToUEAnimationValue>* TargetOverlays =
+		AnimationOverlays.Find(Target))
+	{
+		TargetOverlays->Remove(Address);
+		if (TargetOverlays->IsEmpty()) AnimationOverlays.Remove(Target);
+	}
+	if (TMap<FWebToUEPropertyAddress, FWebToUEAnimationTrackHandle>* TargetTracks =
+		AnimationTracks.Find(Target))
+	{
+		TargetTracks->Remove(Address);
+		if (TargetTracks->IsEmpty()) AnimationTracks.Remove(Target);
+	}
+	if (Presentation->ApplyAnimationOverlayChange(Target, Address))
+	{
+		Invalidate(EInvalidateWidgetReason::Paint);
+	}
+}
+
+void SWebToUEView::CancelAnimationTracks()
+{
+	check(IsInGameThread());
+	const TSharedPtr<FWebToUEAnimationCoordinator, ESPMode::ThreadSafe> Coordinator =
+		AnimationCoordinator.Pin();
+	if (Coordinator && Coordinator->IsActive())
+	{
+		TArray<FWebToUEAnimationTrackHandle> Handles;
+		for (const TPair<FWebToUEInstanceHandle,
+			TMap<FWebToUEPropertyAddress, FWebToUEAnimationTrackHandle>>& Target :
+			AnimationTracks)
+		{
+			for (const TPair<FWebToUEPropertyAddress, FWebToUEAnimationTrackHandle>& Track :
+				Target.Value)
+			{
+				Handles.Add(Track.Value);
+			}
+		}
+		for (const FWebToUEAnimationTrackHandle Handle : Handles)
+		{
+			Coordinator->Cancel(Handle);
+		}
+	}
+	AnimationCoordinator.Reset();
+	AnimationTracks.Reset();
+	AnimationOverlays.Reset();
+}
+
+void SWebToUEView::StartStyleTransitions(
+	TConstArrayView<FWebToUEStyleUpdate> Updates)
+{
+	UWebToUEView* OwnerView = Owner.Get();
+	const TSharedPtr<FWebToUESession> Session =
+		OwnerView ? OwnerView->GetSession() : nullptr;
+	if (!Session || !Session->IsActive()) return;
+	const TSharedRef<FWebToUEAnimationCoordinator, ESPMode::ThreadSafe> Coordinator =
+		Session->GetAnimationCoordinator();
+	AnimationCoordinator = Coordinator;
+	const TSharedRef<IWebToUEAnimationTarget> TargetAdapter =
+		StaticCastSharedRef<IWebToUEAnimationTarget>(SharedThis(this));
+	const FWebToUEPropertyAddress OpacityAddress =
+		FWebToUEPropertyAddress::Css(EWebToUECssProperty::Opacity);
+	for (const FWebToUEStyleUpdate& Update : Updates)
+	{
+		if (!Update.Changes.ChangedProperties.Contains(EWebToUECssProperty::Opacity))
+		{
+			continue;
+		}
+		const FWebToUERuntimeTransition* Transition =
+			RuntimeInstance->FindTransition(Update.Target, OpacityAddress);
+		const FWebToUENode* Node = RuntimeInstance->ResolveNode(Update.Target);
+		if (!Transition || !Node || Transition->DelaySeconds != 0.0 ||
+			Transition->Easing != EWebToUETransitionEasing::Linear)
+		{
+			continue;
+		}
+		const float ToOpacity = GetComputedStyle(*Node).Opacity;
+		if (FMath::IsNearlyEqual(Update.PreviousAnimatableStyle.Opacity, ToOpacity))
+		{
+			continue;
+		}
+		FWebToUEAnimationTrackRequest Request;
+		Request.DebugName = Transition->TransitionId;
+		Request.Target = Update.Target;
+		Request.Address = OpacityAddress;
+		Request.From = FWebToUEAnimationValue::MakeScalar(
+			Update.PreviousAnimatableStyle.Opacity);
+		Request.To = FWebToUEAnimationValue::MakeScalar(ToOpacity);
+		Request.DurationSeconds = Transition->DurationSeconds;
+		Request.ClockDomain = Transition->ClockDomain;
+		Request.TargetAdapter = TargetAdapter;
+		const FWebToUEAnimationStartOutcome Outcome = Coordinator->StartTrack(
+			Request, EWebToUEAnimationConflictPolicy::Retarget);
+		if (Outcome.IsAccepted())
+		{
+			AnimationTracks.FindOrAdd(Update.Target).Add(
+				OpacityAddress, Outcome.Handle);
+		}
+	}
 }
 
 bool SWebToUEView::RequestLazyResource(const FString& ResourceId)
@@ -821,6 +973,7 @@ void SWebToUEView::RefreshBindings(UObject* DataContext, FName ChangedField)
 			EWebToUEPerformanceCounter::StyleDirtyTargets, StyleTargets.Num());
 		FWebToUEStyleResolver::ResolveIncremental(
 			*RuntimeDocument, StyleTargets, StyleUpdates);
+		StartStyleTransitions(StyleUpdates);
 		Presentation->ApplyStyleUpdates(StyleUpdates);
 	}
 	if (!RuntimeStateTargets.IsEmpty())
@@ -1083,6 +1236,7 @@ void SWebToUEView::UpdatePseudoStateBatch(
 	if (!Targets.IsEmpty())
 	{
 		FWebToUEStyleResolver::ResolveIncremental(*RuntimeDocument, Targets, Updates);
+		StartStyleTransitions(Updates);
 	}
 
 	EWebToUEStyleImpact CombinedImpacts = EWebToUEStyleImpact::None;

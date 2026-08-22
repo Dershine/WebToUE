@@ -21,10 +21,20 @@ struct WEBTOUECORE_API FWebToUEStyleChangeSet
 	bool HasInheritedPropertyChange() const;
 };
 
+struct WEBTOUECORE_API FWebToUEAnimatableStyleSnapshot
+{
+	float Opacity = 1.0f;
+	FLinearColor Color = FLinearColor::White;
+	FLinearColor BackgroundColor = FLinearColor::Transparent;
+	FLinearColor BorderColor = FLinearColor::Transparent;
+	FWebToUEVisualTransformValue Transform;
+};
+
 struct WEBTOUECORE_API FWebToUEStyleUpdate
 {
 	FWebToUEInstanceHandle Target;
 	FWebToUEStyleChangeSet Changes;
+	FWebToUEAnimatableStyleSnapshot PreviousAnimatableStyle;
 };
 
 class WEBTOUECORE_API FWebToUECompiler
