@@ -15,6 +15,9 @@ namespace WebToUE::Tests
 		Descriptor.CompilerFingerprintBlake3 = FString::ChrN(64, TEXT('d'));
 		Descriptor.ArtifactVersions.UiIr = { 1, 0 };
 		Descriptor.ArtifactVersions.ResourceIr = { 1, ResourceIrMinor };
+		Descriptor.ArtifactVersions.AnimationIr = {
+			FWebToUECompiledAnimationIR::CurrentMajor,
+			FWebToUECompiledAnimationIR::CurrentMinor };
 
 		FString SourceUnit = TEXT("source/runtime-test.html");
 		for (const FWebToUECompiledResource& Resource : Document.ResourceManifest)

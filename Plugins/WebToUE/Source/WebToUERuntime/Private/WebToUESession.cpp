@@ -3,6 +3,7 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "Templates/Atomic.h"
+#include "WebToUEAnimation.h"
 #include "WebToUEAsyncWork.h"
 
 namespace WebToUE::Session::Private
@@ -139,6 +140,9 @@ FWebToUESession::FWebToUESession(const FWebToUESessionCreateParams& Params)
 	, Clock(Params.Clock)
 	, FeedbackRouter(Params.FeedbackRouter)
 	, UpdateCoordinator(FWebToUEUpdateCoordinator::Create())
+	, AnimationCoordinator(FWebToUEAnimationCoordinator::Create(
+		{ SessionId, Generation }, Clock.ToSharedRef(),
+		UpdateCoordinator.ToSharedRef()))
 	, AsyncCoordinator(FWebToUEAsyncCoordinator::Create(
 		FWebToUESessionHandle::Create(SessionId, Generation), Clock.ToSharedRef(),
 		UpdateCoordinator.ToSharedRef()))
@@ -176,6 +180,7 @@ FWebToUESessionHandle FWebToUESession::AdvanceGeneration()
 	{
 		++Generation;
 	}
+	AnimationCoordinator->AdvanceGeneration({ SessionId, Generation });
 	AsyncCoordinator->AdvanceGeneration(GetHandle());
 	FeedbackRouter->OnSessionGenerationAdvanced(MakeFeedbackRoutingContext());
 	return GetHandle();
@@ -188,6 +193,7 @@ void FWebToUESession::Invalidate()
 	{
 		return;
 	}
+	AnimationCoordinator->Shutdown();
 	AsyncCoordinator->Shutdown();
 	UpdateCoordinator->Shutdown();
 	FeedbackRouter->DeactivateSession(GetHandle());

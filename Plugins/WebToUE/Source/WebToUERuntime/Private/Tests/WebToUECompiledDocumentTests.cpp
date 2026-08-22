@@ -116,6 +116,19 @@ bool FWebToUEResourceContractHydrationTest::RunTest(const FString& Parameters)
 		UnsupportedVersion->ValidateResourceContract(Diagnostics));
 	TestTrue(TEXT("Unsupported Resource IR has a stable version diagnostic"),
 		HasResourceDiagnostic(Diagnostics, TEXT("WTUE-RES-005")));
+
+	UWebToUEDocument* AnimationSealMismatch =
+		NewObject<UWebToUEDocument>(GetTransientPackage());
+	FWebToUECompiledDocumentData AnimationSealMismatchData =
+		MakeCompiledDocument();
+	AnimationSealMismatchData.ResourceFreshness.ArtifactVersions.AnimationIr =
+		{ 1, 1 };
+	AnimationSealMismatch->CommitCompiledDocument(
+		MoveTemp(AnimationSealMismatchData));
+	TestFalse(TEXT("Animation IR payload and sealed artifact versions must match"),
+		AnimationSealMismatch->ValidateResourceContract(Diagnostics));
+	TestTrue(TEXT("Animation IR seal mismatch has a stable Animation diagnostic"),
+		HasResourceDiagnostic(Diagnostics, TEXT("WTUE-ANI-001")));
 	return true;
 }
 

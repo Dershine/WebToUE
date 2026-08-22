@@ -1,10 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "WebToUEClock.generated.h"
 
 class UWorld;
 
 /** Explicit UI time domains. Callers must not infer pause or dilation behavior. */
+UENUM()
 enum class EWebToUEClockDomain : uint8
 {
 	Game,

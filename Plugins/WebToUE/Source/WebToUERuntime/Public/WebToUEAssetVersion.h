@@ -19,8 +19,9 @@ struct WEBTOUERUNTIME_API FWebToUEAssetVersion
 		RelativeTextureSources = 10,
 		StaticMaterialBrushes = 11,
 		VisualTransformAndClip = 12,
+		AnimationIR = 13,
 
-		LatestVersion = VisualTransformAndClip
+		LatestVersion = AnimationIR
 	};
 
 	static const FGuid GUID;

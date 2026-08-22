@@ -78,6 +78,12 @@ bool UWebToUEDocument::ValidateResourceContract(
 	TArray<FWebToUEResourceContractDiagnostic>& OutDiagnostics) const
 {
 	OutDiagnostics.Reset();
+	TArray<FWebToUEAnimationDiagnostic> AnimationDiagnostics;
+	CompiledAnimationIR.Validate(CompiledNodes.Num(), AnimationDiagnostics);
+	for (const FWebToUEAnimationDiagnostic& Diagnostic : AnimationDiagnostics)
+	{
+		OutDiagnostics.Add({ Diagnostic.Code, Diagnostic.Path, Diagnostic.Detail });
+	}
 	const bool bHasContractResource = ResourceManifest.ContainsByPredicate(
 		[](const FWebToUECompiledResource& Resource)
 		{
@@ -87,7 +93,13 @@ bool UWebToUEDocument::ValidateResourceContract(
 	const bool bHasContract = ResourceFreshness.ContractVersion.IsPresent();
 	if (!bHasContractResource && !bHasContract)
 	{
-		return true;
+		return OutDiagnostics.IsEmpty();
+	}
+	if (ResourceFreshness.ArtifactVersions.AnimationIr !=
+		CompiledAnimationIR.Version)
+	{
+		OutDiagnostics.Add({ TEXT("WTUE-ANI-001"), TEXT("animation.version"),
+			TEXT("Compiled Animation IR version does not match the sealed artifact layer version.") });
 	}
 
 	FWebToUEResourceContractDescriptor Descriptor;
@@ -190,6 +202,9 @@ bool UWebToUEDocument::ValidateResourceContract(
 		FWebToUEArtifactVersionSet SupportedVersions;
 		SupportedVersions.UiIr = { 1, 0 };
 		SupportedVersions.ResourceIr = { 1, 2 };
+		SupportedVersions.AnimationIr = {
+			FWebToUECompiledAnimationIR::CurrentMajor,
+			FWebToUECompiledAnimationIR::CurrentMinor };
 		TArray<FWebToUEResourceContractDiagnostic> CompatibilityDiagnostics;
 		FWebToUEResourceContractPolicy::IsRuntimeCompatible(
 			Snapshot.Freshness.ArtifactVersions, SupportedVersions,
@@ -285,6 +300,7 @@ void UWebToUEDocument::CommitCompiledDocument(FWebToUECompiledDocumentData&& Com
 	CompiledNodes = MoveTemp(CompiledDocument.Nodes);
 	CompiledRules = MoveTemp(CompiledDocument.Rules);
 	CompiledBindingOps = MoveTemp(CompiledDocument.BindingOps);
+	CompiledAnimationIR = MoveTemp(CompiledDocument.AnimationIR);
 	RootNodeIndex = CompiledDocument.RootNodeIndex;
 	ResourceManifest = MoveTemp(CompiledDocument.ResourceManifest);
 	SealedResourceDependencies = MoveTemp(CompiledDocument.SealedResourceDependencies);

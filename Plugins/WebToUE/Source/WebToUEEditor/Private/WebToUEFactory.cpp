@@ -427,12 +427,15 @@ namespace WebToUE::ResourceImport::Private
 		FWebToUEArtifactVersionSet Versions;
 		Versions.UiIr = { 1, 0 };
 		Versions.ResourceIr = { 1, 2 };
+		Versions.AnimationIr = {
+			FWebToUECompiledAnimationIR::CurrentMajor,
+			FWebToUECompiledAnimationIR::CurrentMinor };
 		return Versions;
 	}
 
 	static FString CompilerFingerprint()
 	{
-		return HashUtf8(TEXT("WebToUE.Editor.ResourceImporter/3;UI-IR/1.0;Resource-IR/1.2;StaticMaterialBrush/1"));
+		return HashUtf8(TEXT("WebToUE.Editor.ResourceImporter/4;UI-IR/1.0;Resource-IR/1.2;Animation-IR/1.0;StaticMaterialBrush/1"));
 	}
 
 	static bool ResolveDocumentTextures(const FWebToUEDocument& Source,

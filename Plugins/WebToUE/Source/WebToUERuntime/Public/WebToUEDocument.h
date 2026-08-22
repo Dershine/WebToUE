@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include "WebToUEAnimation.h"
 #include "WebToUECoreTypes.h"
 #include "WebToUEResourceContract.h"
 #include "WebToUEDocument.generated.h"
@@ -125,6 +126,7 @@ struct WEBTOUERUNTIME_API FWebToUECompiledDocumentData
 	TArray<FWebToUECompiledNode> Nodes;
 	TArray<FWebToUECompiledRule> Rules;
 	TArray<FWebToUECompiledBindingOp> BindingOps;
+	FWebToUECompiledAnimationIR AnimationIR;
 	int32 RootNodeIndex = INDEX_NONE;
 	TArray<FWebToUECompiledResource> ResourceManifest;
 	TArray<FWebToUEResourceDependency> SealedResourceDependencies;
@@ -170,6 +172,7 @@ public:
 	const TArray<FWebToUECompiledNode>& GetCompiledNodes() const { return CompiledNodes; }
 	const TArray<FWebToUECompiledRule>& GetCompiledRules() const { return CompiledRules; }
 	const TArray<FWebToUECompiledBindingOp>& GetCompiledBindingOps() const { return CompiledBindingOps; }
+	const FWebToUECompiledAnimationIR& GetCompiledAnimationIR() const { return CompiledAnimationIR; }
 	TSharedPtr<const FWebToUERuntimeStyleTemplate> GetOrCreateRuntimeStyleTemplate() const;
 	int32 GetRootNodeIndex() const { return RootNodeIndex; }
 	const TArray<FWebToUECompiledResource>& GetResourceManifest() const { return ResourceManifest; }
@@ -237,6 +240,9 @@ private:
 
 	UPROPERTY()
 	TArray<FWebToUECompiledBindingOp> CompiledBindingOps;
+
+	UPROPERTY()
+	FWebToUECompiledAnimationIR CompiledAnimationIR;
 
 	UPROPERTY()
 	int32 RootNodeIndex = INDEX_NONE;
