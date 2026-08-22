@@ -867,7 +867,10 @@ FVector2D FWebToUEBenchmarkRunner::GetTrajectoryScreenPosition() const
 			 Corpus == TEXT("CompositingSmoke") ||
 			 Corpus == TEXT("TransitionSmoke")) && Mode == TEXT("WebToUE"))
 		{
-			if ((TrajectoryStep & 1) == 0)
+			const bool bUseOutsidePoint = Corpus == TEXT("CompositingSmoke")
+				? Phase != EPhase::Measuring
+				: (TrajectoryStep & 1) == 0;
+			if (bUseOutsidePoint)
 			{
 				return Geometry.LocalToAbsolute(FVector2D(24.0, 24.0));
 			}
